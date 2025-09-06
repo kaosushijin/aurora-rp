@@ -16,11 +16,11 @@ DEBUG = "--debug" in sys.argv
 MCP_URL = "http://127.0.0.1:3456/chat"
 MODEL = "qwen2.5:14b-instruct-q4_k_m"
 SAVE_FILE = Path("memory.json")
-TIMEOUT = 30.0  # seconds
+TIMEOUT = 300.0  # seconds
 
 # System prompt to initialize memory if empty
 SYSTEM_PROMPT = (
-    "You are the Aurora RPG storyteller. Your role is to guide the player through a high-fantasy world, "
+    "You are the an RPG storyteller. Your role is to guide the player through a high-fantasy world, "
     "creating engaging scenarios, characters, and adventures. Maintain continuity across the story, "
     "remember player choices, and respond creatively and consistently."
 )
