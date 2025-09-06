@@ -1,0 +1,19 @@
+# Aurora RPG Client - Python Dependencies
+# HTTP client for MCP server communication
+httpx>=0.24.0
+colorama>=0.4.6
+
+# Additional dependencies that may be needed based on your codebase
+# (These are commonly used with projects like this)
+
+# If you're using any data processing or JSON handling beyond built-in
+# pandas>=1.5.0  # Uncomment if using pandas for data analysis
+
+# If you're using any ML/NLP features for semantic memory
+# numpy>=1.21.0  # Uncomment if using numpy
+# scikit-learn>=1.1.0  # Uncomment if using ML features
+
+# Development and testing (optional)
+# pytest>=7.0.0  # Uncomment for testing
+# black>=22.0.0  # Uncomment for code formatting
+# flake8>=5.0.0  # Uncomment for linting
