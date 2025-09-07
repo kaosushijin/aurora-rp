@@ -1,35 +1,49 @@
 # Aurora RPG Client
 
-A terminal-based RPG storyteller client that leverages Large Language Model capabilities through MCP (Model Control Protocol) to create immersive, interactive high-fantasy narratives with intelligent memory management and dynamic prompt optimization.
+A terminal-based RPG storyteller client that leverages Large Language Model capabilities through MCP (Model Control Protocol) to create immersive, interactive high-fantasy narratives powered by the innovative Story Momentum Engine and intelligent memory management.
 
 ## Features
 
-### Core Functionality
-- **Interactive Storytelling**: Multi-line input system for natural conversation with an AI Game Master
-- **Persistent Memory**: JSON-based conversation memory with intelligent LLM-powered condensation
-- **Modular System Prompts**: Three-part prompt system for flexible Game Master behavior
-- **Intelligent Prompt Optimization**: Automatic condensation of oversized prompt files while preserving functionality
-- **Token Budget Management**: Sophisticated context window management (32k tokens) with dynamic allocation
-- **Companion Character**: Aurora, a detailed bard companion with rich personality and musical abilities
+### Story Momentum Engine (SME)
+Aurora's flagship feature - a sophisticated narrative progression system that creates compelling, evolving stories:
+
+- **Unified Analysis System**: Single function handles both first-time and ongoing momentum analysis
+- **Intelligent Antagonist Generation**: AI creates contextually appropriate villains with detailed motivations and backgrounds
+- **Antagonist Persistence**: Villains evolve with commitment levels (testing → engaged → desperate → cornered)
+- **Resource Loss Tracking**: Monitors antagonist setbacks and adapts behavior accordingly
+- **Pressure Ratcheting**: Mathematical floor system prevents infinite stalling tactics
+- **15-Message Analysis Cycles**: Automated momentum evaluation for optimal story pacing
+- **Quality Validation**: Ensures compelling, well-developed antagonists through multi-attempt generation
 
 ### Advanced Memory Management
-- **LLM-Driven Condensation**: Uses the language model itself to intelligently compress memory while preserving story continuity
-- **Context-Aware Retention**: Maintains important story elements, character relationships, and plot threads
-- **Automatic Optimization**: Triggers condensation only when memory approaches token limits
-- **Seamless Operation**: Memory management happens transparently without interrupting gameplay
+- **Semantic Content Categorization**: AI categorizes conversation into four types with tailored preservation:
+  - **Story-critical**: 80% preservation (plot developments, key decisions, world-changing events)
+  - **Character-focused**: 70% preservation (relationships, personality reveals, character development)
+  - **World-building**: 60% preservation (locations, lore, cultural information, discoveries)
+  - **Standard**: 40% preservation (general interactions, travel, routine activities)
+- **Progressive Condensation**: Multiple passes with increasing compression based on content age
+- **Intelligent Context Retention**: Maintains story continuity across extended gameplay sessions
+- **Batch Processing**: Efficient 10-message batches for LLM-powered analysis
 
-### Intelligent Prompt System
-- **Dynamic Optimization**: Automatically condenses oversized prompt files using LLM intelligence
-- **Isolated Processing**: Each prompt category (Game Master rules, companion definition, narrative guidelines) processed separately
-- **Functionality Preservation**: Maintains prompt effectiveness while reducing token footprint
-- **User Customization Support**: Allows verbose, detailed prompt files without performance concerns
+### Robust System Architecture
+- **Graceful Prompt Handling**: System continues operating even with missing prompt files
+- **Intelligent Prompt Optimization**: Automatic condensation of oversized prompts while preserving functionality
+- **Error Recovery**: Comprehensive retry logic with exponential backoff for network issues
+- **Token Budget Management**: Optimized 32k context window allocation with real-time monitoring
+- **Debug Transparency**: Extensive logging system for development and troubleshooting
+
+### Interactive Storytelling
+- **Multi-line Input System**: Natural conversation flow with double-enter submission
+- **Flexible Companion System**: Support for multiple companion characters via prompt files
+- **Rich Narrative Context**: Momentum-aware system prompts that adapt to story state
+- **Input Validation**: Prevents token budget overflow with helpful user feedback
 
 ## Installation
 
 ### Requirements
 - Python 3.10+
-- Active MCP server running on `127.0.0.1:3456`
-- Language model supporting the configured model string
+- MCP server running on `127.0.0.1:3456`
+- Qwen2.5 14B Instruct model (`qwen2.5:14b-instruct-q4_k_m`)
 
 ### Dependencies
 ```bash
@@ -37,54 +51,72 @@ pip install httpx colorama
 ```
 
 ### Setup
-1. Ensure your MCP server is running with the configured model (`qwen2.5:14b-instruct-q4_k_m`)
-2. Create or customize the prompt files:
-   - `critrules.prompt` - Game Master core rules and behavior
-   - `companion.prompt` - Aurora companion character definition
-   - `lowrules.prompt` - Narrative generation guidelines
+1. Ensure your MCP server is running with the configured model
+2. Create prompt files (system will warn about missing files but continue operating):
+   - `critrules.prompt` - **Required**: Game Master core rules and behavior
+   - `companion.prompt` - Optional: Companion character definition
+   - `lowrules.prompt` - Optional: Narrative generation guidelines
 3. Run the client:
 ```bash
-python aurora3.dv1.py
+python aurora3.sme.py
 ```
 
-For debug mode with verbose logging:
+For comprehensive debug logging:
 ```bash
-python aurora3.dv1.py --debug
+python aurora3.sme.py --debug
 ```
 
 ## Program Flow
 
 ### Startup Sequence
-1. **Initialization**: Load configuration and initialize color output
-2. **Prompt Optimization**: 
-   - Load all three prompt files
+1. **Configuration Validation**: Verify token allocation within 32k context window
+2. **Prompt Loading & Optimization**:
+   - Load available prompt files with graceful missing file handling
    - Calculate combined token usage
-   - Apply intelligent condensation if budget (5000 tokens) exceeded
-   - Each prompt file condensed separately to preserve functional isolation
-3. **Memory Loading**: Restore previous conversation memory from `memory.json`
-4. **System Ready**: Display startup message and enter main interaction loop
+   - Apply intelligent condensation if exceeding 5k token budget
+   - Display warnings for missing files while continuing operation
+3. **Critical Validation**: Ensure `critrules.prompt` exists (required for GM functionality)
+4. **Memory Restoration**: Load previous conversation with semantic categories
+5. **Momentum Analysis**: Check if SME analysis needed (every 15 messages)
+6. **Memory Optimization**: Trigger intelligent management if approaching token limits
+7. **Session Display**: Show current momentum state, active antagonist, and prompt status
+
+### Story Momentum Engine Cycle
+The SME operates on a 15-message cycle to maintain optimal story pacing:
+
+1. **Trigger Analysis**: Every 15 user/assistant message exchanges
+2. **Context Preparation**: Extract recent conversation within 6k token budget (25% reserved for instructions)
+3. **Antagonist Management**:
+   - Generate high-quality antagonist if first analysis or missing
+   - Validate existing antagonist quality
+   - Regenerate if quality validation fails
+4. **Resource Loss Detection**: Analyze recent events for antagonist setbacks
+5. **Pressure Floor Calculation**: Apply ratcheting mechanism (prevents infinite retreats)
+6. **Momentum Analysis**: LLM evaluates:
+   - Narrative pressure level (0.0-1.0 scale)
+   - Pressure source (antagonist/environment/social/discovery)
+   - Manifestation type (exploration/tension/conflict/resolution)
+   - Player behavioral patterns
+   - Antagonist response strategies
+7. **State Validation**: Sanitize and save updated momentum state
+8. **Context Integration**: Generate momentum-aware system prompts for next interactions
 
 ### Main Interaction Loop
-1. **User Input**: Multi-line input system (press ENTER twice to submit)
-2. **Memory Management**: 
-   - Add user input to persistent memory
-   - Check total memory token usage
-   - Apply LLM-powered condensation if approaching limits
-3. **Context Assembly**:
-   - Combine optimized system prompts
-   - Add conversation memory
-   - Include current user input
-4. **LLM Communication**: Send context to MCP server with retry logic
-5. **Response Processing**: 
-   - Receive and display AI response with word wrapping
-   - Add response to persistent memory
-   - Save updated memory to disk
+1. **Multi-line Input Collection**: Gather user input until double-enter
+2. **Input Validation**: Check token limits with helpful feedback
+3. **Memory Addition**: Store user input with timestamp
+4. **Momentum Context Generation**: Create dynamic system prompts based on current story state
+5. **Message Assembly**: Combine system prompts, memory, and current input
+6. **Response Generation**: Call MCP with retry logic and error handling
+7. **Response Processing**: Display, store, and trigger follow-up analysis
+8. **Periodic Maintenance**: Memory management every 50 messages
 
-### Token Budget Management
-- **Total Context Window**: 32,000 tokens
-- **System Prompts**: 5,000 tokens (automatically optimized)
-- **Memory**: ~18,900 tokens (70% of remaining space)
-- **User Input**: ~8,100 tokens (30% of remaining space)
+### Token Budget Allocation
+**Total Context Window**: 32,000 tokens
+- **System Prompts**: 5,000 tokens (auto-optimized)
+- **Momentum Analysis**: 6,000 tokens (SME operations)
+- **Memory Storage**: 14,700 tokens (semantic categorization)
+- **User Input**: 6,300 tokens (validated)
 
 ## Configuration
 
@@ -94,76 +126,93 @@ python aurora3.dv1.py --debug
 - **Timeout**: 300 seconds
 - **Retry Logic**: 3 attempts with exponential backoff
 
-### Token Management
-- **Context Window**: 32,000 tokens
-- **System Prompt Budget**: 5,000 tokens
-- **Memory Fraction**: 70% of remaining tokens
-- **Token Estimation**: ~4 characters per token
-
-## Commands
-- `/quit` - Exit the application gracefully
-
-## File Structure
-- `aurora3.dv1.py` - Main application file
-- `memory.json` - Persistent conversation memory (auto-created)
-- `critrules.prompt` - Game Master rules and behavior
-- `companion.prompt` - Aurora companion character definition  
-- `lowrules.prompt` - Narrative generation guidelines
-
-## Technical Architecture
-
-### Intelligent Prompt Condensation
-The system automatically optimizes oversized prompt files using the same LLM that powers the storytelling:
-
-- **Trigger Condition**: Combined prompt files exceed 5,000 token budget
-- **Isolated Processing**: Each prompt file condensed separately to prevent cross-contamination
-- **Functionality Preservation**: LLM instructed to maintain prompt effectiveness while reducing size
-- **Fallback Protection**: Original prompts used if condensation fails
+### Story Momentum Engine
+- **Analysis Frequency**: Every 15 message exchanges
+- **Pressure Scale**: 0.0-1.0 with named ranges (low/building/critical/explosive)
+- **Commitment Progression**: testing → engaged → desperate → cornered
+- **Pressure Floor**: Ratcheting system with 0.02 increment per escalation
+- **Quality Validation**: Multi-attempt antagonist generation with fallback
 
 ### Memory Management
-- **LLM-Powered Analysis**: Uses language model intelligence for semantic importance assessment
-- **Context Preservation**: Maintains story continuity and character relationships
-- **Automatic Triggering**: Activates only when approaching token limits
-- **Transparent Operation**: No user intervention required
+- **Categorization**: Automatic semantic analysis in 20-message chunks
+- **Preservation Ratios**: Content-type specific (40%-80%)
+- **Condensation Thresholds**: Age-based triggers (40-100 messages)
+- **Batch Processing**: 10-message groups for efficient LLM calls
 
-### Error Handling
-- **Network Resilience**: Automatic retry with exponential backoff for connection issues
-- **Graceful Degradation**: Fallback to original content if optimization fails
-- **Debug Support**: Comprehensive logging when `--debug` flag used
+## Commands & Usage
 
-## Development Roadmap
+### Input Commands
+- `quit` - Exit application gracefully
+- Double-enter - Submit multi-line input
+- `--debug` flag - Enable comprehensive logging
 
-### Priority 1: Combat Phase Detection & Management
-- **Intelligent Phase Recognition**: LLM-powered detection of combat vs. roleplaying contexts
-- **Two-Stage System**: Analysis phase followed by appropriate content generation
-- **Structured Combat Resolution**: JSON-based tracking to ensure conflicts reach satisfying conclusions
-- **Dynamic Threat Generation**: Contextually appropriate enemies based on environment and story
+### File Structure
+- `aurora3.sme.py` - Main application with Story Momentum Engine
+- `memory.json` - Persistent conversation memory (auto-created)
+- `critrules.prompt` - **Required**: Game Master rules
+- `companion.prompt` - Optional: Companion character definition
+- `lowrules.prompt` - Optional: Narrative generation guidelines
 
-### Priority 2: Enhanced Semantic Memory Management
-- **Advanced Importance Scoring**: More sophisticated LLM-driven memory prioritization
-- **Structured Analysis**: JSON-based memory evaluation for consistent decision-making
-- **Context-Aware Retention**: Phase-aware memory management for optimal story continuity
+## Technical Innovation
 
-### Priority 3: Game Master Prompt Refinement
-- **Iterative Optimization**: Systematic testing and improvement of GM behavior
-- **Phase Integration**: Ensure prompts work effectively across different game phases
-- **User Customization**: Better support for user-modified prompt files
+### Story Momentum Engine Breakthroughs
+The SME represents a paradigm shift in AI-powered narrative progression:
 
-### Future Enhancements
-- **Multi-Enemy Combat**: Support for complex encounters with group dynamics
-- **Advanced Combat Features**: Enhanced tactical systems and resolution mechanics
-- **Performance Optimization**: Improved efficiency and response times
-- **Extended Character Support**: Additional companion options beyond Aurora
+- **Unified State Management**: Single analysis function eliminates complexity
+- **Antagonist Quality Assurance**: Multi-attempt generation ensures compelling villains
+- **Mathematical Pressure Modeling**: Prevents common AI storytelling pitfalls
+- **Organic Conflict Resolution**: Sophisticated outcomes beyond simple win/lose
+- **Contextual Adaptability**: System responds to player behavior patterns
+
+### Memory System Architecture
+- **Semantic Intelligence**: LLM categorizes content by narrative importance
+- **Adaptive Preservation**: Different ratios optimize for content type
+- **Progressive Compression**: Multiple passes with increasing aggressiveness
+- **Continuity Maintenance**: Story coherence across extended sessions
+
+### Error Handling & Reliability
+- **Graceful Degradation**: System continues operating with missing components
+- **Network Resilience**: Comprehensive retry logic for unreliable connections
+- **Input Protection**: Token budget validation prevents system overflow
+- **State Recovery**: Robust fallback mechanisms for analysis failures
+
+## Development Features
+
+### Debug Capabilities
+Enable comprehensive logging with `--debug` flag:
+- Token allocation breakdown
+- Momentum analysis context preparation
+- Antagonist generation attempts
+- Memory categorization results
+- Prompt condensation statistics
+- Network retry attempts
+
+### Error Messages & Warnings
+- Missing prompt file notifications
+- Token budget violations with specific guidance
+- Memory optimization triggers
+- Momentum analysis failures with fallbacks
+
+### System Status Display
+Real-time information during operation:
+- Current momentum pressure level
+- Active antagonist name and status
+- Available prompt components
+- Memory optimization results
 
 ## Contributing
 
-This project focuses on leveraging LLM capabilities for semantic understanding rather than programmatic approaches. Key principles:
+Aurora demonstrates advanced LLM integration principles:
 
-- **LLM-First Design**: Use language model intelligence for complex decisions
-- **Structured Integration**: Combine LLM creativity with programmatic reliability
-- **User Experience**: Prioritize seamless, immersive gameplay
-- **Token Efficiency**: Smart resource management for optimal performance
+- **Semantic Partnership**: AI handles complex narrative decisions intelligently
+- **Structured Reliability**: Combines creativity with programmatic robustness
+- **Resource Optimization**: Efficient token usage within hardware constraints
+- **User Agency Preservation**: Maintains meaningful player choice throughout
 
 ## License
 
 GNU Affero General Public License v3.0 - See LICENSE file for details.
+
+---
+
+**Note**: Aurora requires the `critrules.prompt` file to function properly. The system will display an error and exit if this critical file is missing. Companion and narrative prompts are optional but enhance the experience.
