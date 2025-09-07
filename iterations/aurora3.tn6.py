@@ -23,9 +23,9 @@ TIMEOUT = 300.0  # seconds
 # Context window and token allocation
 CONTEXT_WINDOW = 32000
 SYSTEM_PROMPT_TOKENS = 5000  # Token budget for all system prompts combined
-MOMENTUM_ANALYSIS_TOKENS = 6000  # Token budget for momentum analysis
+MOMENTUM_ENGINE_TOKENS = 6000  # Token budget for Story Momentum Engine analysis
 
-REMAINING_TOKENS = CONTEXT_WINDOW - SYSTEM_PROMPT_TOKENS - MOMENTUM_ANALYSIS_TOKENS
+REMAINING_TOKENS = CONTEXT_WINDOW - SYSTEM_PROMPT_TOKENS - MOMENTUM_ENGINE_TOKENS
 MEMORY_FRACTION = 0.7
 MAX_MEMORY_TOKENS = int(REMAINING_TOKENS * MEMORY_FRACTION)  # ~14,700 tokens
 MAX_USER_INPUT_TOKENS = int(REMAINING_TOKENS * (1 - MEMORY_FRACTION))  # ~6,300 tokens
@@ -82,7 +82,7 @@ def load_prompt(file_path: Path) -> str:
 # ------------------ Configuration Validation ------------------ #
 def validate_token_allocation():
     """Ensure token allocation doesn't exceed context window"""
-    total_allocated = (SYSTEM_PROMPT_TOKENS + MOMENTUM_ANALYSIS_TOKENS +
+    total_allocated = (SYSTEM_PROMPT_TOKENS + MOMENTUM_ENGINE_TOKENS +
                       MAX_MEMORY_TOKENS + MAX_USER_INPUT_TOKENS)
 
     if total_allocated > CONTEXT_WINDOW:
@@ -93,7 +93,7 @@ def validate_token_allocation():
         print(Fore.GREEN + f"[Debug] Token allocation validated: {utilization:.1f}% utilization")
         print(Fore.YELLOW + f"[Debug] Token Budget Allocation:")
         print(Fore.YELLOW + f"  System prompts: {SYSTEM_PROMPT_TOKENS:,} tokens ({SYSTEM_PROMPT_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
-        print(Fore.YELLOW + f"  Momentum analysis: {MOMENTUM_ANALYSIS_TOKENS:,} tokens ({MOMENTUM_ANALYSIS_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
+        print(Fore.YELLOW + f"  Momentum engine: {MOMENTUM_ENGINE_TOKENS:,} tokens ({MOMENTUM_ENGINE_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
         print(Fore.YELLOW + f"  Memory: {MAX_MEMORY_TOKENS:,} tokens ({MAX_MEMORY_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
         print(Fore.YELLOW + f"  User input: {MAX_USER_INPUT_TOKENS:,} tokens ({MAX_USER_INPUT_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
         print(Fore.YELLOW + f"  Total: {total_allocated:,} tokens")
@@ -141,58 +141,6 @@ def validate_user_input_length(user_input: str) -> tuple[bool, str]:
 
     return False, warning
 
-# ------------------ Memory Management ------------------ #
-def now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
-def load_memory():
-    if not SAVE_FILE.exists():
-        return []
-    try:
-        with open(SAVE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        return []
-
-def save_memory(memories):
-    with open(SAVE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(memories, f, indent=2, ensure_ascii=False)
-
-def add_memory(memories, role, content):
-    memory = {
-        "id": str(uuid4()),
-        "role": role,
-        "content": content,
-        "timestamp": now_iso()
-    }
-    memories.append(memory)
-    save_memory(memories)
-
-# ------------------ MCP Communication ------------------ #
-async def call_mcp(messages, max_retries=3):
-    """Call MCP with automatic retry logic for robustness."""
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "stream": False
-    }
-    
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-                response = await client.post(MCP_URL, json=payload)
-                response.raise_for_status()
-                result = response.json()
-                return result.get("message", {}).get("content", "")
-        except (httpx.TimeoutException, httpx.RequestError) as e:
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff
-                if DEBUG:
-                    print(Fore.YELLOW + f"[Debug] MCP call failed (attempt {attempt + 1}), retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
-            else:
-                raise e
-
 # ------------------ Story Momentum Engine Core Functions ------------------ #
 
 def get_momentum_state(memories) -> Dict[str, Any] | None:
@@ -200,12 +148,22 @@ def get_momentum_state(memories) -> Dict[str, Any] | None:
     for memory in reversed(memories):
         if memory.get("role") == "momentum_state":
             return memory["content"]
+        # Backward compatibility - also check for old tension_state entries
+        if memory.get("role") == "tension_state":
+            return memory["content"]
     return None
 
 def update_momentum_state(memories, new_state) -> None:
     """Update or create momentum state in memory."""
     for i, memory in enumerate(memories):
         if memory.get("role") == "momentum_state":
+            memories[i]["content"] = new_state
+            memories[i]["timestamp"] = now_iso()
+            save_memory(memories)
+            return
+        # Backward compatibility - update old tension_state entries to momentum_state
+        if memory.get("role") == "tension_state":
+            memories[i]["role"] = "momentum_state"
             memories[i]["content"] = new_state
             memories[i]["timestamp"] = now_iso()
             save_memory(memories)
@@ -247,7 +205,7 @@ def prepare_momentum_analysis_context(memories, current_state, max_tokens=None):
     Prepare context for momentum analysis within the allocated budget.
     """
     if max_tokens is None:
-        max_tokens = MOMENTUM_ANALYSIS_TOKENS
+        max_tokens = MOMENTUM_ENGINE_TOKENS
     
     # Filter to relevant conversation messages
     conversation_messages = [
@@ -309,34 +267,25 @@ def validate_momentum_state(state_data) -> Dict[str, Any]:
     state_data["antagonist"] = antagonist
     return state_data
 
-async def analyze_momentum(memories, current_state, is_first_analysis=False):
-    """
-    Unified momentum analysis function that handles both first-time and regular analysis.
-    """
+async def analyze_momentum_comprehensive(memories, current_state):
+    """Complete momentum analysis with all systems integrated."""
     
     # 1. Token limit validation using allocated budget
     context_messages, context_tokens = prepare_momentum_analysis_context(
-        memories, current_state, max_tokens=MOMENTUM_ANALYSIS_TOKENS
+        memories, current_state, max_tokens=MOMENTUM_ENGINE_TOKENS
     )
     
-    # 2. Handle first-time antagonist generation
-    if is_first_analysis or not current_state.get("antagonist"):
-        if DEBUG:
-            print(Fore.YELLOW + "[Debug] Generating antagonist for momentum analysis...")
-        antagonist = await generate_antagonist(memories)
-        current_state["antagonist"] = antagonist
-    
-    # 3. Resource loss analysis
+    # 2. Resource loss analysis
     conversation_text = "\n".join([f"{m['role']}: {m['content']}" 
                                   for m in context_messages[-10:]])
     events_occurred = await analyze_resource_loss(conversation_text, 
                                                  current_state.get("antagonist"))
     
-    # 4. Calculate pressure floor ratcheting
+    # 3. Calculate pressure floor ratcheting
     new_pressure_floor = calculate_pressure_floor_ratchet(current_state, 
                                                          events_occurred["events"])
     
-    # 5. Main momentum analysis
+    # 4. Main momentum analysis
     momentum_prompt = f"""
 You are analyzing story momentum in an ongoing RPG narrative. Based on the conversation 
 and current momentum state, provide updated momentum metrics.
@@ -362,29 +311,15 @@ Provide a JSON response with updated momentum state including all fields from th
     if DEBUG:
         print(Fore.CYAN + f"[Debug] Running momentum analysis with {len(context_messages)} context messages")
     
-    # 6. Execute analysis with error handling
+    # 5. Execute analysis
     try:
         response = await call_mcp([{"role": "system", "content": momentum_prompt}])
         analysis_result = json.loads(response)
         
-        # 7. Validate and update state
+        # 6. Validate and update state
         validated_state = validate_momentum_state(analysis_result)
         validated_state["last_analysis_count"] = count_total_messages(memories)
         validated_state["base_pressure_floor"] = new_pressure_floor
-        
-        # 8. Validate antagonist quality and regenerate if needed
-        antagonist = validated_state.get("antagonist", {})
-        if not validate_antagonist_quality(antagonist):
-            if DEBUG:
-                print(Fore.YELLOW + "[Debug] Antagonist quality low, attempting regeneration...")
-            try:
-                enhanced_antagonist = await generate_antagonist(memories)
-                validated_state["antagonist"] = enhanced_antagonist
-                if DEBUG:
-                    print(Fore.GREEN + f"[Debug] Enhanced antagonist: {enhanced_antagonist.get('name', 'Unknown')}")
-            except Exception as e:
-                if DEBUG:
-                    print(Fore.RED + f"[Debug] Antagonist regeneration failed: {e}")
         
         if DEBUG:
             print(Fore.GREEN + f"[Debug] Momentum analysis complete. Pressure: {validated_state['narrative_pressure']:.2f}")
@@ -397,8 +332,77 @@ Provide a JSON response with updated momentum state including all fields from th
         # Return safe updated state
         safe_state = current_state.copy()
         safe_state["last_analysis_count"] = count_total_messages(memories)
-        safe_state["base_pressure_floor"] = new_pressure_floor
         return safe_state
+
+async def analyze_momentum_comprehensive_enhanced(memories, current_state):
+    """Enhanced momentum analysis with improved antagonist generation and validation."""
+    
+    # First run standard analysis
+    updated_state = await analyze_momentum_comprehensive(memories, current_state)
+    
+    # If antagonist quality is low, attempt regeneration
+    antagonist = updated_state.get("antagonist", {})
+    if not validate_antagonist_quality(antagonist):
+        if DEBUG:
+            print(Fore.YELLOW + "[Debug] Antagonist quality low, attempting regeneration...")
+        
+        try:
+            enhanced_antagonist = await safe_antagonist_generation(memories)
+            updated_state["antagonist"] = enhanced_antagonist
+            
+            if DEBUG:
+                print(Fore.GREEN + f"[Debug] Enhanced antagonist: {enhanced_antagonist.get('name', 'Unknown')}")
+        except Exception as e:
+            if DEBUG:
+                print(Fore.RED + f"[Debug] Antagonist regeneration failed: {e}")
+    
+    return updated_state
+
+async def first_momentum_analysis(memories):
+    """
+    Perform the first momentum analysis with enhanced antagonist generation.
+    """
+    if DEBUG:
+        print(Fore.YELLOW + "[Debug] First momentum analysis - generating antagonist with enhanced system...")
+    
+    # Create initial state
+    current_state = create_initial_momentum_state()
+    
+    # Generate high-quality antagonist
+    antagonist = await safe_antagonist_generation(memories)
+    current_state["antagonist"] = antagonist
+    
+    # Perform initial momentum analysis with the new antagonist
+    enhanced_state = await analyze_momentum_comprehensive_enhanced(memories, current_state)
+    
+    if DEBUG:
+        final_antagonist = enhanced_state["antagonist"]
+        print(Fore.GREEN + f"[Debug] Momentum engine initialized successfully:")
+        print(Fore.GREEN + f"  Antagonist: {final_antagonist['name']}")
+        print(Fore.GREEN + f"  Motivation: {final_antagonist['motivation']}")
+        print(Fore.GREEN + f"  Quality validated: {validate_antagonist_quality(final_antagonist)}")
+    
+    return enhanced_state
+
+# Error handling and recovery
+class MomentumEngineError(Exception):
+    """Custom exception for momentum engine failures."""
+    pass
+
+def safe_momentum_analysis(func):
+    """Decorator for momentum analysis functions with error handling."""
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            if DEBUG:
+                print(Fore.RED + f"[Debug] Momentum engine error: {e}")
+            # Return safe default state
+            return create_initial_momentum_state()
+    return wrapper
+
+# Apply to critical functions
+generate_antagonist = safe_momentum_analysis(generate_antagonist) if 'generate_antagonist' in globals() else None
 
 def get_pressure_name(pressure_level):
     """Convert pressure level to named range."""
@@ -412,13 +416,28 @@ def get_pressure_name(pressure_level):
         return "explosive"
 
 def generate_momentum_context_prompt(momentum_state):
-    """Generate enhanced system prompt context with detailed momentum information."""
+    """Generate system prompt context from momentum state."""
+    antagonist = momentum_state["antagonist"]
+    pressure_name = get_pressure_name(momentum_state["narrative_pressure"])
+    
+    return f"""
+**MOMENTUM CONTEXT**: Current narrative pressure is {pressure_name} ({momentum_state['narrative_pressure']:.2f}). 
+The antagonist {antagonist['name']} ({antagonist['motivation']}) is at {antagonist['commitment_level']} 
+commitment level. They have lost: {', '.join(antagonist['resources_lost']) if antagonist['resources_lost'] else 'nothing yet'}. 
+Weave appropriate tension, threats, clues, and confrontation opportunities into your narrative 
+based on this pressure level and antagonist state.
+"""
+
+def generate_enhanced_momentum_context_prompt(momentum_state):
+    """
+    Generate enhanced system prompt context with detailed antagonist information.
+    """
     antagonist = momentum_state["antagonist"]
     pressure_name = get_pressure_name(momentum_state["narrative_pressure"])
     quality_indicator = "well-established" if validate_antagonist_quality(antagonist) else "developing"
     
     return f"""
-**MOMENTUM CONTEXT**: Current narrative pressure is {pressure_name} ({momentum_state['narrative_pressure']:.2f}).
+**ENHANCED MOMENTUM CONTEXT**: Current narrative pressure is {pressure_name} ({momentum_state['narrative_pressure']:.2f}).
 The {quality_indicator} antagonist {antagonist['name']} ({antagonist['motivation']}) operates at {antagonist['commitment_level']} 
 commitment level with {len(antagonist.get('resources_lost', []))} confirmed losses. 
 
@@ -430,151 +449,11 @@ Integrate appropriate story momentum elements: tension escalation, antagonist pr
 and narrative progression that matches the current pressure level and momentum state.
 """
 
-# ------------------ Antagonist System Functions ------------------ #
-
-async def generate_antagonist(memories, max_attempts=3):
-    """Generate a high-quality antagonist based on story context."""
-    
-    # Prepare story context from recent memories
-    story_context = "\n".join([
-        f"{mem['role']}: {mem['content'][:300]}"  # Truncate for token efficiency
-        for mem in memories[-15:]  # Recent context
-        if mem.get("role") in ["user", "assistant"]
-    ])
-    
-    antagonist_prompt = f"""
-You are creating an antagonist for an ongoing RPG story. Based on the story context, 
-generate a compelling antagonist that fits naturally into the narrative.
-
-Recent Story Context:
-{story_context}
-
-Create an antagonist with:
-1. Name: A fitting name for the setting
-2. Motivation: Clear, understandable goals that conflict with the player
-3. Commitment Level: Start at "testing" (will escalate based on story events)
-4. Resources: What power, influence, or assets do they have?
-5. Personality: Key traits that drive their behavior
-6. Background: Brief history that explains their motivation
-
-Provide a JSON response with these fields:
-{{
-    "name": "Antagonist Name",
-    "motivation": "Clear motivation that opposes player goals",
-    "commitment_level": "testing",
-    "resources_available": ["resource1", "resource2", "resource3"],
-    "resources_lost": [],
-    "personality_traits": ["trait1", "trait2", "trait3"],
-    "background": "Brief background story",
-    "threat_level": "moderate"
-}}
-"""
-    
-    for attempt in range(max_attempts):
-        try:
-            response = await call_mcp([{"role": "system", "content": antagonist_prompt}])
-            antagonist_data = json.loads(response)
-            
-            # Validate required fields
-            required_fields = ["name", "motivation", "commitment_level"]
-            if all(field in antagonist_data for field in required_fields):
-                # Ensure lists exist
-                antagonist_data.setdefault("resources_available", [])
-                antagonist_data.setdefault("resources_lost", [])
-                antagonist_data.setdefault("personality_traits", [])
-                
-                if DEBUG:
-                    print(Fore.GREEN + f"[Debug] Generated antagonist: {antagonist_data['name']}")
-                
-                return antagonist_data
-                
-        except (json.JSONDecodeError, KeyError) as e:
-            if DEBUG:
-                print(Fore.YELLOW + f"[Debug] Antagonist generation attempt {attempt + 1} failed: {e}")
-    
-    # Fallback antagonist if generation fails
-    return {
-        "name": "The Shadow",
-        "motivation": "seeks to disrupt the player's journey",
-        "commitment_level": "testing",
-        "resources_available": ["stealth", "cunning", "local knowledge"],
-        "resources_lost": [],
-        "personality_traits": ["mysterious", "patient", "observant"],
-        "background": "A mysterious figure who opposes those who disturb the natural order",
-        "threat_level": "moderate"
-    }
-
-def validate_antagonist_quality(antagonist):
-    """Validate that an antagonist has sufficient detail and quality."""
-    if not isinstance(antagonist, dict):
-        return False
-    
-    # Check required fields
-    required_fields = ["name", "motivation", "commitment_level"]
-    if not all(field in antagonist and antagonist[field] for field in required_fields):
-        return False
-    
-    # Check for meaningful content (not just defaults)
-    if antagonist["name"] in ["Unknown Antagonist", "Unknown Adversary", "The Shadow"]:
-        return False
-    
-    if len(antagonist["motivation"]) < 10:  # Too brief
-        return False
-    
-    return True
-
-async def analyze_resource_loss(conversation_text, antagonist):
-    """Analyze recent conversation for antagonist resource losses."""
-    if not antagonist:
-        return {"events": [], "resources_lost": []}
-    
-    analysis_prompt = f"""
-Analyze this RPG conversation for events where the antagonist {antagonist['name']} 
-might have lost resources, suffered setbacks, or been exposed.
-
-Antagonist: {antagonist['name']} - {antagonist['motivation']}
-Available Resources: {', '.join(antagonist.get('resources_available', []))}
-
-Recent Conversation:
-{conversation_text[-2000:]}  # Last 2000 chars
-
-Look for:
-- Direct confrontations or defeats
-- Exposure of plans or identity
-- Loss of allies, resources, or territory
-- Failed schemes or setbacks
-
-Provide JSON response:
-{{
-    "events": ["event1", "event2"],
-    "resources_lost": ["resource1", "resource2"]
-}}
-"""
-    
-    try:
-        response = await call_mcp([{"role": "system", "content": analysis_prompt}])
-        return json.loads(response)
-    except (json.JSONDecodeError, Exception):
-        return {"events": [], "resources_lost": []}
-
-def calculate_pressure_floor_ratchet(current_state, recent_events):
-    """Calculate the new pressure floor based on escalation events."""
-    current_floor = current_state.get("base_pressure_floor", 0.0)
-    escalation_count = current_state.get("escalation_count", 0)
-    
-    # Increment escalation count if significant events occurred
-    if recent_events:
-        escalation_count += len(recent_events)
-    
-    # Calculate new floor (ratcheting upward)
-    new_floor = min(0.3, current_floor + (escalation_count * 0.02))
-    
-    return max(current_floor, new_floor)  # Never decrease
-
 # ------------------ Prompt Condensation System ------------------ #
 async def condense_prompt(content: str, prompt_type: str) -> str:
     """
     Condense a single prompt file while preserving essential functionality.
+    Uses the same LLM approach as memory condensation but optimized for prompts.
     """
     if DEBUG:
         print(Fore.YELLOW + f"[Debug] Condensing {prompt_type} prompt ({len(content)} chars -> target reduction)")
@@ -652,6 +531,32 @@ async def load_and_optimize_prompts() -> Tuple[str, str, str]:
     return prompts['critrules'], prompts['companion'], prompts['lowrules']
 
 # ------------------ Memory Management ------------------ #
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+def load_memory():
+    if not SAVE_FILE.exists():
+        return []
+    try:
+        with open(SAVE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return []
+
+def save_memory(memories):
+    with open(SAVE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(memories, f, indent=2, ensure_ascii=False)
+
+def add_memory(memories, role, content):
+    memory = {
+        "id": str(uuid4()),
+        "role": role,
+        "content": content,
+        "timestamp": now_iso()
+    }
+    memories.append(memory)
+    save_memory(memories)
+
 async def categorize_memory_content(memories, start_idx=0) -> List[Dict[str, Any]]:
     """
     Categorize memory content using LLM analysis for semantic understanding.
@@ -702,6 +607,34 @@ Provide a JSON list with one category per exchange, like: ["standard", "characte
     
     return memories
 
+async def condense_with_semantic_awareness(memories, target_fraction=0.8):
+    """
+    Advanced memory condensation that preserves semantically important content.
+    """
+    if len(memories) < 50:  # Don't condense small memory sets
+        return memories
+    
+    # First, ensure all memories have categories
+    memories = await categorize_memory_content(memories)
+    
+    # Group memories by content type
+    categorized_memories = {}
+    for i, memory in enumerate(memories):
+        if memory.get("role") in ["user", "assistant"]:
+            category = memory.get("content_category", "standard")
+            if category not in categorized_memories:
+                categorized_memories[category] = []
+            categorized_memories[category].append((i, memory))
+    
+    # Apply category-specific condensation
+    for category, strategy in CONDENSATION_STRATEGIES.items():
+        if category in categorized_memories:
+            memory_group = categorized_memories[category]
+            if len(memory_group) > strategy["threshold"]:
+                await condense_memory_category(memory_group, strategy, memories)
+    
+    return memories
+
 async def condense_memory_category(memory_group, strategy, all_memories):
     """
     Condense a specific category of memories using tailored strategies.
@@ -737,6 +670,8 @@ Provide a condensed version that preserves {int(strategy['preservation_ratio'] *
             condensed = await call_mcp([{"role": "system", "content": condensation_prompt}])
             
             # Replace the batch with condensed version
+            # For simplicity, replace the first memory in the batch with condensed content
+            # and mark others for removal
             if batch:
                 first_idx, first_mem = batch[0]
                 all_memories[first_idx]["content"] = condensed
@@ -756,40 +691,234 @@ Provide a condensed version that preserves {int(strategy['preservation_ratio'] *
 
 async def intelligent_memory_management(memories):
     """
-    Streamlined memory management using semantic condensation.
+    Advanced memory management using multiple condensation passes.
     """
-    if len(memories) < 50:  # Don't condense small memory sets
-        return memories
-    
     if DEBUG:
         print(Fore.YELLOW + "[Debug] Starting intelligent memory management...")
     
     original_count = len(memories)
     
-    # Ensure all memories have categories
-    memories = await categorize_memory_content(memories)
+    # Progressive condensation with increasing aggressiveness
+    condensation_passes = [
+        {"target_age": 100, "fraction": 0.9},  # Gentle condensation for recent memories
+        {"target_age": 80, "fraction": 0.8},   # Moderate condensation 
+        {"target_age": 60, "fraction": 0.7}    # Aggressive condensation for old memories
+    ]
     
-    # Group memories by content type
-    categorized_memories = {}
-    for i, memory in enumerate(memories):
-        if memory.get("role") in ["user", "assistant"]:
-            category = memory.get("content_category", "standard")
-            if category not in categorized_memories:
-                categorized_memories[category] = []
-            categorized_memories[category].append((i, memory))
-    
-    # Apply category-specific condensation
-    for category, strategy in CONDENSATION_STRATEGIES.items():
-        if category in categorized_memories:
-            memory_group = categorized_memories[category]
-            if len(memory_group) > strategy["threshold"]:
-                await condense_memory_category(memory_group, strategy, memories)
+    for pass_config in condensation_passes:
+        current_tokens = sum(estimate_tokens(mem["content"]) for mem in memories)
+        if current_tokens <= MAX_MEMORY_TOKENS:
+            break
+            
+        # Apply condensation pass
+        memories = await condense_with_semantic_awareness(memories, pass_config["fraction"])
     
     final_count = len(memories)
     if DEBUG:
         print(Fore.GREEN + f"[Debug] Memory management complete: {original_count} -> {final_count} memories")
     
     return memories
+
+async def manage_memory_if_needed(memories):
+    """
+    Check if memory management is needed and apply appropriate strategy.
+    Maintains backward compatibility.
+    """
+    # Use the new intelligent system when memory pressure is high
+    current_tokens = sum(estimate_tokens(mem["content"]) for mem in memories)
+    if current_tokens > MAX_MEMORY_TOKENS * 0.9:  # When approaching limit
+        return await intelligent_memory_management(memories)
+    else:
+        # Use semantic-aware condensation for normal operation
+        return await condense_with_semantic_awareness(memories, fraction=0.8)
+
+# ------------------ MCP Communication ------------------ #
+async def call_mcp(messages):
+    payload = {
+        "model": MODEL,
+        "messages": messages,
+        "stream": False
+    }
+    
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        response = await client.post(MCP_URL, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        return result.get("message", {}).get("content", "")
+
+async def call_mcp_with_retry(messages, max_retries=3):
+    """Call MCP with automatic retry logic for robustness."""
+    for attempt in range(max_retries):
+        try:
+            return await call_mcp(messages)
+        except (httpx.TimeoutException, httpx.RequestError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff
+                if DEBUG:
+                    print(Fore.YELLOW + f"[Debug] MCP call failed (attempt {attempt + 1}), retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            else:
+                raise e
+
+# ------------------ Antagonist System Functions ------------------ #
+
+async def generate_antagonist(memories, max_attempts=3):
+    """Generate a high-quality antagonist based on story context."""
+    
+    # Prepare story context from recent memories
+    story_context = "\n".join([
+        f"{mem['role']}: {mem['content'][:300]}"  # Truncate for token efficiency
+        for mem in memories[-15:]  # Recent context
+        if mem.get("role") in ["user", "assistant"]
+    ])
+    
+    antagonist_prompt = f"""
+You are creating an antagonist for an ongoing RPG story. Based on the story context, 
+generate a compelling antagonist that fits naturally into the narrative.
+
+Recent Story Context:
+{story_context}
+
+Create an antagonist with:
+1. Name: A fitting name for the setting
+2. Motivation: Clear, understandable goals that conflict with the player
+3. Commitment Level: Start at "testing" (will escalate based on story events)
+4. Resources: What power, influence, or assets do they have?
+5. Personality: Key traits that drive their behavior
+6. Background: Brief history that explains their motivation
+
+Provide a JSON response with these fields:
+{{
+    "name": "Antagonist Name",
+    "motivation": "Clear motivation that opposes player goals",
+    "commitment_level": "testing",
+    "resources_available": ["resource1", "resource2", "resource3"],
+    "resources_lost": [],
+    "personality_traits": ["trait1", "trait2", "trait3"],
+    "background": "Brief background story",
+    "threat_level": "moderate"
+}}
+"""
+    
+    for attempt in range(max_attempts):
+        try:
+            response = await call_mcp_with_retry([{"role": "system", "content": antagonist_prompt}])
+            antagonist_data = json.loads(response)
+            
+            # Validate required fields
+            required_fields = ["name", "motivation", "commitment_level"]
+            if all(field in antagonist_data for field in required_fields):
+                # Ensure lists exist
+                antagonist_data.setdefault("resources_available", [])
+                antagonist_data.setdefault("resources_lost", [])
+                antagonist_data.setdefault("personality_traits", [])
+                
+                if DEBUG:
+                    print(Fore.GREEN + f"[Debug] Generated antagonist: {antagonist_data['name']}")
+                
+                return antagonist_data
+                
+        except (json.JSONDecodeError, KeyError) as e:
+            if DEBUG:
+                print(Fore.YELLOW + f"[Debug] Antagonist generation attempt {attempt + 1} failed: {e}")
+    
+    # Fallback antagonist if generation fails
+    return {
+        "name": "The Shadow",
+        "motivation": "seeks to disrupt the player's journey",
+        "commitment_level": "testing",
+        "resources_available": ["stealth", "cunning", "local knowledge"],
+        "resources_lost": [],
+        "personality_traits": ["mysterious", "patient", "observant"],
+        "background": "A mysterious figure who opposes those who disturb the natural order",
+        "threat_level": "moderate"
+    }
+
+async def safe_antagonist_generation(memories):
+    """Safe wrapper for antagonist generation with error handling."""
+    try:
+        return await generate_antagonist(memories)
+    except Exception as e:
+        if DEBUG:
+            print(Fore.RED + f"[Debug] Safe antagonist generation failed: {e}")
+        # Return basic antagonist
+        return {
+            "name": "Unknown Adversary",
+            "motivation": "opposes the player character",
+            "commitment_level": "testing",
+            "resources_available": ["unknown capabilities"],
+            "resources_lost": [],
+            "personality_traits": ["enigmatic"],
+            "background": "A mysterious opponent",
+            "threat_level": "unknown"
+        }
+
+def validate_antagonist_quality(antagonist):
+    """Validate that an antagonist has sufficient detail and quality."""
+    if not isinstance(antagonist, dict):
+        return False
+    
+    # Check required fields
+    required_fields = ["name", "motivation", "commitment_level"]
+    if not all(field in antagonist and antagonist[field] for field in required_fields):
+        return False
+    
+    # Check for meaningful content (not just defaults)
+    if antagonist["name"] in ["Unknown Antagonist", "Unknown Adversary"]:
+        return False
+    
+    if len(antagonist["motivation"]) < 10:  # Too brief
+        return False
+    
+    return True
+
+async def analyze_resource_loss(conversation_text, antagonist):
+    """Analyze recent conversation for antagonist resource losses."""
+    if not antagonist:
+        return {"events": [], "resources_lost": []}
+    
+    analysis_prompt = f"""
+Analyze this RPG conversation for events where the antagonist {antagonist['name']} 
+might have lost resources, suffered setbacks, or been exposed.
+
+Antagonist: {antagonist['name']} - {antagonist['motivation']}
+Available Resources: {', '.join(antagonist.get('resources_available', []))}
+
+Recent Conversation:
+{conversation_text[-2000:]}  # Last 2000 chars
+
+Look for:
+- Direct confrontations or defeats
+- Exposure of plans or identity
+- Loss of allies, resources, or territory
+- Failed schemes or setbacks
+
+Provide JSON response:
+{{
+    "events": ["event1", "event2"],
+    "resources_lost": ["resource1", "resource2"]
+}}
+"""
+    
+    try:
+        response = await call_mcp([{"role": "system", "content": analysis_prompt}])
+        return json.loads(response)
+    except (json.JSONDecodeError, Exception):
+        return {"events": [], "resources_lost": []}
+
+def calculate_pressure_floor_ratchet(current_state, recent_events):
+    """Calculate the new pressure floor based on escalation events."""
+    current_floor = current_state.get("base_pressure_floor", 0.0)
+    escalation_count = current_state.get("escalation_count", 0)
+    
+    # Increment escalation count if significant events occurred
+    if recent_events:
+        escalation_count += len(recent_events)
+    
+    # Calculate new floor (ratcheting upward)
+    new_floor = min(0.3, current_floor + (escalation_count * 0.02))
+    
+    return max(current_floor, new_floor)  # Never decrease
 
 # ------------------ Main Application Logic ------------------ #
 
@@ -812,21 +941,21 @@ async def main():
             print(Fore.YELLOW + "[System] Running story momentum analysis...")
             
             current_state = get_momentum_state(memories)
-            is_first_analysis = current_state is None
+            if current_state is None:
+                # First time analysis - enhanced generation
+                updated_state = await first_momentum_analysis(memories)
+            else:
+                # Regular analysis
+                updated_state = await analyze_momentum_comprehensive_enhanced(memories, current_state)
             
-            if is_first_analysis:
-                current_state = create_initial_momentum_state()
-            
-            updated_state = await analyze_momentum(memories, current_state, is_first_analysis)
             update_momentum_state(memories, updated_state)
-            
             print(Fore.GREEN + f"[System] Momentum analysis complete. Pressure level: {updated_state['narrative_pressure']:.2f}")
         
         # Check memory management needs
         current_tokens = sum(estimate_tokens(mem["content"]) for mem in memories)
         if current_tokens > MAX_MEMORY_TOKENS:
             print(Fore.YELLOW + f"[System] Memory usage high ({current_tokens:,} tokens), optimizing...")
-            memories = await intelligent_memory_management(memories)
+            memories = await manage_memory_if_needed(memories)
             final_tokens = sum(estimate_tokens(mem["content"]) for mem in memories)
             print(Fore.GREEN + f"[System] Memory optimized: {current_tokens:,} -> {final_tokens:,} tokens")
         
@@ -886,7 +1015,7 @@ async def main():
             momentum_state = get_momentum_state(memories)
             momentum_context = ""
             if momentum_state:
-                momentum_context = generate_momentum_context_prompt(momentum_state)
+                momentum_context = generate_enhanced_momentum_context_prompt(momentum_state)
             
             # Build system prompts with momentum context
             full_system_top = system_prompt_top + momentum_context
@@ -910,7 +1039,7 @@ async def main():
             # Generate response
             try:
                 print(Fore.MAGENTA + "\n[Generating response...]")
-                response = await call_mcp(messages)
+                response = await call_mcp_with_retry(messages)
                 
                 # Display and save response
                 print(Fore.GREEN + "\n" + "="*60)
@@ -923,7 +1052,7 @@ async def main():
                 if should_analyze_momentum(memories):
                     print(Fore.YELLOW + "[System] Analyzing story momentum...")
                     current_state = get_momentum_state(memories)
-                    updated_state = await analyze_momentum(memories, current_state, False)
+                    updated_state = await analyze_momentum_comprehensive_enhanced(memories, current_state)
                     update_momentum_state(memories, updated_state)
                     
                     if DEBUG:
@@ -935,7 +1064,7 @@ async def main():
                     if current_tokens > MAX_MEMORY_TOKENS:
                         if DEBUG:
                             print(Fore.YELLOW + "[Debug] Running periodic memory optimization...")
-                        memories = await intelligent_memory_management(memories)
+                        memories = await manage_memory_if_needed(memories)
                 
             except Exception as e:
                 print(Fore.RED + f"[Error] Failed to generate response: {e}")
