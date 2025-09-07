@@ -75,11 +75,8 @@ PROMPT_MID_FILE = Path("companion.prompt")
 PROMPT_LOW_FILE = Path("lowrules.prompt")
 
 def load_prompt(file_path: Path) -> str:
-    """Load prompt file with graceful handling of missing files."""
     if not file_path.exists():
-        print(Fore.YELLOW + f"[Warning] Prompt file not found: {file_path}")
-        print(Fore.YELLOW + f"[Warning] Using empty prompt for {file_path.stem}")
-        return ""
+        raise FileNotFoundError(f"Prompt file not found: {file_path}")
     return file_path.read_text(encoding="utf-8").strip()
 
 # ------------------ Configuration Validation ------------------ #
@@ -195,147 +192,6 @@ async def call_mcp(messages, max_retries=3):
                 await asyncio.sleep(wait_time)
             else:
                 raise e
-
-# ------------------ Antagonist System Functions ------------------ #
-
-async def generate_antagonist(memories, max_attempts=3):
-    """Generate a high-quality antagonist based on story context."""
-    
-    # Prepare story context from recent memories
-    story_context = "\n".join([
-        f"{mem['role']}: {mem['content'][:300]}"  # Truncate for token efficiency
-        for mem in memories[-15:]  # Recent context
-        if mem.get("role") in ["user", "assistant"]
-    ])
-    
-    antagonist_prompt = f"""
-You are creating an antagonist for an ongoing RPG story. Based on the story context, 
-generate a compelling antagonist that fits naturally into the narrative.
-
-Recent Story Context:
-{story_context}
-
-Create an antagonist with:
-1. Name: A fitting name for the setting
-2. Motivation: Clear, understandable goals that conflict with the player
-3. Commitment Level: Start at "testing" (will escalate based on story events)
-4. Resources: What power, influence, or assets do they have?
-5. Personality: Key traits that drive their behavior
-6. Background: Brief history that explains their motivation
-
-Provide a JSON response with these fields:
-{{
-    "name": "Antagonist Name",
-    "motivation": "Clear motivation that opposes player goals",
-    "commitment_level": "testing",
-    "resources_available": ["resource1", "resource2", "resource3"],
-    "resources_lost": [],
-    "personality_traits": ["trait1", "trait2", "trait3"],
-    "background": "Brief background story",
-    "threat_level": "moderate"
-}}
-"""
-    
-    for attempt in range(max_attempts):
-        try:
-            response = await call_mcp([{"role": "system", "content": antagonist_prompt}])
-            antagonist_data = json.loads(response)
-            
-            # Validate required fields
-            required_fields = ["name", "motivation", "commitment_level"]
-            if all(field in antagonist_data for field in required_fields):
-                # Ensure lists exist
-                antagonist_data.setdefault("resources_available", [])
-                antagonist_data.setdefault("resources_lost", [])
-                antagonist_data.setdefault("personality_traits", [])
-                
-                if DEBUG:
-                    print(Fore.GREEN + f"[Debug] Generated antagonist: {antagonist_data['name']}")
-                
-                return antagonist_data
-                
-        except (json.JSONDecodeError, KeyError) as e:
-            if DEBUG:
-                print(Fore.YELLOW + f"[Debug] Antagonist generation attempt {attempt + 1} failed: {e}")
-    
-    # Fallback antagonist if generation fails
-    return {
-        "name": "The Shadow",
-        "motivation": "seeks to disrupt the player's journey",
-        "commitment_level": "testing",
-        "resources_available": ["stealth", "cunning", "local knowledge"],
-        "resources_lost": [],
-        "personality_traits": ["mysterious", "patient", "observant"],
-        "background": "A mysterious figure who opposes those who disturb the natural order",
-        "threat_level": "moderate"
-    }
-
-def validate_antagonist_quality(antagonist):
-    """Validate that an antagonist has sufficient detail and quality."""
-    if not isinstance(antagonist, dict):
-        return False
-    
-    # Check required fields
-    required_fields = ["name", "motivation", "commitment_level"]
-    if not all(field in antagonist and antagonist[field] for field in required_fields):
-        return False
-    
-    # Check for meaningful content (not just defaults)
-    if antagonist["name"] in ["Unknown Antagonist", "Unknown Adversary", "The Shadow"]:
-        return False
-    
-    if len(antagonist["motivation"]) < 10:  # Too brief
-        return False
-    
-    return True
-
-async def analyze_resource_loss(conversation_text, antagonist):
-    """Analyze recent conversation for antagonist resource losses."""
-    if not antagonist:
-        return {"events": [], "resources_lost": []}
-    
-    analysis_prompt = f"""
-Analyze this RPG conversation for events where the antagonist {antagonist['name']} 
-might have lost resources, suffered setbacks, or been exposed.
-
-Antagonist: {antagonist['name']} - {antagonist['motivation']}
-Available Resources: {', '.join(antagonist.get('resources_available', []))}
-
-Recent Conversation:
-{conversation_text[-2000:]}  # Last 2000 chars
-
-Look for:
-- Direct confrontations or defeats
-- Exposure of plans or identity
-- Loss of allies, resources, or territory
-- Failed schemes or setbacks
-
-Provide JSON response:
-{{
-    "events": ["event1", "event2"],
-    "resources_lost": ["resource1", "resource2"]
-}}
-"""
-    
-    try:
-        response = await call_mcp([{"role": "system", "content": analysis_prompt}])
-        return json.loads(response)
-    except (json.JSONDecodeError, Exception):
-        return {"events": [], "resources_lost": []}
-
-def calculate_pressure_floor_ratchet(current_state, recent_events):
-    """Calculate the new pressure floor based on escalation events."""
-    current_floor = current_state.get("base_pressure_floor", 0.0)
-    escalation_count = current_state.get("escalation_count", 0)
-    
-    # Increment escalation count if significant events occurred
-    if recent_events:
-        escalation_count += len(recent_events)
-    
-    # Calculate new floor (ratcheting upward)
-    new_floor = min(0.3, current_floor + (escalation_count * 0.02))
-    
-    return max(current_floor, new_floor)  # Never decrease
 
 # ------------------ Story Momentum Engine Core Functions ------------------ #
 
@@ -574,6 +430,147 @@ Integrate appropriate story momentum elements: tension escalation, antagonist pr
 and narrative progression that matches the current pressure level and momentum state.
 """
 
+# ------------------ Antagonist System Functions ------------------ #
+
+async def generate_antagonist(memories, max_attempts=3):
+    """Generate a high-quality antagonist based on story context."""
+    
+    # Prepare story context from recent memories
+    story_context = "\n".join([
+        f"{mem['role']}: {mem['content'][:300]}"  # Truncate for token efficiency
+        for mem in memories[-15:]  # Recent context
+        if mem.get("role") in ["user", "assistant"]
+    ])
+    
+    antagonist_prompt = f"""
+You are creating an antagonist for an ongoing RPG story. Based on the story context, 
+generate a compelling antagonist that fits naturally into the narrative.
+
+Recent Story Context:
+{story_context}
+
+Create an antagonist with:
+1. Name: A fitting name for the setting
+2. Motivation: Clear, understandable goals that conflict with the player
+3. Commitment Level: Start at "testing" (will escalate based on story events)
+4. Resources: What power, influence, or assets do they have?
+5. Personality: Key traits that drive their behavior
+6. Background: Brief history that explains their motivation
+
+Provide a JSON response with these fields:
+{{
+    "name": "Antagonist Name",
+    "motivation": "Clear motivation that opposes player goals",
+    "commitment_level": "testing",
+    "resources_available": ["resource1", "resource2", "resource3"],
+    "resources_lost": [],
+    "personality_traits": ["trait1", "trait2", "trait3"],
+    "background": "Brief background story",
+    "threat_level": "moderate"
+}}
+"""
+    
+    for attempt in range(max_attempts):
+        try:
+            response = await call_mcp([{"role": "system", "content": antagonist_prompt}])
+            antagonist_data = json.loads(response)
+            
+            # Validate required fields
+            required_fields = ["name", "motivation", "commitment_level"]
+            if all(field in antagonist_data for field in required_fields):
+                # Ensure lists exist
+                antagonist_data.setdefault("resources_available", [])
+                antagonist_data.setdefault("resources_lost", [])
+                antagonist_data.setdefault("personality_traits", [])
+                
+                if DEBUG:
+                    print(Fore.GREEN + f"[Debug] Generated antagonist: {antagonist_data['name']}")
+                
+                return antagonist_data
+                
+        except (json.JSONDecodeError, KeyError) as e:
+            if DEBUG:
+                print(Fore.YELLOW + f"[Debug] Antagonist generation attempt {attempt + 1} failed: {e}")
+    
+    # Fallback antagonist if generation fails
+    return {
+        "name": "The Shadow",
+        "motivation": "seeks to disrupt the player's journey",
+        "commitment_level": "testing",
+        "resources_available": ["stealth", "cunning", "local knowledge"],
+        "resources_lost": [],
+        "personality_traits": ["mysterious", "patient", "observant"],
+        "background": "A mysterious figure who opposes those who disturb the natural order",
+        "threat_level": "moderate"
+    }
+
+def validate_antagonist_quality(antagonist):
+    """Validate that an antagonist has sufficient detail and quality."""
+    if not isinstance(antagonist, dict):
+        return False
+    
+    # Check required fields
+    required_fields = ["name", "motivation", "commitment_level"]
+    if not all(field in antagonist and antagonist[field] for field in required_fields):
+        return False
+    
+    # Check for meaningful content (not just defaults)
+    if antagonist["name"] in ["Unknown Antagonist", "Unknown Adversary", "The Shadow"]:
+        return False
+    
+    if len(antagonist["motivation"]) < 10:  # Too brief
+        return False
+    
+    return True
+
+async def analyze_resource_loss(conversation_text, antagonist):
+    """Analyze recent conversation for antagonist resource losses."""
+    if not antagonist:
+        return {"events": [], "resources_lost": []}
+    
+    analysis_prompt = f"""
+Analyze this RPG conversation for events where the antagonist {antagonist['name']} 
+might have lost resources, suffered setbacks, or been exposed.
+
+Antagonist: {antagonist['name']} - {antagonist['motivation']}
+Available Resources: {', '.join(antagonist.get('resources_available', []))}
+
+Recent Conversation:
+{conversation_text[-2000:]}  # Last 2000 chars
+
+Look for:
+- Direct confrontations or defeats
+- Exposure of plans or identity
+- Loss of allies, resources, or territory
+- Failed schemes or setbacks
+
+Provide JSON response:
+{{
+    "events": ["event1", "event2"],
+    "resources_lost": ["resource1", "resource2"]
+}}
+"""
+    
+    try:
+        response = await call_mcp([{"role": "system", "content": analysis_prompt}])
+        return json.loads(response)
+    except (json.JSONDecodeError, Exception):
+        return {"events": [], "resources_lost": []}
+
+def calculate_pressure_floor_ratchet(current_state, recent_events):
+    """Calculate the new pressure floor based on escalation events."""
+    current_floor = current_state.get("base_pressure_floor", 0.0)
+    escalation_count = current_state.get("escalation_count", 0)
+    
+    # Increment escalation count if significant events occurred
+    if recent_events:
+        escalation_count += len(recent_events)
+    
+    # Calculate new floor (ratcheting upward)
+    new_floor = min(0.3, current_floor + (escalation_count * 0.02))
+    
+    return max(current_floor, new_floor)  # Never decrease
+
 # ------------------ Prompt Condensation System ------------------ #
 async def condense_prompt(content: str, prompt_type: str) -> str:
     """
@@ -617,30 +614,21 @@ async def condense_prompt(content: str, prompt_type: str) -> str:
 async def load_and_optimize_prompts() -> Tuple[str, str, str]:
     """Load all prompt files and apply condensation if they exceed the token budget."""
     
-    # Load all prompt files with graceful handling
+    # Load all prompt files
     prompts = {
         'critrules': load_prompt(PROMPT_TOP_FILE),
         'companion': load_prompt(PROMPT_MID_FILE), 
         'lowrules': load_prompt(PROMPT_LOW_FILE)
     }
     
-    # Check if any required prompts are missing
-    missing_prompts = [name for name, content in prompts.items() if not content.strip()]
-    if missing_prompts:
-        print(Fore.YELLOW + f"[Warning] Missing prompt files: {', '.join(missing_prompts)}")
-        print(Fore.YELLOW + "[Warning] System will continue with available prompts")
-    
     # Calculate combined token count
-    total_tokens = sum(estimate_tokens(content) for content in prompts.values() if content)
+    total_tokens = sum(estimate_tokens(content) for content in prompts.values())
     
     if DEBUG:
         print(Fore.CYAN + f"[Debug] Loaded prompts: {total_tokens:,} tokens total")
         for prompt_type, content in prompts.items():
-            if content:
-                tokens = estimate_tokens(content)
-                print(Fore.CYAN + f"  {prompt_type}: {tokens:,} tokens ({len(content):,} chars)")
-            else:
-                print(Fore.YELLOW + f"  {prompt_type}: MISSING")
+            tokens = estimate_tokens(content)
+            print(Fore.CYAN + f"  {prompt_type}: {tokens:,} tokens ({len(content):,} chars)")
     
     # Apply condensation if budget exceeded
     if total_tokens > SYSTEM_PROMPT_TOKENS:
@@ -651,13 +639,13 @@ async def load_and_optimize_prompts() -> Tuple[str, str, str]:
         individual_threshold = SYSTEM_PROMPT_TOKENS // 3
         
         for prompt_type, content in prompts.items():
-            if content and estimate_tokens(content) > individual_threshold:
+            if estimate_tokens(content) > individual_threshold:
                 if DEBUG:
                     print(Fore.YELLOW + f"[Debug] Condensing {prompt_type} prompt...")
                 prompts[prompt_type] = await condense_prompt(content, prompt_type)
         
         # Verify condensation worked
-        new_total = sum(estimate_tokens(content) for content in prompts.values() if content)
+        new_total = sum(estimate_tokens(content) for content in prompts.values())
         if DEBUG:
             print(Fore.GREEN + f"[Debug] Condensation complete: {new_total:,} tokens (saved {total_tokens - new_total:,})")
     
@@ -815,13 +803,6 @@ async def main():
         print(Fore.CYAN + "[System] Loading and optimizing prompts...")
         system_prompt_top, system_prompt_mid, system_prompt_low = await load_and_optimize_prompts()
         
-        # Check if critical prompts are missing
-        if not system_prompt_top.strip():
-            print(Fore.RED + "[Error] Critical prompt file 'critrules.prompt' is missing!")
-            print(Fore.RED + "[Error] The system cannot function without the core game master rules.")
-            print(Fore.YELLOW + "[Info] Please ensure 'critrules.prompt' exists in the current directory.")
-            return
-        
         # Load conversation memory
         memories = load_memory()
         print(Fore.CYAN + f"[System] Loaded {len(memories)} memories from previous sessions")
@@ -861,17 +842,6 @@ async def main():
             print(Fore.CYAN + f"Story Momentum: {pressure_name.title()} pressure ({momentum_state['narrative_pressure']:.2f})")
             if antagonist.get("name"):
                 print(Fore.CYAN + f"Active Antagonist: {antagonist['name']}")
-        
-        # Show prompt status
-        prompt_status = []
-        if system_prompt_top.strip():
-            prompt_status.append("GM Rules")
-        if system_prompt_mid.strip():
-            prompt_status.append("Companion")
-        if system_prompt_low.strip():
-            prompt_status.append("Narrative")
-        
-        print(Fore.CYAN + f"Active Prompts: {', '.join(prompt_status) if prompt_status else 'None'}")
         
         print(Fore.WHITE + "\nType your message (press Enter twice to send, 'quit' to exit):")
         print(Fore.WHITE + "-" * 60 + "\n")
@@ -921,13 +891,11 @@ async def main():
             # Build system prompts with momentum context
             full_system_top = system_prompt_top + momentum_context
             
-            system_messages = []
-            if full_system_top.strip():
-                system_messages.append({"role": "system", "content": full_system_top})
-            if system_prompt_mid.strip():
-                system_messages.append({"role": "system", "content": system_prompt_mid})
-            if system_prompt_low.strip():
-                system_messages.append({"role": "system", "content": system_prompt_low})
+            system_messages = [
+                {"role": "system", "content": full_system_top},
+                {"role": "system", "content": system_prompt_mid},
+                {"role": "system", "content": system_prompt_low}
+            ]
             
             # Build conversation messages (excluding system prompts and momentum state)
             memory_messages = [
