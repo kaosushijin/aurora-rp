@@ -9,7 +9,7 @@ MODULE ARCHITECTURE:
 main.py - Application coordination and lifecycle management
 nci.py - Ncurses interface and user interaction
 mcp.py - HTTP client for MCP/Ollama server communication  
-emm.py - Enhanced Memory Manager for conversation history
+emm.py - Enhanced Memory Manager with LLM-powered semantic condensation
 sme.py - Story Momentum Engine for narrative pressure management
 
 CRITICAL INTERCONNECTS:
@@ -18,11 +18,11 @@ nci.py → mcp.py: Sends user messages via MCPClient.send_message()
 nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager methods
 nci.py → sme.py: Updates narrative pressure via StoryMomentumEngine.update_pressure()
 mcp.py ← sme.py: Receives story context for enhanced prompting via get_context()
-mcp.py ← emm.py: Receives conversation history for context via get_messages()
+mcp.py ← emm.py: Receives conversation history for context via get_conversation_for_mcp()
 
 DATA FLOW:
 1. User input captured in nci.py
-2. Message stored in emm.py conversation history
+2. Message stored in emm.py conversation history with automatic semantic analysis
 3. Narrative pressure updated in sme.py based on input analysis
 4. Context gathered from emm.py and sme.py for mcp.py request
 5. MCP request sent to server, response received
@@ -30,35 +30,88 @@ DATA FLOW:
 
 DEPENDENCY REQUIREMENTS:
 - Python 3.8+ with curses support
-- httpx library for HTTP communication (optional, degrades gracefully)
+- httpx library for HTTP communication (required for LLM semantic analysis)
+- asyncio for non-blocking LLM calls in memory management
 - JSON for configuration and history storage
-- Threading for non-blocking MCP communication
+- Threading for thread-safe memory operations
 
 CONFIGURATION SYSTEM:
 - aurora_config.json: Application settings and MCP server configuration
-- chat_history_*.json: Conversation history files with timestamp naming
+- chat_history_*.json: Conversation history files with timestamp naming and metadata
 - debug_*.log: Debug logging when --debug flag enabled
+
+ENHANCED MEMORY MANAGER SPECIFICS (emm.py):
+================================================================
+
+SEMANTIC ANALYSIS SYSTEM:
+- LLM-powered message categorization with 6 semantic categories
+- Context-aware analysis using 11-message window (5 before + target + 5 after)
+- 3-tier retry system: Full Analysis → Simple Analysis → Binary Decision
+- No programmatic fallbacks - pure LLM-driven semantic decisions
+
+SEMANTIC CATEGORIES & PRESERVATION RATIOS:
+- story_critical: 0.9 (90% preservation) - Major plot developments, character deaths, world-changing events
+- character_focused: 0.8 (80% preservation) - Relationship changes, character development, personality reveals
+- relationship_dynamics: 0.8 (80% preservation) - Evolving relationships between characters
+- emotional_significance: 0.75 (75% preservation) - Dramatic moments, trust/betrayal, conflict resolution
+- world_building: 0.7 (70% preservation) - New locations, lore, cultural info, political changes
+- standard: 0.4 (40% preservation) - General interactions, travel, routine activities
+
+PROGRESSIVE CONDENSATION SYSTEM:
+- Multi-pass condensation with increasing aggressiveness (up to 3 passes)
+- Aggressiveness reduces preservation ratios by 0.1 per pass
+- Minimum preservation ratio of 0.2 to prevent critical information loss
+- Recent messages (last 5) always protected from condensation
+
+FRAGMENTATION LOGIC:
+- LLM identifies multi-category messages and fragments them appropriately
+- Each fragment assigned individual categories and importance scores
+- Multi-category fragments use highest applicable preservation ratio
+- Example: "Maria thanked you. Leon sneers from the side" → 2 fragments with different categories
+
+LLM PROMPT DESIGN:
+- Structured JSON response formats for reliable parsing
+- Context-aware prompts that consider surrounding conversation
+- Retry-friendly design with simplified fallback prompts
+- Focus on semantic understanding rather than keyword matching
+
+MEMORY MANAGEMENT ALGORITHM:
+1. Add message → check token threshold → trigger condensation if needed
+2. Analyze condensable messages (excluding recent 5) for semantic importance
+3. Apply category-weighted preservation ratios adjusted for aggressiveness level
+4. Group messages for condensation and create LLM-generated summary
+5. Replace condensed messages with summary, preserve important messages
+6. Repeat up to 3 passes if memory still exceeds threshold
+
+THREAD SAFETY & ASYNC OPERATIONS:
+- Thread-safe message storage with locking mechanisms
+- Async LLM calls for semantic analysis without blocking interface
+- Non-blocking condensation operations in separate event loop
+- Safe concurrent access to conversation history
+
+DEBUG INFORMATION FOCUS:
+- Token allocation tracking: before/after condensation, per-category breakdown
+- Semantic analysis results: categories identified, importance scores, fragmentation details
+- Condensation effectiveness: actual vs target preservation ratios, aggressiveness levels
+- LLM interaction tracking: retry attempts, response parsing success/failure
+- Memory utilization metrics and conversation statistics
 
 MODULAR PRESERVATION RULES:
 1. Breaking interconnects between modules will cause system failure
-2. Each module has specific responsibilities that must not overlap
-3. Data flow patterns must be maintained for proper functionality
-4. Configuration and state management handled centrally in main.py
-5. All user interface operations must go through nci.py
-6. All external communication must go through mcp.py
+2. Enhanced Memory Manager maintains specific interface for other modules:
+   - get_conversation_for_mcp(): Returns formatted conversation for MCP requests
+   - add_message(): Thread-safe message storage with automatic condensation
+   - get_messages(): Retrieves conversation history with optional limits
+   - get_memory_stats(): Returns current memory utilization statistics
+3. LLM semantic analysis requires functional MCP configuration in aurora_config.json
+4. File persistence maintains metadata for debugging and analysis
 
 ERROR HANDLING HIERARCHY:
 main.py: Application-level errors and graceful shutdown
 nci.py: Interface errors and display failures
 mcp.py: Network errors and communication failures  
-emm.py: Memory management and storage errors
+emm.py: Memory management errors, LLM analysis failures, condensation errors
 sme.py: Narrative analysis and context generation errors
-
-THREAD SAFETY:
-- emm.py conversation storage is thread-safe
-- mcp.py uses httpx async client in separate thread
-- nci.py manages UI thread safety with proper locking
-- sme.py pressure calculations are stateless and thread-safe
 
 AI MODIFICATION GUIDELINES:
 1. PRESERVE all programmatic interconnects when modifying any module
@@ -67,12 +120,15 @@ AI MODIFICATION GUIDELINES:
 4. DO NOT merge module responsibilities or break the modular boundaries
 5. VERIFY that changes do not break the data flow patterns
 6. TEST interconnects after any modifications to ensure system integrity
+7. LLM prompt modifications require extensive testing for reliability
+8. Semantic category changes must update preservation ratios accordingly
 
 DEBUGGING INFRASTRUCTURE:
 - Centralized DebugLogger class in main.py shared across all modules
-- Debug output to console and debug_*.log files when --debug enabled
-- Memory usage tracking and conversation history statistics
-- MCP communication logging for troubleshooting server issues
+- Enhanced memory debugging with semantic analysis tracking
+- LLM interaction logging for prompt optimization
+- Token usage monitoring and condensation effectiveness metrics
+- Conversation pattern analysis for system optimization
 
 STORY ENGINE SPECIFICS:
 - Story Momentum Engine tracks narrative pressure across conversation
@@ -80,8 +136,16 @@ STORY ENGINE SPECIFICS:
 - Context provided to MCP requests enhances narrative coherence
 - Fallback systems ensure story continuity during server failures
 
-MEMORY MANAGEMENT SPECIFICS:
-- Enhanced Memory Manager handles conversation history optimization
-- Token estimation prevents context overflow in MCP requests
-- Semantic condensation preserves narrative coherence while reducing tokens
-- History files managed with automatic cleanup of old sessions
+PERFORMANCE CONSIDERATIONS:
+- LLM semantic analysis adds latency but provides superior memory management
+- Async operations prevent interface blocking during condensation
+- Context window analysis balances accuracy with computational cost
+- Progressive aggressiveness ensures memory constraints are met
+- File persistence optimized with metadata for quick analysis
+
+SUCCESS METRICS FOR LLM INTEGRATION:
+- Target 95%+ success rate for semantic analysis parsing
+- Effective token management maintaining conversation coherence
+- Robust retry system handling various LLM response formats
+- Preservation of narrative continuity through intelligent condensation
+- Reliable interconnect functionality with other modules
