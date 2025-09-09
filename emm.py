@@ -83,7 +83,7 @@ class EnhancedMemoryManager:
     def _load_mcp_config(self) -> Dict[str, Any]:
         """Load MCP configuration for LLM calls"""
         return {
-            "server_url": "http://127.0.0.1:3456/api/chat",
+            "server_url": "http://127.0.0.1:3456/chat",
             "model": "qwen2.5:14b-instruct-q4_k_m",
             "timeout": 300
         }
