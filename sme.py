@@ -89,7 +89,7 @@ class StoryMomentumEngine:
     def _log_debug(self, message: str):
         """Internal debug logging"""
         if self.debug_logger:
-            self.debug_logger.log_debug(f"SME: {message}")
+            self.debug_logger.debug(f"SME: {message}", "SME")
     
     def _calculate_pressure_change(self, input_text: str) -> float:
         """Calculate pressure change based on user input patterns"""

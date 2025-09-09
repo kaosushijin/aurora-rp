@@ -26,7 +26,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Configuration constants
-DEFAULT_CONFIG_FILE = "aurora_config.json"
+DEFAULT_CONFIG_FILE = "devname_config.json"
 DEBUG_LOG_FILE = "debug.log"
 MAX_LOG_AGE_DAYS = 7
 
@@ -75,27 +75,19 @@ class DebugLogger:
         self.debug(message, "SYSTEM")
 
 class ApplicationConfig:
-    """Application configuration management"""
+    """Application configuration management - hardcoded values"""
     
     def __init__(self, config_file: str = DEFAULT_CONFIG_FILE):
         self.config_file = config_file
-        self.config_data = self._load_config()
+        self.config_data = self._get_hardcoded_config()
     
-    def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from file"""
-        try:
-            with open(self.config_file, 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return self._create_default_config()
-    
-    def _create_default_config(self) -> Dict[str, Any]:
-        """Create default configuration"""
-        default_config = {
+    def _get_hardcoded_config(self) -> Dict[str, Any]:
+        """Return hardcoded configuration - no file creation"""
+        return {
             "mcp": {
-                "server_url": "http://localhost:11434/api/chat",
-                "model": "qwen2.5:14b-instruct",
-                "timeout": 30
+                "server_url": "http://127.0.0.1:3456/chat",
+                "model": "qwen2.5:14b-instruct-q4_k_m",
+                "timeout": 300
             },
             "interface": {
                 "color_theme": "classic",
@@ -109,15 +101,6 @@ class ApplicationConfig:
                 "antagonist_threshold": 0.6
             }
         }
-        
-        # Save default config
-        try:
-            with open(self.config_file, 'w') as f:
-                json.dump(default_config, f, indent=2)
-        except Exception:
-            pass
-        
-        return default_config
     
     def get(self, key: str, default=None):
         """Get configuration value"""
@@ -240,7 +223,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--config',
         default=DEFAULT_CONFIG_FILE,
-        help=f'Configuration file (default: {DEFAULT_CONFIG_FILE})'
+        help=f'Configuration file (default: {DEFAULT_CONFIG_FILE}) - NOTE: Uses hardcoded values'
     )
     
     parser.add_argument(
@@ -321,12 +304,13 @@ def initialize_application(args) -> DevNameRPGClient:
     if debug_logger:
         debug_logger.system("DevName RPG Client starting")
         debug_logger.system(f"Arguments: {vars(args)}")
+        debug_logger.system("Using hardcoded configuration values")
     
-    # Load configuration
+    # Load configuration (hardcoded values)
     config = ApplicationConfig(args.config)
     
     if debug_logger:
-        debug_logger.system(f"Configuration loaded from {args.config}")
+        debug_logger.system("Configuration loaded with hardcoded values")
     
     # Create application
     app = DevNameRPGClient(config, debug_logger)
