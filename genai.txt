@@ -1,0 +1,87 @@
+GENAI.TXT - AI ANALYSIS REFERENCE FOR MODULAR RPG CLIENT
+================================================================
+
+PROJECT SCOPE:
+Modular RPG client application with ncurses interface and MCP server communication.
+Five-module architecture with defined responsibilities and programmatic interconnects.
+
+MODULE ARCHITECTURE:
+main.py - Application coordination and lifecycle management
+nci.py - Ncurses interface and user interaction
+mcp.py - HTTP client for MCP/Ollama server communication  
+emm.py - Enhanced Memory Manager for conversation history
+sme.py - Story Momentum Engine for narrative pressure management
+
+CRITICAL INTERCONNECTS:
+main.py → nci.py: Creates CursesInterface instance, manages application lifecycle
+nci.py → mcp.py: Sends user messages via MCPClient.send_message()
+nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager methods
+nci.py → sme.py: Updates narrative pressure via StoryMomentumEngine.update_pressure()
+mcp.py ← sme.py: Receives story context for enhanced prompting via get_context()
+mcp.py ← emm.py: Receives conversation history for context via get_messages()
+
+DATA FLOW:
+1. User input captured in nci.py
+2. Message stored in emm.py conversation history
+3. Narrative pressure updated in sme.py based on input analysis
+4. Context gathered from emm.py and sme.py for mcp.py request
+5. MCP request sent to server, response received
+6. Response displayed in nci.py interface
+
+DEPENDENCY REQUIREMENTS:
+- Python 3.8+ with curses support
+- httpx library for HTTP communication (optional, degrades gracefully)
+- JSON for configuration and history storage
+- Threading for non-blocking MCP communication
+
+CONFIGURATION SYSTEM:
+- aurora_config.json: Application settings and MCP server configuration
+- chat_history_*.json: Conversation history files with timestamp naming
+- debug_*.log: Debug logging when --debug flag enabled
+
+MODULAR PRESERVATION RULES:
+1. Breaking interconnects between modules will cause system failure
+2. Each module has specific responsibilities that must not overlap
+3. Data flow patterns must be maintained for proper functionality
+4. Configuration and state management handled centrally in main.py
+5. All user interface operations must go through nci.py
+6. All external communication must go through mcp.py
+
+ERROR HANDLING HIERARCHY:
+main.py: Application-level errors and graceful shutdown
+nci.py: Interface errors and display failures
+mcp.py: Network errors and communication failures  
+emm.py: Memory management and storage errors
+sme.py: Narrative analysis and context generation errors
+
+THREAD SAFETY:
+- emm.py conversation storage is thread-safe
+- mcp.py uses httpx async client in separate thread
+- nci.py manages UI thread safety with proper locking
+- sme.py pressure calculations are stateless and thread-safe
+
+AI MODIFICATION GUIDELINES:
+1. PRESERVE all programmatic interconnects when modifying any module
+2. UPDATE this genai.txt file when making architectural changes
+3. MAINTAIN the single responsibility principle for each module
+4. DO NOT merge module responsibilities or break the modular boundaries
+5. VERIFY that changes do not break the data flow patterns
+6. TEST interconnects after any modifications to ensure system integrity
+
+DEBUGGING INFRASTRUCTURE:
+- Centralized DebugLogger class in main.py shared across all modules
+- Debug output to console and debug_*.log files when --debug enabled
+- Memory usage tracking and conversation history statistics
+- MCP communication logging for troubleshooting server issues
+
+STORY ENGINE SPECIFICS:
+- Story Momentum Engine tracks narrative pressure across conversation
+- Pressure influences antagonist selection and story pacing
+- Context provided to MCP requests enhances narrative coherence
+- Fallback systems ensure story continuity during server failures
+
+MEMORY MANAGEMENT SPECIFICS:
+- Enhanced Memory Manager handles conversation history optimization
+- Token estimation prevents context overflow in MCP requests
+- Semantic condensation preserves narrative coherence while reducing tokens
+- History files managed with automatic cleanup of old sessions
