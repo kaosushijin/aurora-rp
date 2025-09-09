@@ -16,8 +16,8 @@ CRITICAL INTERCONNECTS:
 main.py → nci.py: Creates CursesInterface instance, manages application lifecycle
 nci.py → mcp.py: Sends user messages via MCPClient.send_message()
 nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager methods
-nci.py → sme.py: Updates narrative pressure via StoryMomentumEngine.update_pressure()
-mcp.py ← sme.py: Receives story context for enhanced prompting via get_context()
+nci.py → sme.py: Updates narrative pressure via StoryMomentumEngine.process_user_input()
+mcp.py ← sme.py: Receives story context for enhanced prompting via get_story_context()
 mcp.py ← emm.py: Receives conversation history for context via get_conversation_for_mcp()
 
 DATA FLOW:
@@ -89,22 +89,83 @@ THREAD SAFETY & ASYNC OPERATIONS:
 - Non-blocking condensation operations in separate event loop
 - Safe concurrent access to conversation history
 
-DEBUG INFORMATION FOCUS:
-- Token allocation tracking: before/after condensation, per-category breakdown
-- Semantic analysis results: categories identified, importance scores, fragmentation details
-- Condensation effectiveness: actual vs target preservation ratios, aggressiveness levels
-- LLM interaction tracking: retry attempts, response parsing success/failure
-- Memory utilization metrics and conversation statistics
+STORY MOMENTUM ENGINE SPECIFICS (sme.py):
+================================================================
+
+NARRATIVE PRESSURE SYSTEM:
+- Dynamic pressure tracking on 0.0-1.0 scale with pattern-based calculation
+- Real-time story arc progression: Setup → Rising Action → Climax → Resolution
+- Context-adaptive antagonist generation based on user input patterns
+- LLM-first approach with single fallback system (no multiple backup antagonists)
+
+PRESSURE CALCULATION ALGORITHM:
+- Pattern-based analysis using 6 momentum categories: conflict, tension, mystery, exploration, social, resolution
+- Weighted keyword matching with dynamic pressure deltas per category type
+- Length/complexity factors and punctuation intensity analysis
+- Natural pressure decay over time (0.05 per minute) to prevent artificial inflation
+- Rate limiting (2-second cooldown) to prevent spam-induced pressure spikes
+
+MOMENTUM PATTERN CATEGORIES:
+- conflict: Keywords trigger +0.15 pressure (combat, battle, attack, fight)
+- tension: Keywords trigger +0.12 pressure (danger, threat, fear, worry)
+- mystery: Keywords trigger +0.08 pressure (strange, mysterious, hidden, secret)
+- exploration: Keywords trigger +0.05 pressure (examine, search, investigate)
+- social: Keywords trigger +0.03 pressure (talk, negotiate, persuade)
+- resolution: Keywords trigger -0.10 pressure (resolve, solution, complete, finish)
+
+STORY ARC THRESHOLDS:
+- Setup Arc: 0.0-0.3 pressure (calm exploration, building tension)
+- Rising Action: 0.3-0.7 pressure (escalating conflict)
+- Climax: 0.7-0.9 pressure (peak intensity)
+- Resolution: 0.9-1.0 pressure (concluding action)
+
+ANTAGONIST MANAGEMENT:
+- Single context-adaptive antagonist generation (LLM-first design)
+- Introduction threshold: 0.6 pressure level
+- Dynamic antagonist types based on recent user input analysis:
+  * magical_opposition: Corrupted Mage (magic/spell keywords detected)
+  * environmental_threat: Ancient Guardian (exploration/dungeon keywords)
+  * social_conflict: Corrupt Official (town/people keywords)
+  * adaptive_threat: Shadow Entity (default context-adaptive)
+- Threat level scaling with current pressure level
+- Automatic deactivation during Resolution arc
+
+CONTEXT GENERATION FOR MCP:
+- Comprehensive story context including pressure level, arc, narrative state
+- Antagonist information when present (name, motivation, threat level, active status)
+- Pressure trend analysis (rising/falling/stable) based on recent history
+- Narrative state descriptions: calm_exploration, building_tension, escalating_conflict, peak_intensity, concluding_action
+- Tension introduction flags and climax approach indicators
+
+STATE MANAGEMENT:
+- Persistent state saving/loading with JSON serialization
+- Pressure history tracking (last 200 updates with timestamp pairs)
+- User input buffer (last 50 inputs, condensed to 25 when full)
+- Thread-safe operations with debug logging integration
+- Statistics generation: average/max/min pressure, variance calculation, session duration
+
+PRESSURE TESTING & ANALYSIS:
+- Built-in scenario testing: combat, exploration, social, mystery patterns
+- Real-time momentum analysis for individual text inputs
+- Pattern detection and categorization utilities
+- Debug information exposure for system monitoring
 
 MODULAR PRESERVATION RULES:
+================================================================
+
 1. Breaking interconnects between modules will cause system failure
 2. Enhanced Memory Manager maintains specific interface for other modules:
    - get_conversation_for_mcp(): Returns formatted conversation for MCP requests
    - add_message(): Thread-safe message storage with automatic condensation
    - get_messages(): Retrieves conversation history with optional limits
    - get_memory_stats(): Returns current memory utilization statistics
-3. LLM semantic analysis requires functional MCP configuration in aurora_config.json
-4. File persistence maintains metadata for debugging and analysis
+3. Story Momentum Engine maintains specific interface for other modules:
+   - process_user_input(): Updates pressure and returns processing results
+   - get_story_context(): Returns story context for MCP integration
+   - reset_story_state(): Clears state for new sessions
+   - get_pressure_stats(): Returns pressure analytics and statistics
+4. LLM semantic analysis requires functional MCP configuration in aurora_config.json
+5. File persistence maintains metadata for debugging and analysis
 
 ERROR HANDLING HIERARCHY:
 main.py: Application-level errors and graceful shutdown
@@ -122,6 +183,8 @@ AI MODIFICATION GUIDELINES:
 6. TEST interconnects after any modifications to ensure system integrity
 7. LLM prompt modifications require extensive testing for reliability
 8. Semantic category changes must update preservation ratios accordingly
+9. Story pressure thresholds and antagonist generation logic must remain context-adaptive
+10. Pattern-based pressure calculation should maintain balance between categories
 
 DEBUGGING INFRASTRUCTURE:
 - Centralized DebugLogger class in main.py shared across all modules
@@ -129,12 +192,8 @@ DEBUGGING INFRASTRUCTURE:
 - LLM interaction logging for prompt optimization
 - Token usage monitoring and condensation effectiveness metrics
 - Conversation pattern analysis for system optimization
-
-STORY ENGINE SPECIFICS:
-- Story Momentum Engine tracks narrative pressure across conversation
-- Pressure influences antagonist selection and story pacing
-- Context provided to MCP requests enhances narrative coherence
-- Fallback systems ensure story continuity during server failures
+- Story pressure tracking and antagonist lifecycle monitoring
+- Narrative arc progression analysis and context generation verification
 
 PERFORMANCE CONSIDERATIONS:
 - LLM semantic analysis adds latency but provides superior memory management
@@ -142,6 +201,9 @@ PERFORMANCE CONSIDERATIONS:
 - Context window analysis balances accuracy with computational cost
 - Progressive aggressiveness ensures memory constraints are met
 - File persistence optimized with metadata for quick analysis
+- Story pressure calculation optimized for real-time performance
+- Rate limiting prevents computational overhead from input spam
+- Pattern matching uses efficient keyword detection algorithms
 
 SUCCESS METRICS FOR LLM INTEGRATION:
 - Target 95%+ success rate for semantic analysis parsing
@@ -149,3 +211,6 @@ SUCCESS METRICS FOR LLM INTEGRATION:
 - Robust retry system handling various LLM response formats
 - Preservation of narrative continuity through intelligent condensation
 - Reliable interconnect functionality with other modules
+- Smooth story pressure progression without artificial spikes
+- Context-appropriate antagonist generation matching user input patterns
+- Effective narrative arc transitions based on pressure thresholds
