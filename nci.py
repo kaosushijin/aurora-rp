@@ -1,10 +1,11 @@
-# Chunk 1/4 - nci.py - Core Classes and Dependencies
+# Chunk 1/4 - nci.py - Core Classes and Dependencies with Prompt Integration
 #!/usr/bin/env python3
 """
 DevName RPG Client - Ncurses Interface Module (nci.py)
 
 Module architecture and interconnects documented in genai.txt
 Maintains programmatic interfaces with mcp.py, emm.py, and sme.py
+Integrates loaded prompts from main.py for enhanced RPG experience
 """
 
 import curses
@@ -129,7 +130,7 @@ class InputValidator:
         return True, ""
 
 class CursesInterface:
-    """Ncurses interface for RPG client"""
+    """Ncurses interface for RPG client with integrated prompt system"""
     
     def __init__(self, debug_logger=None, config=None):
         self.debug_logger = debug_logger
@@ -169,10 +170,13 @@ class CursesInterface:
         self.mcp_client = MCPClient(debug_logger=debug_logger)
         self.sme = StoryMomentumEngine(debug_logger=debug_logger)
         
+        # PROMPT INTEGRATION - Load from config passed by main.py
+        self.loaded_prompts = self.config.get('prompts', {})
+        
         self._configure_components()
     
     def _configure_components(self):
-        """Configure modules from config"""
+        """Configure modules from config with prompt integration"""
         if not self.config:
             return
         
@@ -182,6 +186,13 @@ class CursesInterface:
             self.mcp_client.server_url = mcp_config['server_url']
         if 'model' in mcp_config:
             self.mcp_client.model = mcp_config['model']
+        if 'timeout' in mcp_config:
+            self.mcp_client.timeout = mcp_config['timeout']
+        
+        # Set base system prompt from loaded critrules prompt
+        if self.loaded_prompts.get('critrules'):
+            self.mcp_client.system_prompt = self.loaded_prompts['critrules']
+            self._log_debug("Base system prompt set from critrules")
     
     def _log_debug(self, message: str, category: str = "INTERFACE"):
         """Debug logging helper"""
@@ -232,7 +243,7 @@ class CursesInterface:
         # Create windows
         self._create_windows()
         
-        # Show initial content
+        # Show initial content with prompt status
         self._show_welcome_message()
         
         # Test MCP connection
@@ -304,12 +315,34 @@ class CursesInterface:
             self.stdscr.attroff(curses.color_pair(border_color))
     
     def _show_welcome_message(self):
-        """Show initial welcome message"""
+        """Show initial welcome message with prompt status"""
         welcome_msg = DisplayMessage(
             "DevName RPG Client started. Type /help for commands.",
             "system"
         )
         self.display_messages.append(welcome_msg)
+        
+        # Show prompt status
+        prompt_status = []
+        if self.loaded_prompts.get('critrules'):
+            prompt_status.append("GM Rules")
+        if self.loaded_prompts.get('companion'):
+            prompt_status.append("Companion")
+        if self.loaded_prompts.get('lowrules'):
+            prompt_status.append("Narrative")
+        
+        if prompt_status:
+            status_msg = DisplayMessage(
+                f"Active prompts: {', '.join(prompt_status)}",
+                "system"
+            )
+            self.display_messages.append(status_msg)
+        else:
+            status_msg = DisplayMessage(
+                "Warning: No prompts loaded",
+                "system"
+            )
+            self.display_messages.append(status_msg)
     
     def _test_mcp_connection(self):
         """Test MCP server connection"""
@@ -332,7 +365,7 @@ class CursesInterface:
         self.status_win.refresh()
         self.stdscr.refresh()
 
-# Chunk 3/4 - nci.py - Input Processing and Display Updates
+# Chunk 3/4 - nci.py - Input Processing and MCP Integration with Prompts
 
     def _run_main_loop(self):
         """Main input processing loop"""
@@ -426,7 +459,7 @@ class CursesInterface:
             # Update story momentum
             self.sme.process_user_input(user_input)
             
-            # Send to MCP server
+            # Send to MCP server with integrated prompts
             self._send_mcp_request(user_input)
             
         except Exception as e:
@@ -448,11 +481,34 @@ class CursesInterface:
         elif cmd.startswith('/theme '):
             theme_name = cmd[7:].strip()
             self._change_theme(theme_name)
+        elif cmd == '/prompts':
+            self._show_prompt_status()
         else:
             self.add_error_message(f"Unknown command: {command}")
     
+    def _build_system_messages(self, story_context: str) -> List[Dict[str, str]]:
+        """Build system messages with integrated prompts and story context"""
+        system_messages = []
+        
+        # Primary system prompt (GM rules with story context)
+        if self.loaded_prompts.get('critrules'):
+            primary_prompt = self.loaded_prompts['critrules']
+            if story_context:
+                primary_prompt += f"\n\n**STORY CONTEXT**: {story_context}"
+            system_messages.append({"role": "system", "content": primary_prompt})
+        
+        # Companion prompt
+        if self.loaded_prompts.get('companion'):
+            system_messages.append({"role": "system", "content": self.loaded_prompts['companion']})
+        
+        # Narrative rules prompt  
+        if self.loaded_prompts.get('lowrules'):
+            system_messages.append({"role": "system", "content": self.loaded_prompts['lowrules']})
+        
+        return system_messages
+    
     def _send_mcp_request(self, user_input: str):
-        """Send request to MCP server"""
+        """Send request to MCP server with integrated prompt system"""
         try:
             # Get conversation history
             conversation_history = self.memory_manager.get_conversation_for_mcp()
@@ -461,16 +517,35 @@ class CursesInterface:
             story_context = self.sme.get_story_context()
             context_str = self._format_story_context(story_context)
             
-            # Send to MCP
-            response = self.mcp_client.send_message(
-                user_input,
-                conversation_history=conversation_history,
-                story_context=context_str
-            )
+            # Build integrated system messages with all prompts
+            system_messages = self._build_system_messages(context_str)
             
-            # Store and display response
-            self.memory_manager.add_message(response, MessageType.ASSISTANT)
-            self.add_assistant_message(response)
+            # Combine system messages + conversation history + current input
+            all_messages = system_messages + conversation_history + [{"role": "user", "content": user_input}]
+            
+            # Make direct MCP request with custom message structure
+            try:
+                response_data = self.mcp_client._execute_request({
+                    "model": self.mcp_client.model,
+                    "messages": all_messages,
+                    "stream": False
+                })
+                
+                # Store and display response
+                self.memory_manager.add_message(response_data, MessageType.ASSISTANT)
+                self.add_assistant_message(response_data)
+                
+            except Exception as mcp_error:
+                # Fallback to standard send_message if custom approach fails
+                self._log_debug(f"Custom MCP call failed, using fallback: {mcp_error}")
+                response = self.mcp_client.send_message(
+                    user_input,
+                    conversation_history=conversation_history,
+                    story_context=context_str
+                )
+                
+                self.memory_manager.add_message(response, MessageType.ASSISTANT)
+                self.add_assistant_message(response)
             
         except Exception as e:
             self.add_error_message(f"MCP request failed: {e}")
@@ -478,7 +553,7 @@ class CursesInterface:
             self.set_input_blocked(False)
     
     def _format_story_context(self, context: Dict[str, Any]) -> str:
-        """Format story context for MCP"""
+        """Format story context for integration"""
         if not context:
             return ""
         
@@ -497,7 +572,9 @@ class CursesInterface:
             parts.append(f"Antagonist: {name} (threat: {threat:.2f})")
         
         return " | ".join(parts)
-    
+
+# Chunk 4/4 - nci.py - Display Updates and Utility Methods
+
     def _update_output_display(self):
         """Update conversation output display"""
         self.output_win.clear()
@@ -554,7 +631,7 @@ class CursesInterface:
             pass
     
     def _update_status_display(self):
-        """Update status line"""
+        """Update status line with prompt count"""
         self.status_win.clear()
         
         # Build status components
@@ -578,6 +655,10 @@ class CursesInterface:
         else:
             status_parts.append("MCP: Offline")
         
+        # Prompt count
+        prompt_count = len([p for p in self.loaded_prompts.values() if p.strip()])
+        status_parts.append(f"Prompts: {prompt_count}")
+        
         status_text = " | ".join(status_parts)
         
         # Truncate if needed
@@ -594,8 +675,6 @@ class CursesInterface:
                 self.status_win.addstr(0, 0, status_text)
         except curses.error:
             pass
-
-# Chunk 4/4 - nci.py - Message Management and Utility Methods
 
     def add_user_message(self, content: str):
         """Add user message to display"""
@@ -645,9 +724,10 @@ class CursesInterface:
         help_messages = [
             "Available commands:",
             "/help - Show this help",
-            "/quit, /exit - Exit application",
+            "/quit, /exit - Exit application", 
             "/clear - Clear message display",
             "/stats - Show system statistics",
+            "/prompts - Show prompt file status",
             "/theme <name> - Change color theme (classic, dark, bright)",
             "",
             "Use arrow keys to scroll through chat history"
@@ -678,6 +758,27 @@ class CursesInterface:
         # Display stats
         self.add_system_message(f"Display: {len(self.display_messages)} messages, "
                                f"Scroll offset: {self.scroll_offset}")
+    
+    def _show_prompt_status(self):
+        """Show prompt file status and details"""
+        self.add_system_message("Prompt Status:")
+        
+        prompt_names = {
+            'critrules': 'GM Rules (Critical)',
+            'companion': 'Companion Character', 
+            'lowrules': 'Narrative Guidelines'
+        }
+        
+        for prompt_type, display_name in prompt_names.items():
+            content = self.loaded_prompts.get(prompt_type, '')
+            if content.strip():
+                token_count = len(content) // 4
+                self.add_system_message(f"  {display_name}: Loaded ({token_count:,} tokens)")
+            else:
+                self.add_system_message(f"  {display_name}: Missing")
+        
+        total_tokens = sum(len(content) // 4 for content in self.loaded_prompts.values() if content.strip())
+        self.add_system_message(f"Total prompt tokens: {total_tokens:,}")
     
     def _change_theme(self, theme_name: str):
         """Change color theme"""
