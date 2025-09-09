@@ -1,0 +1,1001 @@
+# DO NOT FACTOR INTO PROJECT CODE - THIS FILE IS PROVIDED ONLY AS A REFERENCE DOCUMENT FOR THE ENHANCED MEMORY MANAGER AND STORY MOMENTUM ENGINE AS THEY WERE IN THE LAST MONOLITHIC VERSION OF THE RPG CLIENT
+
+import asyncio
+import json
+from pathlib import Path
+from uuid import uuid4
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Tuple
+import httpx
+import sys
+from colorama import init, Fore, Style
+import textwrap
+import shutil
+
+# ------------------ Initialization ------------------ #
+init(autoreset=True)
+DEBUG = "--debug" in sys.argv
+
+# ------------------ Configuration ------------------ #
+MCP_URL = "http://127.0.0.1:3456/chat"
+MODEL = "qwen2.5:14b-instruct-q4_k_m"
+SAVE_FILE = Path("memory.json")
+TIMEOUT = 300.0  # seconds
+
+# Context window and token allocation
+CONTEXT_WINDOW = 32000
+SYSTEM_PROMPT_TOKENS = 5000  # Token budget for all system prompts combined
+MOMENTUM_ANALYSIS_TOKENS = 6000  # Token budget for momentum analysis
+
+REMAINING_TOKENS = CONTEXT_WINDOW - SYSTEM_PROMPT_TOKENS - MOMENTUM_ANALYSIS_TOKENS
+MEMORY_FRACTION = 0.7
+MAX_MEMORY_TOKENS = int(REMAINING_TOKENS * MEMORY_FRACTION)  # ~14,700 tokens
+MAX_USER_INPUT_TOKENS = int(REMAINING_TOKENS * (1 - MEMORY_FRACTION))  # ~6,300 tokens
+
+# Memory condensation strategies by content type
+CONDENSATION_STRATEGIES = {
+    "story_critical": {
+        "threshold": 100,  # Start condensing after 100 messages
+        "preservation_ratio": 0.8,  # Keep 80% of content
+        "instruction": (
+            "Preserve all major plot developments, character deaths, world-changing events, "
+            "key player decisions, and their consequences. Use decisive language highlighting "
+            "the significance of events. Compress dialogue while maintaining essential meaning."
+        )
+    },
+    "character_focused": {
+        "threshold": 80,
+        "preservation_ratio": 0.7,  # Keep 70% of content
+        "instruction": (
+            "Preserve relationship changes, trust/betrayal moments, character motivations, "
+            "personality reveals, Aurora's development, and NPC traits. Emphasize emotional "
+            "weight and relationship dynamics. Condense descriptions while keeping character essence."
+        )
+    },
+    "world_building": {
+        "threshold": 60,
+        "preservation_ratio": 0.6,  # Keep 60% of content
+        "instruction": (
+            "Preserve new locations, lore revelations, cultural information, political changes, "
+            "economic systems, magical discoveries, and historical context. Provide rich "
+            "foundational details. Compress atmospheric descriptions while keeping key world facts."
+        )
+    },
+    "standard": {
+        "threshold": 40,
+        "preservation_ratio": 0.4,  # Keep 40% of content
+        "instruction": (
+            "Preserve player actions and immediate consequences for continuity. Compress "
+            "everything else aggressively while maintaining basic story flow."
+        )
+    }
+}
+
+# ------------------ Prompt Files ------------------ #
+PROMPT_TOP_FILE = Path("critrules.prompt")
+PROMPT_MID_FILE = Path("companion.prompt")
+PROMPT_LOW_FILE = Path("lowrules.prompt")
+
+def load_prompt(file_path: Path) -> str:
+    """Load prompt file with graceful handling of missing files."""
+    if not file_path.exists():
+        print(Fore.YELLOW + f"[Warning] Prompt file not found: {file_path}")
+        print(Fore.YELLOW + f"[Warning] Using empty prompt for {file_path.stem}")
+        return ""
+    return file_path.read_text(encoding="utf-8").strip()
+
+# ------------------ Configuration Validation ------------------ #
+def validate_token_allocation():
+    """Ensure token allocation doesn't exceed context window"""
+    total_allocated = (SYSTEM_PROMPT_TOKENS + MOMENTUM_ANALYSIS_TOKENS +
+                      MAX_MEMORY_TOKENS + MAX_USER_INPUT_TOKENS)
+
+    if total_allocated > CONTEXT_WINDOW:
+        raise ValueError(f"Token allocation ({total_allocated:,}) exceeds context window ({CONTEXT_WINDOW:,})")
+
+    if DEBUG:
+        utilization = (total_allocated / CONTEXT_WINDOW) * 100
+        print(Fore.GREEN + f"[Debug] Token allocation validated: {utilization:.1f}% utilization")
+        print(Fore.YELLOW + f"[Debug] Token Budget Allocation:")
+        print(Fore.YELLOW + f"  System prompts: {SYSTEM_PROMPT_TOKENS:,} tokens ({SYSTEM_PROMPT_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
+        print(Fore.YELLOW + f"  Momentum analysis: {MOMENTUM_ANALYSIS_TOKENS:,} tokens ({MOMENTUM_ANALYSIS_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
+        print(Fore.YELLOW + f"  Memory: {MAX_MEMORY_TOKENS:,} tokens ({MAX_MEMORY_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
+        print(Fore.YELLOW + f"  User input: {MAX_USER_INPUT_TOKENS:,} tokens ({MAX_USER_INPUT_TOKENS/CONTEXT_WINDOW*100:.1f}%)")
+        print(Fore.YELLOW + f"  Total: {total_allocated:,} tokens")
+        print(Fore.YELLOW + f"  Safety margin: {CONTEXT_WINDOW - total_allocated:,} tokens")
+
+    return True
+
+# ------------------ Utility Functions ------------------ #
+def get_terminal_width(default=80):
+    try:
+        return shutil.get_terminal_size((default, 20)).columns
+    except Exception:
+        return default
+
+def print_wrapped(text: str, color=Fore.GREEN, indent: int = 0):
+    width = get_terminal_width() - indent
+    wrapper = textwrap.TextWrapper(width=width, subsequent_indent=' ' * indent)
+    paragraphs = text.split("\n\n")
+    for i, para in enumerate(paragraphs):
+        lines = para.splitlines()
+        wrapped_para = "\n".join(wrapper.fill(line) for line in lines)
+        print(color + wrapped_para)
+        if i < len(paragraphs) - 1:
+            print("")
+
+# ------------------ Token Estimation ------------------ #
+estimate_tokens = lambda text: max(1, len(text) // 4)
+
+# ------------------ Input Validation ------------------ #
+def validate_user_input_length(user_input: str) -> tuple[bool, str]:
+    """
+    Validate user input length and provide helpful feedback if too long.
+    """
+    input_tokens = estimate_tokens(user_input)
+
+    if input_tokens <= MAX_USER_INPUT_TOKENS:
+        return True, ""
+
+    char_count = len(user_input)
+    max_chars = MAX_USER_INPUT_TOKENS * 4
+
+    warning = (f"Input too long ({input_tokens:,} tokens, {char_count:,} chars). "
+              f"Maximum: {MAX_USER_INPUT_TOKENS:,} tokens ({max_chars:,} chars). "
+              f"Please shorten your input or split it into multiple messages.")
+
+    return False, warning
+
+# ------------------ Memory Management ------------------ #
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+def load_memory():
+    if not SAVE_FILE.exists():
+        return []
+    try:
+        with open(SAVE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return []
+
+def save_memory(memories):
+    with open(SAVE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(memories, f, indent=2, ensure_ascii=False)
+
+def add_memory(memories, role, content):
+    memory = {
+        "id": str(uuid4()),
+        "role": role,
+        "content": content,
+        "timestamp": now_iso()
+    }
+    memories.append(memory)
+    save_memory(memories)
+
+# ------------------ MCP Communication ------------------ #
+async def call_mcp(messages, max_retries=3):
+    """Call MCP with automatic retry logic for robustness."""
+    payload = {
+        "model": MODEL,
+        "messages": messages,
+        "stream": False
+    }
+    
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+                response = await client.post(MCP_URL, json=payload)
+                response.raise_for_status()
+                result = response.json()
+                return result.get("message", {}).get("content", "")
+        except (httpx.TimeoutException, httpx.RequestError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff
+                if DEBUG:
+                    print(Fore.YELLOW + f"[Debug] MCP call failed (attempt {attempt + 1}), retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            else:
+                raise e
+
+# ------------------ Antagonist System Functions ------------------ #
+
+async def generate_antagonist(memories, max_attempts=3):
+    """Generate a high-quality antagonist based on story context."""
+    
+    # Prepare story context from recent memories
+    story_context = "\n".join([
+        f"{mem['role']}: {mem['content'][:300]}"  # Truncate for token efficiency
+        for mem in memories[-15:]  # Recent context
+        if mem.get("role") in ["user", "assistant"]
+    ])
+    
+    antagonist_prompt = f"""
+You are creating an antagonist for an ongoing RPG story. Based on the story context, 
+generate a compelling antagonist that fits naturally into the narrative.
+
+Recent Story Context:
+{story_context}
+
+Create an antagonist with:
+1. Name: A fitting name for the setting
+2. Motivation: Clear, understandable goals that conflict with the player
+3. Commitment Level: Start at "testing" (will escalate based on story events)
+4. Resources: What power, influence, or assets do they have?
+5. Personality: Key traits that drive their behavior
+6. Background: Brief history that explains their motivation
+
+Provide a JSON response with these fields:
+{{
+    "name": "Antagonist Name",
+    "motivation": "Clear motivation that opposes player goals",
+    "commitment_level": "testing",
+    "resources_available": ["resource1", "resource2", "resource3"],
+    "resources_lost": [],
+    "personality_traits": ["trait1", "trait2", "trait3"],
+    "background": "Brief background story",
+    "threat_level": "moderate"
+}}
+"""
+    
+    for attempt in range(max_attempts):
+        try:
+            response = await call_mcp([{"role": "system", "content": antagonist_prompt}])
+            antagonist_data = json.loads(response)
+            
+            # Validate required fields
+            required_fields = ["name", "motivation", "commitment_level"]
+            if all(field in antagonist_data for field in required_fields):
+                # Ensure lists exist
+                antagonist_data.setdefault("resources_available", [])
+                antagonist_data.setdefault("resources_lost", [])
+                antagonist_data.setdefault("personality_traits", [])
+                
+                if DEBUG:
+                    print(Fore.GREEN + f"[Debug] Generated antagonist: {antagonist_data['name']}")
+                
+                return antagonist_data
+                
+        except (json.JSONDecodeError, KeyError) as e:
+            if DEBUG:
+                print(Fore.YELLOW + f"[Debug] Antagonist generation attempt {attempt + 1} failed: {e}")
+    
+    # Fallback antagonist if generation fails
+    return {
+        "name": "The Shadow",
+        "motivation": "seeks to disrupt the player's journey",
+        "commitment_level": "testing",
+        "resources_available": ["stealth", "cunning", "local knowledge"],
+        "resources_lost": [],
+        "personality_traits": ["mysterious", "patient", "observant"],
+        "background": "A mysterious figure who opposes those who disturb the natural order",
+        "threat_level": "moderate"
+    }
+
+def validate_antagonist_quality(antagonist):
+    """Validate that an antagonist has sufficient detail and quality."""
+    if not isinstance(antagonist, dict):
+        return False
+    
+    # Check required fields
+    required_fields = ["name", "motivation", "commitment_level"]
+    if not all(field in antagonist and antagonist[field] for field in required_fields):
+        return False
+    
+    # Check for meaningful content (not just defaults)
+    if antagonist["name"] in ["Unknown Antagonist", "Unknown Adversary", "The Shadow"]:
+        return False
+    
+    if len(antagonist["motivation"]) < 10:  # Too brief
+        return False
+    
+    return True
+
+async def analyze_resource_loss(conversation_text, antagonist):
+    """Analyze recent conversation for antagonist resource losses."""
+    if not antagonist:
+        return {"events": [], "resources_lost": []}
+    
+    analysis_prompt = f"""
+Analyze this RPG conversation for events where the antagonist {antagonist['name']} 
+might have lost resources, suffered setbacks, or been exposed.
+
+Antagonist: {antagonist['name']} - {antagonist['motivation']}
+Available Resources: {', '.join(antagonist.get('resources_available', []))}
+
+Recent Conversation:
+{conversation_text[-2000:]}  # Last 2000 chars
+
+Look for:
+- Direct confrontations or defeats
+- Exposure of plans or identity
+- Loss of allies, resources, or territory
+- Failed schemes or setbacks
+
+Provide JSON response:
+{{
+    "events": ["event1", "event2"],
+    "resources_lost": ["resource1", "resource2"]
+}}
+"""
+    
+    try:
+        response = await call_mcp([{"role": "system", "content": analysis_prompt}])
+        return json.loads(response)
+    except (json.JSONDecodeError, Exception):
+        return {"events": [], "resources_lost": []}
+
+def calculate_pressure_floor_ratchet(current_state, recent_events):
+    """Calculate the new pressure floor based on escalation events."""
+    current_floor = current_state.get("base_pressure_floor", 0.0)
+    escalation_count = current_state.get("escalation_count", 0)
+    
+    # Increment escalation count if significant events occurred
+    if recent_events:
+        escalation_count += len(recent_events)
+    
+    # Calculate new floor (ratcheting upward)
+    new_floor = min(0.3, current_floor + (escalation_count * 0.02))
+    
+    return max(current_floor, new_floor)  # Never decrease
+
+# ------------------ Story Momentum Engine Core Functions ------------------ #
+
+def get_momentum_state(memories) -> Dict[str, Any] | None:
+    """Retrieve current momentum state from memory."""
+    for memory in reversed(memories):
+        if memory.get("role") == "momentum_state":
+            return memory["content"]
+    return None
+
+def update_momentum_state(memories, new_state) -> None:
+    """Update or create momentum state in memory."""
+    for i, memory in enumerate(memories):
+        if memory.get("role") == "momentum_state":
+            memories[i]["content"] = new_state
+            memories[i]["timestamp"] = now_iso()
+            save_memory(memories)
+            return
+    
+    # Create new momentum state entry
+    add_memory(memories, "momentum_state", new_state)
+
+def create_initial_momentum_state() -> Dict[str, Any]:
+    """Create initial momentum state structure."""
+    return {
+        "narrative_pressure": 0.05,
+        "pressure_source": "antagonist",
+        "manifestation_type": "exploration",
+        "escalation_count": 0,
+        "base_pressure_floor": 0.0,
+        "last_analysis_count": 0,
+        "antagonist": None  # Generated during first analysis
+    }
+
+def should_analyze_momentum(memories) -> bool:
+    """Check if momentum analysis should be triggered."""
+    total_messages = count_total_messages(memories)
+    current_state = get_momentum_state(memories)
+    
+    if current_state is None:
+        return total_messages >= 15  # First analysis after grace period
+    
+    last_analysis = current_state.get("last_analysis_count", 0)
+    return total_messages - last_analysis >= 15
+
+def count_total_messages(memories) -> int:
+    """Count all user and assistant messages."""
+    return sum(1 for mem in memories 
+               if mem.get("role") in ["user", "assistant"])
+
+def prepare_momentum_analysis_context(memories, current_state, max_tokens=None):
+    """
+    Prepare context for momentum analysis within the allocated budget.
+    """
+    if max_tokens is None:
+        max_tokens = MOMENTUM_ANALYSIS_TOKENS
+    
+    # Filter to relevant conversation messages
+    conversation_messages = [
+        mem for mem in memories 
+        if mem.get("role") in ["user", "assistant"] and "content" in mem
+    ]
+    
+    # Start with recent messages and work backwards
+    context_messages = []
+    total_tokens = 0
+    
+    # Reserve tokens for analysis prompt overhead
+    analysis_overhead = max_tokens // 4  # Reserve 25% for analysis instructions
+    available_tokens = max_tokens - analysis_overhead
+    
+    for message in reversed(conversation_messages):
+        message_tokens = estimate_tokens(message["content"])
+        if total_tokens + message_tokens <= available_tokens:
+            context_messages.insert(0, message)
+            total_tokens += message_tokens
+        else:
+            break
+    
+    if DEBUG:
+        print(Fore.CYAN + f"[Debug] Momentum analysis context: {len(context_messages)} messages, {total_tokens} tokens")
+    
+    return context_messages, total_tokens
+
+def validate_momentum_state(state_data) -> Dict[str, Any]:
+    """Validate and sanitize momentum state data."""
+    if not isinstance(state_data, dict):
+        return create_initial_momentum_state()
+    
+    # Clamp numeric values to valid ranges
+    state_data["narrative_pressure"] = max(0.0, min(1.0, 
+                                          state_data.get("narrative_pressure", 0.1)))
+    state_data["base_pressure_floor"] = max(0.0, min(0.3, 
+                                           state_data.get("base_pressure_floor", 0.0)))
+    state_data["escalation_count"] = max(0, state_data.get("escalation_count", 0))
+    
+    # Validate enums with defaults
+    if state_data.get("pressure_source") not in ["antagonist", "environment", "social", "discovery"]:
+        state_data["pressure_source"] = "antagonist"
+    
+    if state_data.get("manifestation_type") not in ["exploration", "tension", "conflict", "resolution"]:
+        state_data["manifestation_type"] = "exploration"
+    
+    # Validate antagonist data
+    antagonist = state_data.get("antagonist", {})
+    if not isinstance(antagonist.get("name"), str):
+        antagonist["name"] = "Unknown Antagonist"
+    if not isinstance(antagonist.get("motivation"), str):
+        antagonist["motivation"] = "seeks to oppose the player"
+    if not isinstance(antagonist.get("resources_lost"), list):
+        antagonist["resources_lost"] = []
+    if antagonist.get("commitment_level") not in ["testing", "engaged", "desperate", "cornered"]:
+        antagonist["commitment_level"] = "testing"
+    
+    state_data["antagonist"] = antagonist
+    return state_data
+
+async def analyze_momentum(memories, current_state, is_first_analysis=False):
+    """
+    Unified momentum analysis function that handles both first-time and regular analysis.
+    """
+    
+    # 1. Token limit validation using allocated budget
+    context_messages, context_tokens = prepare_momentum_analysis_context(
+        memories, current_state, max_tokens=MOMENTUM_ANALYSIS_TOKENS
+    )
+    
+    # 2. Handle first-time antagonist generation
+    if is_first_analysis or not current_state.get("antagonist"):
+        if DEBUG:
+            print(Fore.YELLOW + "[Debug] Generating antagonist for momentum analysis...")
+        antagonist = await generate_antagonist(memories)
+        current_state["antagonist"] = antagonist
+    
+    # 3. Resource loss analysis
+    conversation_text = "\n".join([f"{m['role']}: {m['content']}" 
+                                  for m in context_messages[-10:]])
+    events_occurred = await analyze_resource_loss(conversation_text, 
+                                                 current_state.get("antagonist"))
+    
+    # 4. Calculate pressure floor ratcheting
+    new_pressure_floor = calculate_pressure_floor_ratchet(current_state, 
+                                                         events_occurred["events"])
+    
+    # 5. Main momentum analysis
+    momentum_prompt = f"""
+You are analyzing story momentum in an ongoing RPG narrative. Based on the conversation 
+and current momentum state, provide updated momentum metrics.
+
+Current Momentum State: {json.dumps(current_state, indent=2)}
+Recent Events Detected: {events_occurred}
+Calculated Pressure Floor: {new_pressure_floor}
+
+Recent Conversation:
+{conversation_text}
+
+Analyze:
+1. How has narrative pressure changed? (0.0-1.0 scale)
+2. What is the pressure source? (antagonist/environment/social/discovery)
+3. How is momentum manifesting? (exploration/tension/conflict/resolution)
+4. What is the player's behavioral pattern? (aggressive/cautious/avoidant)
+5. How should the antagonist respond given their commitment level?
+6. What resources has the antagonist lost, if any?
+
+Provide a JSON response with updated momentum state including all fields from the current state.
+"""
+
+    if DEBUG:
+        print(Fore.CYAN + f"[Debug] Running momentum analysis with {len(context_messages)} context messages")
+    
+    # 6. Execute analysis with error handling
+    try:
+        response = await call_mcp([{"role": "system", "content": momentum_prompt}])
+        analysis_result = json.loads(response)
+        
+        # 7. Validate and update state
+        validated_state = validate_momentum_state(analysis_result)
+        validated_state["last_analysis_count"] = count_total_messages(memories)
+        validated_state["base_pressure_floor"] = new_pressure_floor
+        
+        # 8. Validate antagonist quality and regenerate if needed
+        antagonist = validated_state.get("antagonist", {})
+        if not validate_antagonist_quality(antagonist):
+            if DEBUG:
+                print(Fore.YELLOW + "[Debug] Antagonist quality low, attempting regeneration...")
+            try:
+                enhanced_antagonist = await generate_antagonist(memories)
+                validated_state["antagonist"] = enhanced_antagonist
+                if DEBUG:
+                    print(Fore.GREEN + f"[Debug] Enhanced antagonist: {enhanced_antagonist.get('name', 'Unknown')}")
+            except Exception as e:
+                if DEBUG:
+                    print(Fore.RED + f"[Debug] Antagonist regeneration failed: {e}")
+        
+        if DEBUG:
+            print(Fore.GREEN + f"[Debug] Momentum analysis complete. Pressure: {validated_state['narrative_pressure']:.2f}")
+        
+        return validated_state
+        
+    except (json.JSONDecodeError, KeyError) as e:
+        if DEBUG:
+            print(Fore.RED + f"[Debug] Momentum analysis failed: {e}")
+        # Return safe updated state
+        safe_state = current_state.copy()
+        safe_state["last_analysis_count"] = count_total_messages(memories)
+        safe_state["base_pressure_floor"] = new_pressure_floor
+        return safe_state
+
+def get_pressure_name(pressure_level):
+    """Convert pressure level to named range."""
+    if pressure_level < 0.1:
+        return "low"
+    elif pressure_level < 0.3:
+        return "building" 
+    elif pressure_level < 0.6:
+        return "critical"
+    else:
+        return "explosive"
+
+def generate_momentum_context_prompt(momentum_state):
+    """Generate enhanced system prompt context with detailed momentum information."""
+    antagonist = momentum_state["antagonist"]
+    pressure_name = get_pressure_name(momentum_state["narrative_pressure"])
+    quality_indicator = "well-established" if validate_antagonist_quality(antagonist) else "developing"
+    
+    return f"""
+**MOMENTUM CONTEXT**: Current narrative pressure is {pressure_name} ({momentum_state['narrative_pressure']:.2f}).
+The {quality_indicator} antagonist {antagonist['name']} ({antagonist['motivation']}) operates at {antagonist['commitment_level']} 
+commitment level with {len(antagonist.get('resources_lost', []))} confirmed losses. 
+
+Story momentum is manifesting through {momentum_state['manifestation_type']} with {momentum_state['pressure_source']} 
+as the primary pressure source. The narrative has escalated {momentum_state['escalation_count']} times with a 
+pressure floor of {momentum_state['base_pressure_floor']:.2f}.
+
+Integrate appropriate story momentum elements: tension escalation, antagonist presence, conflict opportunities, 
+and narrative progression that matches the current pressure level and momentum state.
+"""
+
+# ------------------ Prompt Condensation System ------------------ #
+async def condense_prompt(content: str, prompt_type: str) -> str:
+    """
+    Condense a single prompt file while preserving essential functionality.
+    """
+    if DEBUG:
+        print(Fore.YELLOW + f"[Debug] Condensing {prompt_type} prompt ({len(content)} chars -> target reduction)")
+    
+    # Design prompt-specific condensation instructions
+    condensation_prompts = {
+        "critrules": (
+            "You are optimizing a Game Master system prompt for an RPG. "
+            "Condense the following prompt while preserving all essential game master rules, "
+            "narrative generation guidelines, and core functionality. Maintain the same purpose "
+            "and effectiveness while reducing token count. Keep all critical instructions intact:\n\n"
+            f"{content}\n\n"
+            "Provide only the condensed prompt text that maintains full GM functionality."
+        ),
+        "companion": (
+            "You are optimizing a character definition prompt for an RPG companion. "
+            "Condense the following prompt while preserving the companion's complete personality, "
+            "appearance, abilities, relationship dynamics, and behavioral patterns. "
+            "Maintain all essential character traits while reducing token count:\n\n"
+            f"{content}\n\n"
+            "Provide only the condensed prompt text that fully preserves the companion character."
+        ),
+        "lowrules": (
+            "You are optimizing a narrative generation prompt for an RPG system. "
+            "Condense the following prompt while preserving all narrative guidelines, "
+            "storytelling rules, and generation principles. Maintain effectiveness "
+            "in guiding story creation while reducing token count:\n\n"
+            f"{content}\n\n"
+            "Provide only the condensed prompt text that maintains narrative quality."
+        )
+    }
+    
+    prompt_instruction = condensation_prompts.get(prompt_type, condensation_prompts["critrules"])
+    condensed = await call_mcp([{"role": "system", "content": prompt_instruction}])
+    return condensed.strip()
+
+async def load_and_optimize_prompts() -> Tuple[str, str, str]:
+    """Load all prompt files and apply condensation if they exceed the token budget."""
+    
+    # Load all prompt files with graceful handling
+    prompts = {
+        'critrules': load_prompt(PROMPT_TOP_FILE),
+        'companion': load_prompt(PROMPT_MID_FILE), 
+        'lowrules': load_prompt(PROMPT_LOW_FILE)
+    }
+    
+    # Check if any required prompts are missing
+    missing_prompts = [name for name, content in prompts.items() if not content.strip()]
+    if missing_prompts:
+        print(Fore.YELLOW + f"[Warning] Missing prompt files: {', '.join(missing_prompts)}")
+        print(Fore.YELLOW + "[Warning] System will continue with available prompts")
+    
+    # Calculate combined token count
+    total_tokens = sum(estimate_tokens(content) for content in prompts.values() if content)
+    
+    if DEBUG:
+        print(Fore.CYAN + f"[Debug] Loaded prompts: {total_tokens:,} tokens total")
+        for prompt_type, content in prompts.items():
+            if content:
+                tokens = estimate_tokens(content)
+                print(Fore.CYAN + f"  {prompt_type}: {tokens:,} tokens ({len(content):,} chars)")
+            else:
+                print(Fore.YELLOW + f"  {prompt_type}: MISSING")
+    
+    # Apply condensation if budget exceeded
+    if total_tokens > SYSTEM_PROMPT_TOKENS:
+        print(Fore.YELLOW + f"[System] Prompt files exceed token budget ({total_tokens:,} > {SYSTEM_PROMPT_TOKENS:,})")
+        print(Fore.YELLOW + "[System] Applying intelligent condensation...")
+        
+        # Condense any file that's more than 1/3 of the total budget
+        individual_threshold = SYSTEM_PROMPT_TOKENS // 3
+        
+        for prompt_type, content in prompts.items():
+            if content and estimate_tokens(content) > individual_threshold:
+                if DEBUG:
+                    print(Fore.YELLOW + f"[Debug] Condensing {prompt_type} prompt...")
+                prompts[prompt_type] = await condense_prompt(content, prompt_type)
+        
+        # Verify condensation worked
+        new_total = sum(estimate_tokens(content) for content in prompts.values() if content)
+        if DEBUG:
+            print(Fore.GREEN + f"[Debug] Condensation complete: {new_total:,} tokens (saved {total_tokens - new_total:,})")
+    
+    return prompts['critrules'], prompts['companion'], prompts['lowrules']
+
+# ------------------ Memory Management ------------------ #
+async def categorize_memory_content(memories, start_idx=0) -> List[Dict[str, Any]]:
+    """
+    Categorize memory content using LLM analysis for semantic understanding.
+    """
+    if len(memories) <= start_idx:
+        return memories
+    
+    # Prepare content for analysis (recent messages to avoid token limits)
+    analysis_window = memories[start_idx:start_idx + 20]  # Analyze in chunks
+    conversation_text = "\n".join([
+        f"{mem.get('role', 'unknown')}: {mem.get('content', '')[:500]}"  # Truncate long messages
+        for mem in analysis_window
+        if mem.get("role") in ["user", "assistant"]
+    ])
+    
+    categorization_prompt = f"""
+Analyze the following RPG conversation segments and categorize each exchange as one of:
+- story_critical: Major plot developments, character deaths, world-changing events, key decisions
+- character_focused: Relationship changes, character development, personality reveals, emotional moments
+- world_building: New locations, lore, cultural info, political changes, magical discoveries
+- standard: General interactions, travel, routine activities, basic world interactions
+
+Conversation:
+{conversation_text}
+
+Provide a JSON list with one category per exchange, like: ["standard", "character_focused", "story_critical"]
+"""
+    
+    try:
+        response = await call_mcp([{"role": "system", "content": categorization_prompt}])
+        categories = json.loads(response)
+        
+        # Apply categories to memories
+        for i, category in enumerate(categories):
+            if start_idx + i < len(memories) and category in CONDENSATION_STRATEGIES:
+                memories[start_idx + i]["content_category"] = category
+        
+        if DEBUG:
+            print(Fore.CYAN + f"[Debug] Categorized {len(categories)} memory segments")
+        
+    except (json.JSONDecodeError, IndexError) as e:
+        if DEBUG:
+            print(Fore.RED + f"[Debug] Memory categorization failed: {e}")
+        # Fallback: mark as standard
+        for i in range(len(analysis_window)):
+            if start_idx + i < len(memories):
+                memories[start_idx + i]["content_category"] = "standard"
+    
+    return memories
+
+async def condense_memory_category(memory_group, strategy, all_memories):
+    """
+    Condense a specific category of memories using tailored strategies.
+    """
+    if len(memory_group) < strategy["threshold"]:
+        return
+    
+    # Select memories to condense (older ones first)
+    condensation_candidates = memory_group[:-20]  # Keep recent 20 messages uncondensed
+    
+    if not condensation_candidates:
+        return
+    
+    # Prepare condensation batches
+    batch_size = 10
+    for i in range(0, len(condensation_candidates), batch_size):
+        batch = condensation_candidates[i:i + batch_size]
+        batch_text = "\n".join([
+            f"{mem['role']}: {mem['content']}"
+            for _, mem in batch
+        ])
+        
+        condensation_prompt = f"""
+{strategy['instruction']}
+
+Original conversation:
+{batch_text}
+
+Provide a condensed version that preserves {int(strategy['preservation_ratio'] * 100)}% of the essential content while reducing overall length.
+"""
+        
+        try:
+            condensed = await call_mcp([{"role": "system", "content": condensation_prompt}])
+            
+            # Replace the batch with condensed version
+            if batch:
+                first_idx, first_mem = batch[0]
+                all_memories[first_idx]["content"] = condensed
+                all_memories[first_idx]["condensed"] = True
+                
+                # Mark subsequent memories in batch for removal
+                for j in range(1, len(batch)):
+                    idx, _ = batch[j]
+                    all_memories[idx]["remove"] = True
+            
+        except Exception as e:
+            if DEBUG:
+                print(Fore.RED + f"[Debug] Category condensation failed: {e}")
+    
+    # Remove marked memories
+    all_memories[:] = [mem for mem in all_memories if not mem.get("remove", False)]
+
+async def intelligent_memory_management(memories):
+    """
+    Streamlined memory management using semantic condensation.
+    """
+    if len(memories) < 50:  # Don't condense small memory sets
+        return memories
+    
+    if DEBUG:
+        print(Fore.YELLOW + "[Debug] Starting intelligent memory management...")
+    
+    original_count = len(memories)
+    
+    # Ensure all memories have categories
+    memories = await categorize_memory_content(memories)
+    
+    # Group memories by content type
+    categorized_memories = {}
+    for i, memory in enumerate(memories):
+        if memory.get("role") in ["user", "assistant"]:
+            category = memory.get("content_category", "standard")
+            if category not in categorized_memories:
+                categorized_memories[category] = []
+            categorized_memories[category].append((i, memory))
+    
+    # Apply category-specific condensation
+    for category, strategy in CONDENSATION_STRATEGIES.items():
+        if category in categorized_memories:
+            memory_group = categorized_memories[category]
+            if len(memory_group) > strategy["threshold"]:
+                await condense_memory_category(memory_group, strategy, memories)
+    
+    final_count = len(memories)
+    if DEBUG:
+        print(Fore.GREEN + f"[Debug] Memory management complete: {original_count} -> {final_count} memories")
+    
+    return memories
+
+# ------------------ Main Application Logic ------------------ #
+
+async def main():
+    """Main application entry point with Story Momentum Engine integration."""
+    try:
+        # Validate configuration
+        validate_token_allocation()
+        
+        # Load and optimize prompts
+        print(Fore.CYAN + "[System] Loading and optimizing prompts...")
+        system_prompt_top, system_prompt_mid, system_prompt_low = await load_and_optimize_prompts()
+        
+        # Check if critical prompts are missing
+        if not system_prompt_top.strip():
+            print(Fore.RED + "[Error] Critical prompt file 'critrules.prompt' is missing!")
+            print(Fore.RED + "[Error] The system cannot function without the core game master rules.")
+            print(Fore.YELLOW + "[Info] Please ensure 'critrules.prompt' exists in the current directory.")
+            return
+        
+        # Load conversation memory
+        memories = load_memory()
+        print(Fore.CYAN + f"[System] Loaded {len(memories)} memories from previous sessions")
+        
+        # Check if momentum analysis is needed
+        if should_analyze_momentum(memories):
+            print(Fore.YELLOW + "[System] Running story momentum analysis...")
+            
+            current_state = get_momentum_state(memories)
+            is_first_analysis = current_state is None
+            
+            if is_first_analysis:
+                current_state = create_initial_momentum_state()
+            
+            updated_state = await analyze_momentum(memories, current_state, is_first_analysis)
+            update_momentum_state(memories, updated_state)
+            
+            print(Fore.GREEN + f"[System] Momentum analysis complete. Pressure level: {updated_state['narrative_pressure']:.2f}")
+        
+        # Check memory management needs
+        current_tokens = sum(estimate_tokens(mem["content"]) for mem in memories)
+        if current_tokens > MAX_MEMORY_TOKENS:
+            print(Fore.YELLOW + f"[System] Memory usage high ({current_tokens:,} tokens), optimizing...")
+            memories = await intelligent_memory_management(memories)
+            final_tokens = sum(estimate_tokens(mem["content"]) for mem in memories)
+            print(Fore.GREEN + f"[System] Memory optimized: {current_tokens:,} -> {final_tokens:,} tokens")
+        
+        # Display session info
+        print(Fore.GREEN + "\n" + "="*60)
+        print(Fore.GREEN + "Aurora RPG Client - Story Momentum Engine (SME) Active")
+        print(Fore.GREEN + "="*60)
+        
+        momentum_state = get_momentum_state(memories)
+        if momentum_state:
+            pressure_name = get_pressure_name(momentum_state["narrative_pressure"])
+            antagonist = momentum_state.get("antagonist", {})
+            print(Fore.CYAN + f"Story Momentum: {pressure_name.title()} pressure ({momentum_state['narrative_pressure']:.2f})")
+            if antagonist.get("name"):
+                print(Fore.CYAN + f"Active Antagonist: {antagonist['name']}")
+        
+        # Show prompt status
+        prompt_status = []
+        if system_prompt_top.strip():
+            prompt_status.append("GM Rules")
+        if system_prompt_mid.strip():
+            prompt_status.append("Companion")
+        if system_prompt_low.strip():
+            prompt_status.append("Narrative")
+        
+        print(Fore.CYAN + f"Active Prompts: {', '.join(prompt_status) if prompt_status else 'None'}")
+        
+        print(Fore.WHITE + "\nType your message (press Enter twice to send, 'quit' to exit):")
+        print(Fore.WHITE + "-" * 60 + "\n")
+        
+        # Main conversation loop
+        while True:
+            # Multi-line input collection
+            user_lines = []
+            print(Fore.YELLOW + "> ", end="", flush=True)
+            
+            while True:
+                try:
+                    line = input()
+                    if line.lower().strip() == 'quit':
+                        print(Fore.CYAN + "\n[System] Goodbye!")
+                        return
+                    
+                    if line == "" and user_lines:  # Double enter to submit
+                        break
+                    
+                    user_lines.append(line)
+                    print(Fore.YELLOW + "> ", end="", flush=True)
+                    
+                except KeyboardInterrupt:
+                    print(Fore.CYAN + "\n[System] Goodbye!")
+                    return
+            
+            raw_input_text = "\n".join(user_lines).strip()
+            if not raw_input_text:
+                continue
+            
+            # Validate input length
+            is_valid, warning = validate_user_input_length(raw_input_text)
+            if not is_valid:
+                print(Fore.RED + f"[Error] {warning}")
+                continue
+            
+            # Add user input to memory
+            add_memory(memories, "user", raw_input_text)
+            
+            # Prepare messages for generation
+            momentum_state = get_momentum_state(memories)
+            momentum_context = ""
+            if momentum_state:
+                momentum_context = generate_momentum_context_prompt(momentum_state)
+            
+            # Build system prompts with momentum context
+            full_system_top = system_prompt_top + momentum_context
+            
+            system_messages = []
+            if full_system_top.strip():
+                system_messages.append({"role": "system", "content": full_system_top})
+            if system_prompt_mid.strip():
+                system_messages.append({"role": "system", "content": system_prompt_mid})
+            if system_prompt_low.strip():
+                system_messages.append({"role": "system", "content": system_prompt_low})
+            
+            # Build conversation messages (excluding system prompts and momentum state)
+            memory_messages = [
+                {"role": mem["role"], "content": mem["content"]} 
+                for mem in memories 
+                if mem["role"] in ["user", "assistant"]
+            ]
+            
+            # Combine all messages
+            messages = system_messages + memory_messages
+            
+            # Generate response
+            try:
+                print(Fore.MAGENTA + "\n[Generating response...]")
+                response = await call_mcp(messages)
+                
+                # Display and save response
+                print(Fore.GREEN + "\n" + "="*60)
+                print_wrapped(response, Fore.GREEN)
+                print(Fore.GREEN + "="*60 + "\n")
+                
+                add_memory(memories, "assistant", response)
+                
+                # Check if momentum analysis should be triggered
+                if should_analyze_momentum(memories):
+                    print(Fore.YELLOW + "[System] Analyzing story momentum...")
+                    current_state = get_momentum_state(memories)
+                    updated_state = await analyze_momentum(memories, current_state, False)
+                    update_momentum_state(memories, updated_state)
+                    
+                    if DEBUG:
+                        print(Fore.CYAN + f"[Debug] Momentum updated: pressure {updated_state['narrative_pressure']:.2f}")
+                
+                # Periodic memory management
+                if len(memories) % 50 == 0:  # Check every 50 messages
+                    current_tokens = sum(estimate_tokens(mem["content"]) for mem in memories)
+                    if current_tokens > MAX_MEMORY_TOKENS:
+                        if DEBUG:
+                            print(Fore.YELLOW + "[Debug] Running periodic memory optimization...")
+                        memories = await intelligent_memory_management(memories)
+                
+            except Exception as e:
+                print(Fore.RED + f"[Error] Failed to generate response: {e}")
+                if DEBUG:
+                    import traceback
+                    traceback.print_exc()
+    
+    except Exception as e:
+        print(Fore.RED + f"[Fatal Error] {e}")
+        if DEBUG:
+            import traceback
+            traceback.print_exc()
+
+# ------------------ Entry Point ------------------ #
+
+if __name__ == "__main__":
+    if DEBUG:
+        print(Fore.CYAN + "[Debug] Aurora RPG Client with Story Momentum Engine starting...")
+        print(Fore.CYAN + f"[Debug] Python version: {sys.version}")
+        print(Fore.CYAN + f"[Debug] Model: {MODEL}")
+        print(Fore.CYAN + f"[Debug] MCP URL: {MCP_URL}")
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print(Fore.CYAN + "\n[System] Shutdown complete.")
+    except Exception as e:
+        print(Fore.RED + f"[Fatal Error] {e}")
+        sys.exit(1)
