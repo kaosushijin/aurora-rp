@@ -8,7 +8,7 @@ Five-module architecture with defined responsibilities and programmatic intercon
 MODULE ARCHITECTURE:
 main.py - Application coordination and lifecycle management
 nci.py - Ncurses interface and user interaction
-mcp.py - HTTP client for MCP/Ollama server communication  
+mcp.py - HTTP client for MCP/Ollama server communication (UPDATED - Code Boil optimized)
 emm.py - Enhanced Memory Manager with LLM-powered semantic condensation
 sme.py - Story Momentum Engine for narrative pressure management
 
@@ -39,6 +39,64 @@ CONFIGURATION SYSTEM:
 - aurora_config.json: Application settings and MCP server configuration
 - chat_history_*.json: Conversation history files with timestamp naming and metadata
 - debug_*.log: Debug logging when --debug flag enabled
+
+MCP COMMUNICATION MODULE SPECIFICS (mcp.py) - CODE BOIL OPTIMIZED:
+================================================================
+
+SIMPLIFIED ARCHITECTURE:
+- Streamlined MCPClient class with essential HTTP communication only
+- Single retry mechanism (MCP_MAX_RETRIES = 2) replacing complex fallback systems
+- Eliminated performance monitoring and verbose error reporting
+- Clean context integration from both EMM and SME modules
+- Brand-neutral naming throughout (DevName RPG Client)
+
+CORE FUNCTIONALITY:
+- MCPClient.send_message(): Primary interface for message transmission
+  * Integrates story_context from SME module
+  * Accepts conversation_history from EMM module
+  * Handles up to 10 historical messages for efficiency
+  * Returns clean response content or raises exception
+- MCPClient.test_connection(): Simple async connection verification
+- MCPClient.get_server_info(): Basic diagnostics without performance metrics
+- MCPClient.update_system_prompt(): Dynamic prompt modification capability
+
+SIMPLIFIED ERROR HANDLING:
+- Single exception type for all MCP failures
+- Debug-only verbose logging (no user-facing error verbosity)
+- Graceful fallback when httpx unavailable
+- Brief retry delays (1 second) without complex backoff algorithms
+
+CONTEXT INTEGRATION DESIGN:
+- Story context from SME injected as system message: "Story Context: {context}"
+- Conversation history from EMM limited to last 10 messages for token efficiency
+- System prompt + story context + history + user input = complete message chain
+- No redundant validation beyond essential response structure checking
+
+CONFIGURATION CONSTANTS:
+- MCP_SERVER_URL: "http://localhost:11434/api/chat"
+- MCP_MODEL: "qwen2.5:14b-instruct"
+- MCP_TIMEOUT: 30 seconds
+- MCP_MAX_RETRIES: 2 attempts
+- DEFAULT_SYSTEM_PROMPT: High-fantasy RPG Game Master instructions
+
+ASYNC EXECUTION PATTERN:
+- Creates new event loop for each request (avoiding loop conflicts)
+- Simple async/await pattern with httpx.AsyncClient
+- Timeout management through httpx configuration
+- Clean loop closure after execution
+
+UTILITY FUNCTIONS:
+- validate_mcp_request(): Payload structure validation
+- quick_mcp_test(): Standalone connection testing without client instantiation
+- Module test suite for standalone verification
+
+REMOVED COMPLEXITY (Code Boil Objectives):
+- Performance monitoring and statistics collection
+- Multiple retry strategies and complex backoff algorithms
+- Verbose user-facing error messages and marketing language
+- Request/response validation beyond essential structure
+- Aurora branding replaced with DevName RPG Client
+- Extensive debugging infrastructure (simplified to essential logging)
 
 ENHANCED MEMORY MANAGER SPECIFICS (emm.py):
 ================================================================
@@ -89,6 +147,12 @@ THREAD SAFETY & ASYNC OPERATIONS:
 - Non-blocking condensation operations in separate event loop
 - Safe concurrent access to conversation history
 
+EMM INTERFACE FOR OTHER MODULES:
+- get_conversation_for_mcp(): Returns formatted conversation for MCP requests
+- add_message(): Thread-safe message storage with automatic condensation
+- get_messages(): Retrieves conversation history with optional limits
+- get_memory_stats(): Returns current memory utilization statistics
+
 STORY MOMENTUM ENGINE SPECIFICS (sme.py):
 ================================================================
 
@@ -137,18 +201,18 @@ CONTEXT GENERATION FOR MCP:
 - Narrative state descriptions: calm_exploration, building_tension, escalating_conflict, peak_intensity, concluding_action
 - Tension introduction flags and climax approach indicators
 
+SME INTERFACE FOR OTHER MODULES:
+- process_user_input(): Updates pressure and returns processing results
+- get_story_context(): Returns story context for MCP integration
+- reset_story_state(): Clears state for new sessions
+- get_pressure_stats(): Returns pressure analytics and statistics
+
 STATE MANAGEMENT:
 - Persistent state saving/loading with JSON serialization
 - Pressure history tracking (last 200 updates with timestamp pairs)
 - User input buffer (last 50 inputs, condensed to 25 when full)
 - Thread-safe operations with debug logging integration
 - Statistics generation: average/max/min pressure, variance calculation, session duration
-
-PRESSURE TESTING & ANALYSIS:
-- Built-in scenario testing: combat, exploration, social, mystery patterns
-- Real-time momentum analysis for individual text inputs
-- Pattern detection and categorization utilities
-- Debug information exposure for system monitoring
 
 MODULAR PRESERVATION RULES:
 ================================================================
@@ -164,17 +228,42 @@ MODULAR PRESERVATION RULES:
    - get_story_context(): Returns story context for MCP integration
    - reset_story_state(): Clears state for new sessions
    - get_pressure_stats(): Returns pressure analytics and statistics
-4. LLM semantic analysis requires functional MCP configuration in aurora_config.json
-5. File persistence maintains metadata for debugging and analysis
+4. MCP Communication Module maintains specific interface for other modules:
+   - send_message(): Primary communication method with context integration
+   - test_connection(): Connection verification for diagnostics
+   - get_server_info(): Basic server information without performance metrics
+   - update_system_prompt(): Dynamic prompt modification capability
+5. LLM semantic analysis requires functional MCP configuration in aurora_config.json
+6. File persistence maintains metadata for debugging and analysis
 
 ERROR HANDLING HIERARCHY:
 main.py: Application-level errors and graceful shutdown
 nci.py: Interface errors and display failures
-mcp.py: Network errors and communication failures  
+mcp.py: Network errors and communication failures (SIMPLIFIED - single exception type)
 emm.py: Memory management errors, LLM analysis failures, condensation errors
 sme.py: Narrative analysis and context generation errors
 
+CODE BOIL COMPLIANCE:
+================================================================
+
+APPLIED OPTIMIZATIONS (mcp.py):
+- ✅ External documentation reference (genai.txt) replaces verbose comment blocks
+- ✅ Marketing language removed (Aurora → DevName RPG Client)
+- ✅ Single retry mechanism replaces complex fallback systems
+- ✅ Debug-only error reporting (no user-facing verbosity)
+- ✅ Performance monitoring eliminated
+- ✅ LLM-first design with clean context integration
+- ✅ Preserved all programmatic interconnects
+
+REMAINING CODE BOIL TARGETS:
+- emm.py: Enhanced Memory Manager optimization (Phase 1 - Highest Priority)
+- sme.py: Story Momentum Engine optimization (Phase 1 - High Priority)
+- nci.py: Ncurses Interface cleanup (Phase 3 - Medium Priority)
+- main.py: Application coordination cleanup (Phase 3 - Lowest Priority)
+
 AI MODIFICATION GUIDELINES:
+================================================================
+
 1. PRESERVE all programmatic interconnects when modifying any module
 2. UPDATE this genai.txt file when making architectural changes
 3. MAINTAIN the single responsibility principle for each module
@@ -185,6 +274,8 @@ AI MODIFICATION GUIDELINES:
 8. Semantic category changes must update preservation ratios accordingly
 9. Story pressure thresholds and antagonist generation logic must remain context-adaptive
 10. Pattern-based pressure calculation should maintain balance between categories
+11. APPLY Code Boil principles: minimize verbosity, eliminate marketing language, simplify error handling
+12. MAINTAIN essential functionality while reducing boilerplate and redundancy
 
 DEBUGGING INFRASTRUCTURE:
 - Centralized DebugLogger class in main.py shared across all modules
@@ -194,6 +285,7 @@ DEBUGGING INFRASTRUCTURE:
 - Conversation pattern analysis for system optimization
 - Story pressure tracking and antagonist lifecycle monitoring
 - Narrative arc progression analysis and context generation verification
+- Simplified MCP communication logging (debug-only verbosity)
 
 PERFORMANCE CONSIDERATIONS:
 - LLM semantic analysis adds latency but provides superior memory management
@@ -204,6 +296,7 @@ PERFORMANCE CONSIDERATIONS:
 - Story pressure calculation optimized for real-time performance
 - Rate limiting prevents computational overhead from input spam
 - Pattern matching uses efficient keyword detection algorithms
+- Simplified MCP retry logic reduces communication overhead
 
 SUCCESS METRICS FOR LLM INTEGRATION:
 - Target 95%+ success rate for semantic analysis parsing
@@ -214,3 +307,30 @@ SUCCESS METRICS FOR LLM INTEGRATION:
 - Smooth story pressure progression without artificial spikes
 - Context-appropriate antagonist generation matching user input patterns
 - Effective narrative arc transitions based on pressure thresholds
+- Streamlined MCP communication without performance degradation
+
+PRESSURE TESTING & ANALYSIS:
+- Built-in scenario testing: combat, exploration, social, mystery patterns
+- Real-time momentum analysis for individual text inputs
+- Pattern detection and categorization utilities
+- Debug information exposure for system monitoring
+- MCP connection testing and server verification
+- Simplified diagnostic reporting for troubleshooting
+
+ARCHITECTURE EVOLUTION TRACKING:
+================================================================
+
+COMPLETED OPTIMIZATIONS:
+- mcp.py: Full Code Boil optimization completed
+  * Removed verbose comment blocks → genai.txt reference
+  * Eliminated marketing language and Aurora branding
+  * Simplified retry logic from complex fallback to single mechanism
+  * Removed performance monitoring infrastructure
+  * Streamlined error handling to debug-only verbosity
+  * Maintained all critical module interconnects
+
+NEXT PHASE TARGETS:
+- emm.py: Memory manager optimization (remove verbose logging, simplify condensation reporting)
+- sme.py: Story momentum optimization (consolidate antagonist fallbacks, eliminate static examples)
+- Cross-module pattern identification and consolidation
+- Final integration testing and verification
