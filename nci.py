@@ -6,15 +6,6 @@ DevName RPG Client - Ncurses Interface Module (nci.py) - COMPLETE REWRITE
 Module architecture and interconnects documented in genai.txt
 Maintains programmatic interfaces with mcp.py, emm.py, and sme.py
 Integrates loaded prompts from main.py for enhanced RPG experience
-
-COMPLETE REWRITE CHANGES:
-- MCP detection removal - no startup connection testing
-- Message prefix improvements: AI -> GM, System -> empty space
-- Multi-line input system with cursor navigation
-- Enhanced scrolling with PgUp/PgDn, Home/End keys
-- Dynamic terminal management with resize handling
-- Immediate display pattern with explicit cursor management
-- Command simplification (removed /prompts)
 """
 
 import curses
@@ -1387,22 +1378,6 @@ class CursesInterface:
         
         self._log_debug(f"Processing state: {processing}")
     
-    # Backward compatibility wrappers
-    def add_user_message(self, content: str):
-        self.add_user_message_immediate(content)
-    
-    def add_assistant_message(self, content: str):
-        self.add_assistant_message_immediate(content)
-    
-    def add_system_message(self, content: str):
-        self.add_system_message_immediate(content)
-    
-    def add_error_message(self, content: str):
-        self.add_error_message_immediate(content)
-    
-    def set_input_blocked(self, blocked: bool):
-        self.set_processing_state_immediate(blocked)
-
 # Chunk 4/4 - nci.py - Command Processing, Utilities, and Module Testing
 
     def _clear_display(self):
@@ -1760,75 +1735,4 @@ if __name__ == "__main__":
     print("\nInterface module complete rewrite test completed successfully.")
     print("Run main.py to start the fully rewritten application.")
 
-# End of nci.py - DevName RPG Client Ncurses Interface Module - COMPLETE REWRITE
-# 
-# COMPLETE REWRITE IMPLEMENTATION:
-# ================================
-# 
-# This complete rewrite implements ALL improvements from MCP Detection Removal - Interface Robustness.md:
-# 
-# 1. MCP DETECTION REMOVAL:
-#    - Eliminated startup connection testing (_test_mcp_connection removed)
-#    - Errors only shown during actual communication attempts
-#    - Graceful error handling with specific messages (ConnectionError, TimeoutError)
-# 
-# 2. MESSAGE PREFIX IMPROVEMENTS:
-#    - Changed "AI" to "GM" for Game Master branding
-#    - Changed "System" to clean space for visual hierarchy
-#    - Maintained timestamp format for consistency
-# 
-# 3. MULTI-LINE INPUT SYSTEM:
-#    - Full cursor navigation with arrow keys
-#    - Word wrapping at terminal boundaries
-#    - Intelligent submission (Enter creates new line vs submits)
-#    - Line merging on backspace
-#    - Character and line limits for reasonable usage
-# 
-# 4. ENHANCED SCROLLING SYSTEM:
-#    - Page-based navigation with PgUp/PgDn
-#    - Home/End keys for top/bottom jumping
-#    - Scroll indicators in status bar
-#    - Auto-return to bottom on new messages
-#    - SCROLLBACK indicator when not at bottom
-# 
-# 5. DYNAMIC TERMINAL MANAGEMENT:
-#    - Real-time resize detection and handling
-#    - Minimum size validation with helpful messages
-#    - Complete window recreation on resize
-#    - Content rewrapping for new dimensions
-#    - Graceful degradation for too-small terminals
-# 
-# 6. IMMEDIATE DISPLAY PATTERN:
-#    - Every change triggers immediate window refresh
-#    - Explicit cursor management after every operation
-#    - No batched updates - synchronous display updates
-#    - Proper cursor positioning in multi-line input
-# 
-# 7. COMMAND SIMPLIFICATION:
-#    - Removed /prompts command (info shown at startup)
-#    - Enhanced /help with navigation instructions
-#    - Improved /stats with comprehensive information
-#    - Better error messages for unknown commands
-# 
-# 8. ROBUST ERROR HANDLING:
-#    - Specific error types (connection, timeout, processing)
-#    - No startup error messages unless actually relevant
-#    - Graceful fallback patterns for MCP communication
-#    - Debug logging for development troubleshooting
-# 
-# 9. ENHANCED TESTING UTILITIES:
-#    - Comprehensive state inspection methods
-#    - Input simulation for automated testing
-#    - Resize simulation for testing responsive behavior
-#    - Navigation key testing for debugging
-#    - Display state analysis for troubleshooting
-# 
-# 10. BACKWARD COMPATIBILITY:
-#     - Old method names preserved as wrappers
-#     - Existing interconnects with other modules maintained
-#     - Configuration system unchanged
-#     - Prompt integration system preserved
-# 
-# The rewrite addresses all issues identified in the analysis while maintaining
-# full compatibility with the existing module architecture and providing
-# significantly improved user experience and system robustness.
+# End of nci.py - DevName RPG Client Ncurses Interface Module

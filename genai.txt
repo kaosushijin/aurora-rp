@@ -1,12 +1,12 @@
-GENAI.TXT - AI ANALYSIS REFERENCE FOR AURORA RPG CLIENT
+GENAI.TXT - AI ANALYSIS REFERENCE FOR DEVNAME RPG CLIENT
 ================================================================
 
 PROJECT SCOPE:
-Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Control Protocol). Features innovative Story Momentum Engine and intelligent memory management with integrated prompt system architecture.
+Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Control Protocol). Features innovative Story Momentum Engine, intelligent memory management, and complete rewrite of ncurses interface with immediate display architecture.
 
 MODULE ARCHITECTURE:
 main.py - Application coordination, prompt management, and lifecycle control
-nci.py - Ncurses interface with integrated prompt system
+nci.py - Ncurses interface with immediate display pattern and integrated prompt system
 mcp.py - HTTP client for MCP/Ollama server communication  
 emm.py - Enhanced Memory Manager with LLM-powered semantic condensation
 sme.py - Story Momentum Engine for narrative pressure management
@@ -21,12 +21,12 @@ mcp.py ← emm.py: Receives conversation history via get_conversation_for_mcp()
 
 DATA FLOW:
 1. Prompts loaded and optimized in main.py during startup
-2. User input captured in nci.py with integrated prompt system
+2. User input captured in nci.py with immediate display multi-line input system
 3. Message stored in emm.py with automatic semantic analysis
 4. Narrative pressure updated in sme.py based on input patterns
 5. System messages built from loaded prompts + story context + conversation history
 6. MCP request sent with complete message chain, response received
-7. Response displayed in nci.py interface with memory storage
+7. Response displayed in nci.py interface with immediate refresh pattern
 
 CONFIGURATION SYSTEM:
 - Hardcoded configuration values in ApplicationConfig class
@@ -82,51 +82,100 @@ DEPENDENCY MANAGEMENT:
 - Module verification system for all components
 - Graceful degradation messaging for missing dependencies
 
-NCURSES INTERFACE MODULE (nci.py):
+NCURSES INTERFACE MODULE (nci.py) - COMPLETE REWRITE:
 ================================================================
 
-INTEGRATED PROMPT ARCHITECTURE:
-- CursesInterface receives loaded prompts from main.py configuration
-- Dynamic system message building with prompt integration
-- Story context injection into critrules prompt
-- Multi-prompt system: critrules + companion + lowrules
-- Real-time prompt status display and management
+IMMEDIATE DISPLAY ARCHITECTURE:
+- All message display methods use "_immediate" suffix for real-time updates
+- Every display operation triggers immediate window refresh
+- Explicit cursor management after every interface operation
+- No backwards compatibility wrappers - clean API surface
+- Synchronous display updates with no batched operations
 
-INTERFACE ARCHITECTURE:
-- CursesInterface: Main controller with prompt system integration
+CORE INTERFACE CLASSES:
+- CursesInterface: Main controller with immediate display integration
+- MultiLineInput: Advanced multi-line input with cursor navigation and word wrapping
+- ScrollManager: Enhanced scrolling with page navigation and scroll indicators
+- TerminalManager: Dynamic terminal management with real-time resize handling
+- DisplayMessage: Message formatting with new prefix system (GM instead of AI)
 - ColorManager: Theme-based color management (classic/dark/bright)
-- InputValidator: Token estimation and input validation
-- DisplayMessage: Message formatting for display
+- InputValidator: Token estimation and multi-line input validation
+
+MULTI-LINE INPUT SYSTEM:
+- Full cursor navigation with arrow keys (left/right/up/down)
+- Word wrapping at terminal boundaries with intelligent break points
+- Intelligent submission detection (punctuation endings or commands)
+- Line merging on backspace across line boundaries
+- Character limit (4000) and line limit (20) for reasonable usage
+- Real-time display formatting within input window constraints
+
+ENHANCED SCROLLING SYSTEM:
+- Page-based navigation with PgUp/PgDn keys
+- Home/End keys for instant top/bottom navigation
+- Scroll indicators in status bar showing position and scrollback state
+- Auto-return to bottom on new message submission
+- SCROLLBACK indicator when viewing history (not at bottom)
+- Single-line scroll with arrow keys when not in input mode
+
+DYNAMIC TERMINAL MANAGEMENT:
+- Real-time resize detection every 0.5 seconds
+- Minimum size validation (80x24) with helpful error messages
+- Complete window recreation and content rewrapping on resize
+- Graceful degradation for terminals that are too small
+- Automatic dimension recalculation and component reinitialization
+
+MESSAGE DISPLAY IMPROVEMENTS:
+- Changed "AI:" prefix to "GM:" for Game Master branding
+- Changed "System:" prefix to clean space " :" for visual hierarchy
+- True blank lines between GM responses for better readability
+- Immediate display refresh on every message addition
+- Proper color coding with theme support
 
 WINDOW MANAGEMENT:
-- Output window: Conversation display with scroll support
-- Input window: User input with real-time validation
-- Status window: System statistics, connection status, and prompt count
-- Automatic dimension calculation with minimum size validation
+- Output window: Conversation display with enhanced scroll support
+- Input window: Multi-line user input with real-time validation
+- Status window: Enhanced statistics including scroll position and prompt count
+- Automatic dimension calculation with proportional screen usage
+- Border drawing with immediate refresh
+
+NO MCP CONNECTION TESTING:
+- Eliminated startup connection testing entirely
+- Errors only displayed during actual communication attempts
+- Specific error types: ConnectionError, TimeoutError, general exceptions
+- Graceful fallback patterns for MCP communication failures
+- Clean startup experience without unnecessary error messages
 
 PROMPT INTEGRATION WORKFLOW:
 - _build_system_messages(): Constructs integrated prompt chain
-- Primary prompt (critrules) enhanced with story context
+- Primary prompt (critrules) enhanced with story context injection
 - Companion and narrative prompts added as separate system messages
-- Custom MCP request with complete message structure
+- Custom MCP request building with complete message structure
 - Fallback to standard send_message if custom approach fails
 
-INPUT PROCESSING:
-- Character-by-character input building
-- Enter key submission with validation
-- Arrow key scrolling through conversation history
-- Enhanced commands: /help, /quit, /clear, /stats, /theme, /prompts
+INPUT PROCESSING ARCHITECTURE:
+- Character-by-character input building with immediate visual feedback
+- Enter key intelligent submission vs. new line creation
+- Enhanced navigation: arrow keys, page navigation, home/end positioning
+- Real-time input validation with token estimation
+- Command processing: /help, /quit, /clear, /stats, /theme (removed /prompts)
 
-MODULE INTERCONNECTS:
-- Creates and manages MCPClient, EnhancedMemoryManager, StoryMomentumEngine
-- Coordinates message flow between all modules
-- Handles async MCP requests while blocking interface input
-- Formats story context from SME for prompt integration
+INTERFACE METHOD NAMING:
+- add_user_message_immediate(): User message display with immediate refresh
+- add_assistant_message_immediate(): GM message with blank line separation
+- add_system_message_immediate(): System message with immediate refresh
+- add_error_message_immediate(): Error message with debug logging
+- set_processing_state_immediate(): Processing state with visual feedback
+- _add_message_immediate(): Core message addition with display update
+- _add_blank_line_immediate(): True blank line insertion with refresh
 
-COLOR THEME SYSTEM:
-- Classic: Cyan user, green assistant, yellow system, red error, blue borders
-- Dark: White user, cyan assistant, magenta system, red error, white borders
-- Bright: Blue user, green assistant, yellow system, red error, magenta borders
+ENHANCED DEBUGGING UTILITIES:
+- get_display_state(): Comprehensive interface state inspection
+- get_input_state(): Multi-line input state analysis
+- get_scroll_position(): Scroll manager state information
+- simulate_user_input(): Automated input testing
+- simulate_resize(): Terminal resize testing
+- test_all_navigation_keys(): Navigation functionality testing
+- force_refresh_display(): Emergency display recovery
 
 MCP COMMUNICATION MODULE (mcp.py):
 ================================================================
@@ -292,7 +341,7 @@ INTELLIGENT PROMPT LOADING:
 - Automatic token estimation and budget management
 - LLM-powered condensation when exceeding 5k token allocation
 - Preservation of essential functionality during condensation
-- Status display showing active prompt components
+- Status display showing active prompt components in interface
 
 PROMPT INTEGRATION WORKFLOW:
 1. Load available prompt files during startup
@@ -300,7 +349,7 @@ PROMPT INTEGRATION WORKFLOW:
 3. Pass optimized prompts to interface configuration
 4. Build dynamic system messages with story context injection
 5. Combine prompts + context + history for complete message chain
-6. Real-time status display and /prompts command for inspection
+6. Real-time status display showing active prompt count
 
 TOKEN BUDGET ALLOCATION:
 - Total Context Window: 32,000 tokens
@@ -318,10 +367,13 @@ MODULAR PRESERVATION RULES:
 5. LLM semantic analysis requires functional MCP configuration
 6. Prompt system requires critrules.prompt for core functionality
 7. File persistence maintains metadata for debugging and analysis
+8. Interface immediate display methods must maintain synchronous operation
+9. Multi-line input system requires proper cursor management
+10. Terminal resize handling must preserve scroll position and input state
 
 ERROR HANDLING HIERARCHY:
 - main.py: Application-level errors, prompt loading failures, graceful shutdown
-- nci.py: Interface errors, display failures, prompt integration errors
+- nci.py: Interface errors, display failures, terminal management, immediate refresh failures
 - mcp.py: Network errors and communication failures (simplified single exception type)
 - emm.py: Memory management errors, LLM analysis failures, condensation errors
 - sme.py: Narrative analysis and context generation errors
@@ -334,6 +386,9 @@ DEBUGGING INFRASTRUCTURE:
 - Story pressure tracking and antagonist lifecycle monitoring
 - Prompt loading and condensation process logging
 - Simplified MCP communication logging (debug-only verbosity)
+- Interface state inspection and testing utilities
+- Multi-line input debugging and simulation capabilities
+- Terminal resize testing and recovery mechanisms
 
 PERFORMANCE CONSIDERATIONS:
 - LLM semantic analysis adds latency but provides superior memory management
@@ -344,6 +399,9 @@ PERFORMANCE CONSIDERATIONS:
 - Rate limiting prevents computational overhead from input spam
 - Prompt condensation reduces token usage while preserving functionality
 - Simplified MCP retry logic reduces communication overhead
+- Immediate display pattern adds refresh overhead but improves user experience
+- Multi-line input processing optimized for real-time character insertion
+- Terminal resize handling optimized to minimize disruption
 
 DEPENDENCY REQUIREMENTS:
 - Python 3.8+ with curses support
@@ -351,6 +409,7 @@ DEPENDENCY REQUIREMENTS:
 - asyncio for non-blocking LLM calls in memory management
 - JSON for configuration and history storage
 - Threading for thread-safe memory operations
+- textwrap for multi-line input word wrapping
 
 AI MODIFICATION GUIDELINES:
 ================================================================
@@ -369,6 +428,12 @@ AI MODIFICATION GUIDELINES:
 12. Token budget changes require corresponding updates to allocation constants
 13. Condensation logic changes must preserve essential prompt functionality
 14. System message building must maintain prompt integration order and structure
+15. Interface display methods must maintain immediate refresh pattern
+16. Multi-line input modifications must preserve cursor navigation functionality
+17. Terminal management changes must maintain dynamic resize capability
+18. Scrolling system modifications must preserve page navigation and indicators
+19. Color theme changes must maintain accessibility and visual hierarchy
+20. Error handling modifications must preserve specific error type reporting
 
 ARCHITECTURAL INNOVATIONS:
 ================================================================
@@ -391,8 +456,30 @@ INTEGRATED PROMPT SYSTEM:
 - Story context injection into core GM rules
 - Multi-prompt integration with hierarchical message building
 
+IMMEDIATE DISPLAY ARCHITECTURE:
+- Real-time interface updates with explicit cursor management
+- Multi-line input system with intelligent submission detection
+- Enhanced scrolling with page navigation and visual indicators
+- Dynamic terminal management with seamless resize handling
+
 TECHNICAL EXCELLENCE:
 - Graceful degradation with missing components
 - Comprehensive error handling with debug transparency
 - Modular architecture with clear separation of concerns
 - Real-time status monitoring and user feedback
+- Clean API surface without backwards compatibility baggage
+- Comprehensive testing and debugging utilities for development support
+
+INTERFACE REWRITE ACHIEVEMENTS:
+================================================================
+
+1. MCP DETECTION REMOVAL: Eliminated startup connection testing for cleaner initialization
+2. MESSAGE PREFIX IMPROVEMENTS: AI→GM branding, clean system message formatting
+3. MULTI-LINE INPUT SYSTEM: Full cursor navigation, word wrapping, intelligent submission
+4. ENHANCED SCROLLING: Page navigation, position indicators, auto-return behavior
+5. DYNAMIC TERMINAL MANAGEMENT: Real-time resize, minimum size validation, content rewrapping
+6. IMMEDIATE DISPLAY PATTERN: Synchronous updates, explicit cursor management, no batching
+7. COMMAND SIMPLIFICATION: Removed /prompts, enhanced help and stats
+8. ROBUST ERROR HANDLING: Specific error types, contextual messages, graceful fallbacks
+9. TESTING UTILITIES: State inspection, input simulation, navigation testing
+10. CLEAN API SURFACE: No backwards compatibility wrappers, consistent method naming
