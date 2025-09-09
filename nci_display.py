@@ -2,6 +2,7 @@
 #!/usr/bin/env python3
 """
 DevName RPG Client - Message Display Module (nci_display.py)
+Module architecture and interconnects documented in genai.txt
 Extracted from nci.py for better separation of concerns
 """
 

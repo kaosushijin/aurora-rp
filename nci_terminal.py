@@ -2,6 +2,7 @@
 #!/usr/bin/env python3
 """
 DevName RPG Client - Terminal Management Module (nci_terminal.py)
+Module architecture and interconnects documented in genai.txt
 Implements dynamic box coordinate system for robust window management
 """
 

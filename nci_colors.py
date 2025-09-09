@@ -2,6 +2,7 @@
 #!/usr/bin/env python3
 """
 DevName RPG Client - Color Management Module (nci_colors.py)
+Module architecture and interconnects documented in genai.txt
 Extracted from nci.py for better separation of concerns
 """
 
