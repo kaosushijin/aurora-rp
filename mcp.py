@@ -20,9 +20,9 @@ except ImportError:
     MCP_AVAILABLE = False
 
 # Configuration constants
-MCP_SERVER_URL = "http://localhost:11434/api/chat"
-MCP_MODEL = "qwen2.5:14b-instruct"
-MCP_TIMEOUT = 30
+MCP_SERVER_URL = "http://127.0.0.1:3456/chat"
+MCP_MODEL = "qwen2.5:14b-instruct-q4_k_m"
+MCP_TIMEOUT = 300
 MCP_MAX_RETRIES = 2
 
 # System prompt for RPG storytelling

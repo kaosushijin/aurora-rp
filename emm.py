@@ -82,16 +82,11 @@ class EnhancedMemoryManager:
         
     def _load_mcp_config(self) -> Dict[str, Any]:
         """Load MCP configuration for LLM calls"""
-        try:
-            with open("aurora_config.json", "r") as f:
-                config = json.load(f)
-                return config.get("mcp", {})
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {
-                "server_url": "http://localhost:11434",
-                "model": "llama3.1:8b",
-                "timeout": 30
-            }
+        return {
+            "server_url": "http://127.0.0.1:3456/api/chat",
+            "model": "qwen2.5:14b-instruct-q4_k_m",
+            "timeout": 300
+        }
     
     def add_message(self, content: str, message_type: MessageType) -> None:
         """Add new message and manage memory"""

@@ -15,7 +15,7 @@ import argparse
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 
 # Import application modules
 try:
@@ -65,6 +65,10 @@ class DebugLogger:
     def error(self, message: str, category: str = "ERROR"):
         """Log error message"""
         self.debug(f"ERROR: {message}", category)
+
+    def memory(self, message: str):
+        """Log memory message"""
+        self.debug(message, "MEMORY")
     
     def system(self, message: str):
         """Log system message"""
