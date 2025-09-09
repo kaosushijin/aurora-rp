@@ -455,7 +455,7 @@ class AuroraRPGClient:
         
         try:
             # Import the ncurses interface module
-            from nci_nc5 import CursesInterface
+            from nci_nc5 import RewrittenCursesInterface as CursesInterface
             
             # Create and configure the interface
             self.curses_interface = CursesInterface(
