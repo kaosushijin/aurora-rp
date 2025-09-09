@@ -1,74 +1,99 @@
-GENAI.TXT - AI ANALYSIS REFERENCE FOR MODULAR RPG CLIENT
+GENAI.TXT - AI ANALYSIS REFERENCE FOR AURORA RPG CLIENT
 ================================================================
 
 PROJECT SCOPE:
-Modular RPG client application with ncurses interface and MCP server communication.
-Five-module architecture with defined responsibilities and programmatic interconnects.
+Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Control Protocol). Features innovative Story Momentum Engine and intelligent memory management with integrated prompt system architecture.
 
 MODULE ARCHITECTURE:
-main.py - Application coordination and lifecycle management
-nci.py - Ncurses interface and user interaction
-mcp.py - HTTP client for MCP/Ollama server communication
+main.py - Application coordination, prompt management, and lifecycle control
+nci.py - Ncurses interface with integrated prompt system
+mcp.py - HTTP client for MCP/Ollama server communication  
 emm.py - Enhanced Memory Manager with LLM-powered semantic condensation
 sme.py - Story Momentum Engine for narrative pressure management
 
 CRITICAL INTERCONNECTS:
-main.py → nci.py: Creates CursesInterface instance, manages application lifecycle
-nci.py → mcp.py: Sends user messages via MCPClient.send_message()
-nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager methods
+main.py → nci.py: Creates CursesInterface with loaded prompt configuration
+nci.py → mcp.py: Sends integrated system messages via MCPClient methods
+nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager
 nci.py → sme.py: Updates narrative pressure via StoryMomentumEngine.process_user_input()
-mcp.py ← sme.py: Receives story context for enhanced prompting via get_story_context()
-mcp.py ← emm.py: Receives conversation history for context via get_conversation_for_mcp()
+mcp.py ← sme.py: Receives story context via get_story_context()
+mcp.py ← emm.py: Receives conversation history via get_conversation_for_mcp()
 
 DATA FLOW:
-1. User input captured in nci.py
-2. Message stored in emm.py conversation history with automatic semantic analysis
-3. Narrative pressure updated in sme.py based on input analysis
-4. Context gathered from emm.py and sme.py for mcp.py request
-5. MCP request sent to server, response received
-6. Response displayed in nci.py interface
+1. Prompts loaded and optimized in main.py during startup
+2. User input captured in nci.py with integrated prompt system
+3. Message stored in emm.py with automatic semantic analysis
+4. Narrative pressure updated in sme.py based on input patterns
+5. System messages built from loaded prompts + story context + conversation history
+6. MCP request sent with complete message chain, response received
+7. Response displayed in nci.py interface with memory storage
 
 CONFIGURATION SYSTEM:
-- aurora_config.json: Application settings and MCP server configuration
-- chat_history_*.json: Conversation history files with timestamp naming and metadata
-- debug_*.log: Debug logging when --debug flag enabled
+- Hardcoded configuration values in ApplicationConfig class
+- memory.json: Persistent conversation memory (auto-created)
+- Prompt files: critrules.prompt (required), companion.prompt, lowrules.prompt
+- debug.log: Debug logging when --debug flag enabled
 
 APPLICATION ENTRY POINT (main.py):
 ================================================================
 
+ENHANCED PROMPT MANAGEMENT SYSTEM:
+- PromptManager class with intelligent loading and condensation
+- Token budget allocation (5,000 tokens for all prompts combined)
+- Automatic prompt condensation using LLM when budget exceeded
+- Critical validation ensuring critrules.prompt exists
+- Graceful handling of missing optional prompt files
+
 MAIN CLASS STRUCTURE:
-- DevNameRPGClient: Primary application coordinator
+- DevNameRPGClient: Primary application coordinator with prompt integration
 - DebugLogger: Centralized logging system shared across modules
-- ApplicationConfig: JSON-based configuration management with defaults
-- Command-line argument parsing with --debug and --config options
+- ApplicationConfig: Hardcoded configuration management (no file creation)
+- PromptManager: Handles prompt loading, optimization, and condensation
 
 INITIALIZATION SEQUENCE:
 1. Argument parsing and environment setup
 2. Module verification and dependency checking
-3. Configuration loading with fallback to defaults
+3. Hardcoded configuration loading
 4. Debug logger initialization if enabled
-5. CursesInterface creation with config injection
-6. Signal handlers for graceful shutdown
+5. Async prompt loading and optimization phase
+6. CursesInterface creation with prompt injection
+7. Signal handlers for graceful shutdown
+
+PROMPT OPTIMIZATION ALGORITHM:
+1. Load all available prompt files with graceful missing file handling
+2. Calculate combined token usage with conservative estimation
+3. Apply LLM-powered condensation if exceeding 5k token budget
+4. Individual prompt condensation for files >1/3 of total budget
+5. Verification of condensation effectiveness
+6. Pass optimized prompts to interface configuration
 
 CONFIGURATION DEFAULTS:
-- MCP server: http://localhost:11434/api/chat
-- MCP model: qwen2.5:14b-instruct
-- MCP timeout: 30 seconds
-- Memory max tokens: 16000
+- MCP server: http://127.0.0.1:3456/chat
+- MCP model: qwen2.5:14b-instruct-q4_k_m
+- MCP timeout: 300 seconds
+- Memory max tokens: 16,000
 - Interface color theme: classic
 - Story pressure decay: 0.05
 - Antagonist threshold: 0.6
 
 DEPENDENCY MANAGEMENT:
 - Required: curses module (with platform-specific guidance)
-- Optional: httpx (graceful degradation if missing)
+- Required: httpx for MCP communication and prompt condensation
 - Module verification system for all components
+- Graceful degradation messaging for missing dependencies
 
 NCURSES INTERFACE MODULE (nci.py):
 ================================================================
 
+INTEGRATED PROMPT ARCHITECTURE:
+- CursesInterface receives loaded prompts from main.py configuration
+- Dynamic system message building with prompt integration
+- Story context injection into critrules prompt
+- Multi-prompt system: critrules + companion + lowrules
+- Real-time prompt status display and management
+
 INTERFACE ARCHITECTURE:
-- CursesInterface: Main interface controller
+- CursesInterface: Main controller with prompt system integration
 - ColorManager: Theme-based color management (classic/dark/bright)
 - InputValidator: Token estimation and input validation
 - DisplayMessage: Message formatting for display
@@ -76,20 +101,27 @@ INTERFACE ARCHITECTURE:
 WINDOW MANAGEMENT:
 - Output window: Conversation display with scroll support
 - Input window: User input with real-time validation
-- Status window: System statistics and connection status
+- Status window: System statistics, connection status, and prompt count
 - Automatic dimension calculation with minimum size validation
+
+PROMPT INTEGRATION WORKFLOW:
+- _build_system_messages(): Constructs integrated prompt chain
+- Primary prompt (critrules) enhanced with story context
+- Companion and narrative prompts added as separate system messages
+- Custom MCP request with complete message structure
+- Fallback to standard send_message if custom approach fails
 
 INPUT PROCESSING:
 - Character-by-character input building
 - Enter key submission with validation
 - Arrow key scrolling through conversation history
-- Command processing for slash commands (/help, /quit, /clear, /stats, /theme)
+- Enhanced commands: /help, /quit, /clear, /stats, /theme, /prompts
 
 MODULE INTERCONNECTS:
-- Creates and manages MCPClient, EnhancedMemoryManager, StoryMomentumEngine instances
+- Creates and manages MCPClient, EnhancedMemoryManager, StoryMomentumEngine
 - Coordinates message flow between all modules
 - Handles async MCP requests while blocking interface input
-- Formats story context from SME for MCP integration
+- Formats story context from SME for prompt integration
 
 COLOR THEME SYSTEM:
 - Classic: Cyan user, green assistant, yellow system, red error, blue borders
@@ -100,36 +132,32 @@ MCP COMMUNICATION MODULE (mcp.py):
 ================================================================
 
 STREAMLINED ARCHITECTURE:
-- MCPClient class with essential HTTP communication only
-- Single retry mechanism (MCP_MAX_RETRIES = 2) 
-- Eliminated performance monitoring and verbose error reporting
-- Clean context integration from both EMM and SME modules
-- Brand-neutral naming throughout (DevName RPG Client)
+- MCPClient class with essential HTTP communication
+- Single retry mechanism (MCP_MAX_RETRIES = 2)
+- Clean context integration from EMM and SME modules
+- Eliminated performance monitoring for simplicity
 
 CORE FUNCTIONALITY:
-- MCPClient.send_message(): Primary interface for message transmission
-  * Integrates story_context from SME module
-  * Accepts conversation_history from EMM module
-  * Handles up to 10 historical messages for efficiency
-  * Returns clean response content or raises exception
+- MCPClient.send_message(): Primary interface with story context integration
+- MCPClient._execute_request(): Direct request execution for custom message chains
 - MCPClient.test_connection(): Async connection verification
-- MCPClient.get_server_info(): Basic diagnostics without performance metrics
-- MCPClient.update_system_prompt(): Dynamic prompt modification capability
+- MCPClient.get_server_info(): Basic diagnostics
+- MCPClient.update_system_prompt(): Dynamic prompt modification
 
 ERROR HANDLING:
 - Single exception type for all MCP failures
-- Debug-only verbose logging (no user-facing error verbosity)
+- Debug-only verbose logging
 - Graceful fallback when httpx unavailable
-- Brief retry delays (1 second) without complex backoff algorithms
+- Brief retry delays (1 second) without complex backoff
 
 CONTEXT INTEGRATION DESIGN:
-- Story context from SME injected as system message: "Story Context: {context}"
-- Conversation history from EMM limited to last 10 messages for token efficiency
-- System prompt + story context + history + user input = complete message chain
+- Story context from SME injected as system message
+- Conversation history from EMM limited to last 10 messages
+- System prompt + story context + history + user input = complete chain
 - Minimal response validation for essential structure checking
 
 ASYNC EXECUTION PATTERN:
-- Creates new event loop for each request (avoiding loop conflicts)
+- Creates new event loop for each request (avoiding conflicts)
 - Simple async/await pattern with httpx.AsyncClient
 - Timeout management through httpx configuration
 - Clean loop closure after execution
@@ -144,7 +172,7 @@ SEMANTIC ANALYSIS SYSTEM:
 - LLM-powered message categorization with 6 semantic categories
 - Context-aware analysis using 11-message window (5 before + target + 5 after)
 - 3-tier retry system: Full Analysis → Simple Analysis → Binary Decision
-- Pure LLM-driven semantic decisions with no programmatic fallbacks
+- Pure LLM-driven semantic decisions with programmatic fallbacks
 
 SEMANTIC CATEGORIES & PRESERVATION RATIOS:
 - story_critical: 0.9 (90% preservation) - Major plot developments, character deaths, world-changing events
@@ -161,15 +189,15 @@ PROGRESSIVE CONDENSATION SYSTEM:
 - Recent messages (last 5) always protected from condensation
 
 FRAGMENTATION LOGIC:
-- LLM identifies multi-category messages and fragments them appropriately
+- LLM identifies multi-category messages and fragments appropriately
 - Each fragment assigned individual categories and importance scores
 - Multi-category fragments use highest applicable preservation ratio
-- Example: "Maria thanked you. Leon sneers from the side" → 2 fragments with different categories
+- Semantic fragmentation for complex messages with multiple elements
 
 MEMORY MANAGEMENT ALGORITHM:
 1. Add message → check token threshold → trigger condensation if needed
 2. Analyze condensable messages (excluding recent 5) for semantic importance
-3. Apply category-weighted preservation ratios adjusted for aggressiveness level
+3. Apply category-weighted preservation ratios adjusted for aggressiveness
 4. Group messages for condensation and create LLM-generated summary
 5. Replace condensed messages with summary, preserve important messages
 6. Repeat up to 3 passes if memory still exceeds threshold
@@ -196,14 +224,14 @@ NARRATIVE PRESSURE SYSTEM:
 - Dynamic pressure tracking on 0.0-1.0 scale with pattern-based calculation
 - Real-time story arc progression: Setup → Rising Action → Climax → Resolution
 - Context-adaptive antagonist generation based on user input patterns
-- LLM-first approach with single fallback system
+- Rate limiting (2-second cooldown) to prevent spam-induced pressure spikes
 
 PRESSURE CALCULATION ALGORITHM:
-- Pattern-based analysis using 6 momentum categories: conflict, tension, mystery, exploration, social, resolution
-- Weighted keyword matching with dynamic pressure deltas per category type
+- Pattern-based analysis using 6 momentum categories
+- Weighted keyword matching with dynamic pressure deltas per category
 - Length/complexity factors and punctuation intensity analysis
-- Natural pressure decay over time (0.05 per minute) to prevent artificial inflation
-- Rate limiting (2-second cooldown) to prevent spam-induced pressure spikes
+- Natural pressure decay over time (0.05 per minute) to prevent inflation
+- Maximum single increase cap of 0.3 to prevent extreme spikes
 
 MOMENTUM PATTERN CATEGORIES:
 - conflict: Keywords trigger +0.15 pressure (fight, attack, defend, battle, combat, strike)
@@ -220,8 +248,7 @@ STORY ARC THRESHOLDS:
 - Resolution: 0.9-1.0 pressure (concluding action)
 
 ANTAGONIST MANAGEMENT:
-- Single context-adaptive antagonist generation
-- Introduction threshold: 0.6 pressure level
+- Context-adaptive antagonist generation at 0.6 pressure threshold
 - Dynamic antagonist types based on recent user input analysis:
   * magical_opposition: Corrupted Mage (magic/spell keywords detected)
   * environmental_threat: Ancient Guardian (exploration/dungeon keywords)
@@ -249,20 +276,37 @@ SME INTERFACE FOR OTHER MODULES:
 PROMPT SYSTEM INTEGRATION:
 ================================================================
 
-COMPANION PROMPTS:
+PROMPT FILE ARCHITECTURE:
+- critrules.prompt: Core GM rules and character control boundaries (REQUIRED)
+- companion.prompt: Active companion character definition (OPTIONAL)
+- lowrules.prompt: World generation and environmental storytelling rules (OPTIONAL)
+
+COMPANION PROMPT TEMPLATES:
 - tsundere_companion.prompt: Seraphina knight companion template
 - dandere_companion.prompt: Elena healer companion template
 - kuudere_companion.prompt: Lysander mage companion template
 - himedere_companion.prompt: Victoria noble companion template
 
-RULE PROMPTS:
-- critrules.prompt: Core GM rules for character control boundaries
-- lowrules.prompt: World generation and environmental storytelling rules
+INTELLIGENT PROMPT LOADING:
+- Graceful handling of missing files with user warnings
+- Automatic token estimation and budget management
+- LLM-powered condensation when exceeding 5k token allocation
+- Preservation of essential functionality during condensation
+- Status display showing active prompt components
 
-PROMPT LOADING SYSTEM:
-- companion.prompt: Active companion (copied from specific companion template)
-- Dynamic prompt injection based on story context and pressure levels
-- Memory-conscious prompt design for semantic preservation
+PROMPT INTEGRATION WORKFLOW:
+1. Load available prompt files during startup
+2. Apply condensation if budget exceeded
+3. Pass optimized prompts to interface configuration
+4. Build dynamic system messages with story context injection
+5. Combine prompts + context + history for complete message chain
+6. Real-time status display and /prompts command for inspection
+
+TOKEN BUDGET ALLOCATION:
+- Total Context Window: 32,000 tokens
+- System Prompts: 5,000 tokens (auto-optimized)
+- Memory Storage: 16,000 tokens (semantic categorization)
+- Input Buffer: Remaining capacity with validation
 
 MODULAR PRESERVATION RULES:
 ================================================================
@@ -272,11 +316,12 @@ MODULAR PRESERVATION RULES:
 3. Story Momentum Engine maintains specific interface methods for other modules
 4. MCP Communication Module maintains specific interface methods for other modules
 5. LLM semantic analysis requires functional MCP configuration
-6. File persistence maintains metadata for debugging and analysis
+6. Prompt system requires critrules.prompt for core functionality
+7. File persistence maintains metadata for debugging and analysis
 
 ERROR HANDLING HIERARCHY:
-- main.py: Application-level errors and graceful shutdown
-- nci.py: Interface errors and display failures
+- main.py: Application-level errors, prompt loading failures, graceful shutdown
+- nci.py: Interface errors, display failures, prompt integration errors
 - mcp.py: Network errors and communication failures (simplified single exception type)
 - emm.py: Memory management errors, LLM analysis failures, condensation errors
 - sme.py: Narrative analysis and context generation errors
@@ -287,6 +332,7 @@ DEBUGGING INFRASTRUCTURE:
 - LLM interaction logging for prompt optimization
 - Token usage monitoring and condensation effectiveness metrics
 - Story pressure tracking and antagonist lifecycle monitoring
+- Prompt loading and condensation process logging
 - Simplified MCP communication logging (debug-only verbosity)
 
 PERFORMANCE CONSIDERATIONS:
@@ -296,11 +342,12 @@ PERFORMANCE CONSIDERATIONS:
 - Progressive aggressiveness ensures memory constraints are met
 - Story pressure calculation optimized for real-time performance
 - Rate limiting prevents computational overhead from input spam
+- Prompt condensation reduces token usage while preserving functionality
 - Simplified MCP retry logic reduces communication overhead
 
 DEPENDENCY REQUIREMENTS:
 - Python 3.8+ with curses support
-- httpx library for HTTP communication (required for LLM semantic analysis)
+- httpx library for HTTP communication (REQUIRED for full functionality)
 - asyncio for non-blocking LLM calls in memory management
 - JSON for configuration and history storage
 - Threading for thread-safe memory operations
@@ -318,3 +365,34 @@ AI MODIFICATION GUIDELINES:
 8. Semantic category changes must update preservation ratios accordingly
 9. Story pressure thresholds and antagonist generation logic must remain context-adaptive
 10. Pattern-based pressure calculation should maintain balance between categories
+11. Prompt system modifications must maintain critrules.prompt as required dependency
+12. Token budget changes require corresponding updates to allocation constants
+13. Condensation logic changes must preserve essential prompt functionality
+14. System message building must maintain prompt integration order and structure
+
+ARCHITECTURAL INNOVATIONS:
+================================================================
+
+STORY MOMENTUM ENGINE:
+- Mathematical pressure modeling prevents common AI storytelling pitfalls
+- Context-adaptive antagonist generation based on player behavior patterns
+- Natural pressure decay prevents artificial tension inflation
+- Rate limiting prevents exploitation through rapid inputs
+
+INTELLIGENT MEMORY MANAGEMENT:
+- LLM-powered semantic categorization with multi-tier retry system
+- Progressive condensation with category-weighted preservation
+- Thread-safe operations with async LLM calls
+- Fragmentation logic for complex multi-category messages
+
+INTEGRATED PROMPT SYSTEM:
+- Dynamic prompt loading with intelligent condensation
+- Token budget management with automatic optimization
+- Story context injection into core GM rules
+- Multi-prompt integration with hierarchical message building
+
+TECHNICAL EXCELLENCE:
+- Graceful degradation with missing components
+- Comprehensive error handling with debug transparency
+- Modular architecture with clear separation of concerns
+- Real-time status monitoring and user feedback
