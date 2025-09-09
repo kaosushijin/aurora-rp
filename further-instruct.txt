@@ -1,0 +1,9 @@
+Please create a copy of the latest revision of ```Interface Final Touches```, name it ```Interface Final Touches Mk2```, and then work the following considerations into the new "Mk2" copy:
+
+If it hasn't already been accounted for, I would like Arrow Keys Up and Down to traverse lines in the input box (if multiple lines exist).  In the case where we've moved the cursor up into an old line, moved it to the end of the old line (to the right), and then moved it down into void/unwritten space past the new line, the cursor should appropriately snap to the left, to the end of the new line.  This is both an explicit request and an example of the robustness of the multi-line input to be expected.
+
+Also, when we detect the terminal has been resized, we should automatically exit scrollback mode and "End" down to the latest messages to reinitialize the scrollback function for the new geometry.  This way we will not have to do any complicated logic to try to retain the previous scrollback state with the new geometry.
+
+See the example output (attached as ```output-nl-interp.txt```)  Showing that new lines produced by the model are being ignored, clumping the response into a paragraph;  We need any new lines the model produces to be preserved in the output formatting.
+
+Finally, let's expose the SME antagonist name in the status bar after it's been generated for the first time, but only when running in debug mode.
