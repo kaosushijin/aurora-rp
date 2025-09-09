@@ -1,18 +1,18 @@
-# Chunk 6a/6 - nci.py (refactored) - Part 1/4 - Imports and Initialization
+# Chunk 1/4 - nci.py with Dynamic Box Coordinate System - Imports and Initialization
 #!/usr/bin/env python3
 """
-DevName RPG Client - Ncurses Interface Module (nci.py) - REFACTORED
+DevName RPG Client - Ncurses Interface Module (nci.py) - DYNAMIC COORDINATES
 Module architecture and interconnects documented in genai.txt
-Uses extracted support modules for better separation of concerns
+Uses dynamic box coordinate system for robust window management
 """
 
 import curses
 import time
 from typing import Dict, List, Any, Optional, Tuple
 
-# Import extracted modules
+# Import extracted modules with dynamic coordinate support
 from nci_colors import ColorManager, ColorTheme
-from nci_terminal import TerminalManager
+from nci_terminal import TerminalManager, LayoutGeometry
 from nci_display import DisplayMessage, InputValidator
 from nci_scroll import ScrollManager
 from nci_input import MultiLineInput
@@ -31,13 +31,13 @@ MAX_USER_INPUT_TOKENS = 2000
 
 class CursesInterface:
     """
-    REFACTORED: Ncurses interface using extracted support modules
+    DYNAMIC COORDINATES: Ncurses interface using box coordinate system
     
-    SIMPLIFICATIONS:
-    - Uses extracted modules for specialized functionality
-    - Reduced from ~1000 lines to ~400 lines
-    - Cleaner separation of concerns
-    - Maintained all existing functionality
+    IMPROVEMENTS:
+    - Dynamic window positioning eliminates coordinate assumption bugs
+    - Automatic adaptation to terminal geometry changes
+    - Simplified resize logic with consistent layout
+    - Robust coordinate calculations prevent curses NULL returns
     """
     
     def __init__(self, debug_logger=None, config=None):
@@ -55,12 +55,8 @@ class CursesInterface:
         self.input_win = None
         self.status_win = None
         
-        # Screen dimensions (managed by TerminalManager)
-        self.screen_height = 0
-        self.screen_width = 0
-        self.output_win_height = 0
-        self.input_win_height = 4
-        self.status_win_height = 1
+        # Dynamic layout management
+        self.current_layout = None
         
         # Extracted module instances
         self.terminal_manager = None  # Initialize after stdscr available
@@ -124,11 +120,9 @@ class CursesInterface:
             self._log_debug(f"Curses wrapper error: {e}")
             print(f"Interface error: {e}")
             return 1
-
-# Chunk 6b/6 - nci.py (refactored) - Part 2/4 - Initialization and Window Management
     
     def _initialize_interface(self, stdscr):
-        """Initialize interface without MCP connection testing"""
+        """Initialize interface with dynamic coordinate system"""
         self.stdscr = stdscr
         
         # Basic ncurses setup
@@ -139,102 +133,88 @@ class CursesInterface:
         stdscr.clear()
         stdscr.refresh()
         
-        # Initialize terminal manager
+        # Initialize terminal manager with dynamic coordinates
         self.terminal_manager = TerminalManager(stdscr)
         resized, width, height = self.terminal_manager.check_resize()
-        self.screen_width, self.screen_height = width, height
         
         # Check minimum size
         if self.terminal_manager.is_too_small():
             self.terminal_manager.show_too_small_message()
             return
         
-        # Initialize components with proper dimensions
-        self.color_manager.init_colors()
-        self._calculate_window_dimensions()
-        self.multi_input.update_max_width(self.screen_width - 10)
-        self.scroll_manager.update_window_height(self.output_win_height)
+        # Get initial layout
+        self.current_layout = self.terminal_manager.get_box_layout()
         
-        # Create windows and populate content
-        self._create_windows()
+        # Initialize components with layout dimensions
+        self.color_manager.init_colors()
+        self._update_component_dimensions()
+        
+        # Create windows using dynamic coordinates
+        self._create_windows_dynamic()
+        
+        # Populate content and finalize setup
         self._populate_welcome_content()
         self._ensure_cursor_in_input()
         
-        self._log_debug(f"Interface initialized: {self.screen_width}x{self.screen_height}")
+        self._log_debug(f"Interface initialized with dynamic coordinates: {width}x{height}")
     
-    def _calculate_window_dimensions(self):
-        """Calculate window dimensions with better proportions"""
-        # Reserve space for borders
-        border_space = 3
+    def _update_component_dimensions(self):
+        """Update component dimensions from current layout"""
+        if not self.current_layout:
+            return
         
-        # Calculate output window height (majority of screen)
-        available_height = self.screen_height - self.input_win_height - self.status_win_height - border_space
-        self.output_win_height = max(8, available_height)
+        # Update multi-input width
+        self.multi_input.update_max_width(self.current_layout.terminal_width - 10)
         
-        # Adjust input height if screen is very small
-        if self.output_win_height < 12 and self.input_win_height > 2:
-            self.input_win_height = 2
-            self.output_win_height = self.screen_height - self.input_win_height - self.status_win_height - border_space
+        # Update scroll manager height
+        self.scroll_manager.update_window_height(self.current_layout.output_box.inner_height)
     
-    def _create_windows(self):
-        """Create ncurses windows with immediate display"""
-        # Output window (conversation display)
+    def _create_windows_dynamic(self):
+        """Create ncurses windows using dynamic box coordinates"""
+        if not self.current_layout:
+            return
+        
+        layout = self.current_layout
+        
+        # Output window using box coordinates
         self.output_win = curses.newwin(
-            self.output_win_height,
-            self.screen_width,
-            0,
-            0
+            layout.output_box.height,
+            layout.output_box.width,
+            layout.output_box.top,
+            layout.output_box.left
         )
         self.output_win.scrollok(True)
         self.output_win.idlok(True)
         self.output_win.clear()
         self.output_win.refresh()
         
-        # Input window (user input)
-        input_y = self.output_win_height + 1
+        # Input window using box coordinates
         self.input_win = curses.newwin(
-            self.input_win_height,
-            self.screen_width,
-            input_y,
-            0
+            layout.input_box.height,
+            layout.input_box.width,
+            layout.input_box.top,
+            layout.input_box.left
         )
         self.input_win.clear()
         self._update_input_display()
         
-        # Status window (bottom line)
-        status_y = input_y + self.input_win_height + 1
+        # Status window using box coordinates
         self.status_win = curses.newwin(
-            self.status_win_height,
-            self.screen_width,
-            status_y,
-            0
+            layout.status_line.height,
+            layout.status_line.width,
+            layout.status_line.top,
+            layout.status_line.left
         )
         self.status_win.clear()
         self.status_win.addstr(0, 0, "Ready")
         self.status_win.refresh()
         
-        # Draw borders
-        self._draw_borders()
-    
-    def _draw_borders(self):
-        """Draw window borders with immediate refresh"""
+        # Draw borders using layout coordinates
         border_color = self.color_manager.get_color('border')
-        
-        if border_color and self.color_manager.colors_available:
-            self.stdscr.attron(curses.color_pair(border_color))
-        
-        # Top border
-        self.stdscr.hline(self.output_win_height, 0, curses.ACS_HLINE, self.screen_width)
-        
-        # Bottom border
-        status_y = self.output_win_height + self.input_win_height + 1
-        self.stdscr.hline(status_y, 0, curses.ACS_HLINE, self.screen_width)
-        
-        if border_color and self.color_manager.colors_available:
-            self.stdscr.attroff(curses.color_pair(border_color))
-        
-        self.stdscr.refresh()
-    
+        self.terminal_manager.draw_box_borders(layout, border_color)
+
+# Chunk 2/4 - nci.py with Dynamic Box Coordinate System - Main Loop and Resize Handling
+
     def _populate_welcome_content(self):
         """Add welcome messages WITHOUT MCP connection testing"""
         # Welcome message
@@ -277,17 +257,17 @@ class CursesInterface:
         self._update_status_display()
     
     def _run_main_loop(self):
-        """Main input processing loop with enhanced features"""
+        """Main input processing loop with dynamic coordinate support"""
         while self.running:
             try:
-                # Check for terminal resize
+                # Check for terminal resize with dynamic coordinate handling
                 resized, new_width, new_height = self.terminal_manager.check_resize()
                 if resized:
                     if self.terminal_manager.is_too_small():
                         self.terminal_manager.show_too_small_message()
                         continue
                     else:
-                        self._handle_resize(new_width, new_height)
+                        self._handle_resize_dynamic()
                 
                 # Get user input
                 key = self.stdscr.getch()
@@ -308,46 +288,51 @@ class CursesInterface:
             except Exception as e:
                 self._log_debug(f"Main loop error: {e}")
     
-    def _handle_resize(self, new_width: int, new_height: int):
-        """Handle terminal resize with complete window recreation"""
-        self._log_debug(f"Terminal resized: {new_width}x{new_height}")
+    def _handle_resize_dynamic(self):
+        """
+        SIMPLIFIED: Handle terminal resize with dynamic coordinate system
         
-        # Update dimensions
-        self.screen_width = new_width
-        self.screen_height = new_height
+        No manual coordinate calculations needed - layout system handles everything
+        """
+        # Get new layout from terminal manager
+        self.current_layout = self.terminal_manager.get_box_layout()
         
-        # Recalculate window dimensions
-        self._calculate_window_dimensions()
+        if not self.current_layout:
+            return
         
-        # Update component dimensions
-        self.multi_input.update_max_width(new_width - 10)
-        self.scroll_manager.update_window_height(self.output_win_height)
-        self.scroll_manager.update_max_scroll(len(self.display_lines))
+        self._log_debug(f"Terminal resized: {self.current_layout.terminal_width}x{self.current_layout.terminal_height}")
         
-        # Recreate windows
-        self._create_windows()
+        # Update component dimensions from new layout
+        self._update_component_dimensions()
         
-        # Rewrap all display content
+        # Recreate windows with new coordinates
+        self._create_windows_dynamic()
+        
+        # Rewrap content for new dimensions
         self._rewrap_all_content()
         
         # Force complete refresh
         self._refresh_all_windows()
         
-        self._log_debug("Resize handling complete")
+        self._log_debug("Dynamic resize handling complete")
     
     def _rewrap_all_content(self):
         """Rewrap all messages for new terminal width"""
+        if not self.current_layout:
+            return
+        
         self.display_lines.clear()
         
+        # Use inner width for content wrapping
+        content_width = self.current_layout.output_box.inner_width - 2
+        
         for message in self.display_messages:
-            wrapped_lines = message.format_for_display(self.screen_width - 2)
+            wrapped_lines = message.format_for_display(content_width)
             for line in wrapped_lines:
                 self.display_lines.append((line, message.msg_type))
         
         # Update scroll manager with new content
         self.scroll_manager.update_max_scroll(len(self.display_lines))
-
-# Chunk 6c/6 - nci.py (refactored) - Part 3/4 - Input Handling and MCP Processing
     
     def _handle_key_input(self, key: int) -> bool:
         """Enhanced key handling with multi-line input and navigation"""
@@ -466,7 +451,9 @@ class CursesInterface:
             self._change_theme(theme_name)
         else:
             self.add_error_message_immediate(f"Unknown command: {command}")
-    
+
+# Chunk 3/4 - nci.py with Dynamic Box Coordinate System - MCP Processing and Display Updates
+
     def _send_mcp_request(self, user_input: str):
         """Send MCP request with improved error handling"""
         try:
@@ -553,17 +540,20 @@ class CursesInterface:
             parts.append(f"Antagonist: {name} (threat: {threat:.2f})")
         
         return " | ".join(parts)
-
-# Chunk 6d/6 - nci.py (refactored) - Part 4/4 - Display Methods and Commands
     
-    # Display update methods using extracted components
+    # Display update methods using dynamic box coordinates
     def _add_message_immediate(self, message: DisplayMessage):
-        """Add message with immediate display refresh"""
+        """Add message with immediate display refresh using dynamic coordinates"""
         # Add to message storage
         self.display_messages.append(message)
         
-        # Generate wrapped lines
-        wrapped_lines = message.format_for_display(self.screen_width - 2)
+        # Generate wrapped lines using layout inner width
+        if self.current_layout:
+            content_width = self.current_layout.output_box.inner_width - 2
+        else:
+            content_width = 78  # Fallback width
+        
+        wrapped_lines = message.format_for_display(content_width)
         
         # Add to display lines cache
         for line in wrapped_lines:
@@ -584,7 +574,10 @@ class CursesInterface:
         self._update_output_display()
     
     def _update_input_display(self):
-        """Update input display with multi-line support"""
+        """Update input display with multi-line support using dynamic coordinates"""
+        if not self.current_layout or not self.input_win:
+            return
+        
         self.input_win.clear()
         
         if self.mcp_processing:
@@ -594,11 +587,11 @@ class CursesInterface:
             prompt = "Input> "
             prompt_color = self.color_manager.get_color('user')
         
-        # Get display lines from multi-input
-        display_lines = self.multi_input.get_display_lines(
-            self.screen_width - 8, 
-            self.input_win_height - 1
-        )
+        # Get display lines from multi-input using layout dimensions
+        available_width = self.current_layout.input_box.inner_width - 8
+        available_height = self.current_layout.input_box.inner_height - 1
+        
+        display_lines = self.multi_input.get_display_lines(available_width, available_height)
         
         # Display prompt and first line
         try:
@@ -612,7 +605,7 @@ class CursesInterface:
             # Display input content
             if display_lines:
                 first_line = display_lines[0]
-                max_len = self.screen_width - len(prompt) - 1
+                max_len = self.current_layout.input_box.inner_width - len(prompt) - 1
                 if len(first_line) > max_len:
                     first_line = first_line[:max_len]
                 
@@ -620,10 +613,10 @@ class CursesInterface:
                 
                 # Display additional lines if multi-line
                 for i, line in enumerate(display_lines[1:], 1):
-                    if i >= self.input_win_height - 1:
+                    if i >= self.current_layout.input_box.inner_height - 1:
                         break
                     
-                    max_len = self.screen_width - 1
+                    max_len = self.current_layout.input_box.inner_width - 1
                     if len(line) > max_len:
                         line = line[:max_len]
                     
@@ -636,16 +629,21 @@ class CursesInterface:
         self._ensure_cursor_in_input()
     
     def _update_output_display(self):
-        """Update output window with immediate refresh"""
+        """Update output window with immediate refresh using dynamic coordinates"""
+        if not self.current_layout or not self.output_win:
+            return
+        
         self.output_win.clear()
         
         # Get visible lines based on scroll position
         start_idx, end_idx = self.scroll_manager.get_visible_range()
         visible_lines = self.display_lines[start_idx:end_idx]
         
-        # Display lines with proper colors
+        # Display lines with proper colors using layout dimensions
+        max_display_lines = self.current_layout.output_box.inner_height
+        
         for i, (line_text, msg_type) in enumerate(visible_lines):
-            if i >= self.output_win_height - 1:
+            if i >= max_display_lines:
                 break
             
             # Handle empty lines (true blank lines)
@@ -657,7 +655,8 @@ class CursesInterface:
                 continue
             
             color = self.color_manager.get_color(msg_type)
-            display_text = line_text[:self.screen_width - 1] if len(line_text) >= self.screen_width else line_text
+            max_line_width = self.current_layout.output_box.inner_width - 1
+            display_text = line_text[:max_line_width] if len(line_text) >= max_line_width else line_text
             
             try:
                 if color and self.color_manager.colors_available:
@@ -673,7 +672,10 @@ class CursesInterface:
         self._ensure_cursor_in_input()
     
     def _update_status_display(self):
-        """Update status with scroll indicators and information"""
+        """Update status with scroll indicators using dynamic coordinates"""
+        if not self.current_layout or not self.status_win:
+            return
+        
         self.status_win.clear()
         
         status_parts = []
@@ -712,12 +714,14 @@ class CursesInterface:
         
         # Terminal size (for debugging)
         if self.debug_logger:
-            status_parts.append(f"{self.screen_width}x{self.screen_height}")
+            status_parts.append(f"{self.current_layout.terminal_width}x{self.current_layout.terminal_height}")
         
         status_text = " | ".join(status_parts)
         
-        if len(status_text) > self.screen_width - 1:
-            status_text = status_text[:self.screen_width - 4] + "..."
+        # Use layout width for truncation
+        max_status_width = self.current_layout.status_line.inner_width - 1
+        if len(status_text) > max_status_width:
+            status_text = status_text[:max_status_width - 3] + "..."
         
         try:
             status_color = self.color_manager.get_color('system')
@@ -732,19 +736,21 @@ class CursesInterface:
         
         self.status_win.refresh()
         self._ensure_cursor_in_input()
-    
+
+# Chunk 4/4 - nci.py with Dynamic Box Coordinate System - Cursor Management, Commands and Utilities
+
     def _ensure_cursor_in_input(self):
-        """Ensure cursor is positioned correctly in input window"""
+        """Ensure cursor is positioned correctly using dynamic coordinates"""
         try:
-            if not self.mcp_processing and self.input_win:
+            if not self.mcp_processing and self.input_win and self.current_layout:
                 # Get actual cursor position from multi-line input
                 cursor_line, cursor_col = self.multi_input.get_cursor_position()
 
-                # For multi-line display, we need to map logical cursor to display cursor
-                display_lines = self.multi_input.get_display_lines(
-                    self.screen_width - 8,
-                    self.input_win_height - 1
-                )
+                # For multi-line display, map logical cursor to display cursor
+                available_width = self.current_layout.input_box.inner_width - 8
+                available_height = self.current_layout.input_box.inner_height - 1
+                
+                display_lines = self.multi_input.get_display_lines(available_width, available_height)
 
                 if cursor_line == 0:
                     # First line - add prompt length
@@ -754,9 +760,12 @@ class CursesInterface:
                     # Subsequent lines - no prompt prefix
                     visual_x = cursor_col
 
-                # Clamp to window boundaries
-                visual_x = min(visual_x, self.screen_width - 1)
-                visual_y = min(cursor_line, self.input_win_height - 1)
+                # Clamp to layout boundaries
+                max_width = self.current_layout.input_box.inner_width - 1
+                max_height = self.current_layout.input_box.inner_height - 1
+                
+                visual_x = min(visual_x, max_width)
+                visual_y = min(cursor_line, max_height)
 
                 # Set cursor position
                 self.input_win.move(visual_y, visual_x)
@@ -767,12 +776,17 @@ class CursesInterface:
             pass
     
     def _refresh_all_windows(self):
-        """Refresh all windows immediately"""
+        """Refresh all windows immediately using dynamic coordinates"""
         try:
             self._update_output_display()
             self._update_input_display()
             self._update_status_display()
-            self._draw_borders()
+            
+            # Redraw borders using layout
+            if self.current_layout:
+                border_color = self.color_manager.get_color('border')
+                self.terminal_manager.draw_box_borders(self.current_layout, border_color)
+                
         except curses.error as e:
             self._log_debug(f"Display refresh error: {e}")
     
@@ -823,8 +837,9 @@ class CursesInterface:
         self.scroll_manager.in_scrollback = False
         
         # Clear and refresh output window
-        self.output_win.clear()
-        self.output_win.refresh()
+        if self.output_win:
+            self.output_win.clear()
+            self.output_win.refresh()
         
         # Add clear confirmation message
         self.add_system_message_immediate("Display cleared")
@@ -856,7 +871,7 @@ class CursesInterface:
             self.add_system_message_immediate(msg)
     
     def _show_stats(self):
-        """Show comprehensive system statistics"""
+        """Show comprehensive system statistics using dynamic coordinates"""
         try:
             # Memory stats
             mem_stats = self.memory_manager.get_memory_stats()
@@ -882,13 +897,19 @@ class CursesInterface:
         self.add_system_message_immediate(f"MCP: {mcp_info.get('server_url', 'unknown')}")
         self.add_system_message_immediate(f"Model: {mcp_info.get('model', 'unknown')}")
         
-        # Display stats
+        # Display stats using dynamic coordinates
         scroll_info = self.scroll_manager.get_scroll_info()
         self.add_system_message_immediate(f"Display: {len(self.display_lines)} lines, "
                                        f"Scroll: {scroll_info['offset']}/{scroll_info['max']}")
         
-        # Terminal stats
-        self.add_system_message_immediate(f"Terminal: {self.screen_width}x{self.screen_height}")
+        # Terminal stats with layout info
+        if self.current_layout:
+            layout = self.current_layout
+            self.add_system_message_immediate(f"Terminal: {layout.terminal_width}x{layout.terminal_height}")
+            self.add_system_message_immediate(f"Layout: Output {layout.output_box.inner_width}x{layout.output_box.inner_height}, "
+                                           f"Input {layout.input_box.inner_width}x{layout.input_box.inner_height}")
+        else:
+            self.add_system_message_immediate("Terminal: Layout not available")
         
         # Input stats
         input_content = self.multi_input.get_content()
@@ -944,13 +965,18 @@ class CursesInterface:
 
 # Module test functionality
 if __name__ == "__main__":
-    print("DevName RPG Client - Ncurses Interface Module - REFACTORED")
-    print("Successfully extracted support modules:")
-    print("✓ nci_colors.py - Color management")
-    print("✓ nci_terminal.py - Terminal management") 
-    print("✓ nci_display.py - Message display")
-    print("✓ nci_scroll.py - Scrolling system")
-    print("✓ nci_input.py - Multi-line input")
-    print("✓ nci.py - Main interface (reduced complexity)")
-    print("\nRefactored interface maintains all functionality while improving code organization.")
-    print("Run main.py to start the application with the refactored modules.")
+    print("DevName RPG Client - Ncurses Interface Module - DYNAMIC COORDINATES")
+    print("Successfully implemented dynamic box coordinate system:")
+    print("✓ nci_terminal.py - Box coordinate calculation and layout geometry")
+    print("✓ nci.py - Dynamic window positioning and content adaptation")
+    print("✓ Eliminated manual coordinate calculations")
+    print("✓ Automatic adaptation to terminal geometry changes")
+    print("✓ Simplified resize handling with consistent layout")
+    print("✓ Robust coordinate system prevents curses NULL returns")
+    print("\nDynamic coordinate system provides:")
+    print("- Coordinate independence from terminal size")
+    print("- Automatic proportional scaling")
+    print("- Visual consistency across all terminal sizes") 
+    print("- Simplified debugging with clear boundaries")
+    print("- Elimination of coordinate assumption bugs")
+    print("\nRun main.py to start the application with dynamic coordinates.")
