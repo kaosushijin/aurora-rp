@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-# Chunk 1/3 - emm.py - Enhanced Memory Manager with Auto-Save Infrastructure
+# emm.py - Enhanced Memory Manager Module
 # CRITICAL: Read genai.txt to understand the holistic program across modules.
 
 import json
 import os
-import shutil
 import time
 from datetime import datetime
 from enum import Enum
@@ -13,9 +12,6 @@ from uuid import uuid4
 import threading
 import asyncio
 import httpx
-
-# Default memory file configuration
-DEFAULT_MEMORY_FILE = "memory.json"
 
 class MessageType(Enum):
     """Message type enumeration for conversation tracking"""
@@ -62,14 +58,11 @@ class Message:
         return msg
 
 class EnhancedMemoryManager:
-    """Memory management with LLM-powered semantic condensation and auto-persistence"""
+    """Memory management with LLM-powered semantic condensation"""
     
-    def __init__(self, max_memory_tokens: int = 16000, debug_logger=None, 
-                 auto_save_enabled: bool = True, memory_file: str = DEFAULT_MEMORY_FILE):
+    def __init__(self, max_memory_tokens: int = 16000, debug_logger=None):
         self.max_memory_tokens = max_memory_tokens
         self.debug_logger = debug_logger
-        self.auto_save_enabled = auto_save_enabled
-        self.memory_file = memory_file
         self.messages: List[Message] = []
         self.condensation_count = 0
         self.lock = threading.Lock()
@@ -87,10 +80,6 @@ class EnhancedMemoryManager:
         # MCP client configuration
         self.mcp_config = self._load_mcp_config()
         
-        # Auto-load existing memory on initialization
-        if self.auto_save_enabled:
-            self._auto_load()
-        
     def _load_mcp_config(self) -> Dict[str, Any]:
         """Load MCP configuration for LLM calls"""
         return {
@@ -99,43 +88,8 @@ class EnhancedMemoryManager:
             "timeout": 300
         }
     
-    def _auto_load(self) -> None:
-        """Auto-load memory from file if it exists"""
-        try:
-            if os.path.exists(self.memory_file):
-                success = self.load_conversation(self.memory_file)
-                if success and self.debug_logger:
-                    self.debug_logger.memory(f"Auto-loaded {len(self.messages)} messages from {self.memory_file}")
-                elif not success and self.debug_logger:
-                    self.debug_logger.error(f"Failed to auto-load from {self.memory_file}")
-            elif self.debug_logger:
-                self.debug_logger.memory(f"No existing memory file found at {self.memory_file}")
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Auto-load error: {e}")
-    
-    def _auto_save(self) -> None:
-        """Auto-save memory to file"""
-        if not self.auto_save_enabled:
-            return
-            
-        try:
-            # Create backup of existing file
-            if os.path.exists(self.memory_file):
-                backup_file = f"{self.memory_file}.bak"
-                shutil.copy2(self.memory_file, backup_file)
-            
-            # Save current state
-            success = self.save_conversation(self.memory_file)
-            if not success and self.debug_logger:
-                self.debug_logger.error(f"Auto-save failed to {self.memory_file}")
-                
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Auto-save error: {e}")
-    
     def add_message(self, content: str, message_type: MessageType) -> None:
-        """Add new message and manage memory with auto-save"""
+        """Add new message and manage memory"""
         with self.lock:
             message = Message(content, message_type)
             self.messages.append(message)
@@ -143,97 +97,11 @@ class EnhancedMemoryManager:
             if self.debug_logger:
                 self.debug_logger.memory(f"Added {message_type.value} message: {len(content)} chars, {message.token_estimate} tokens")
             
-            # Auto-save after adding message
-            self._auto_save()
-            
             # Check if condensation needed
             current_tokens = sum(msg.token_estimate for msg in self.messages)
             if current_tokens > self.max_memory_tokens:
                 self._perform_semantic_condensation()
     
-    def clear_memory_file(self) -> bool:
-        """Clear memory file and reset in-memory state"""
-        try:
-            with self.lock:
-                # Clear in-memory state
-                self.messages.clear()
-                self.condensation_count = 0
-                
-                # Remove memory file if it exists
-                if os.path.exists(self.memory_file):
-                    os.remove(self.memory_file)
-                
-                # Remove backup file if it exists
-                backup_file = f"{self.memory_file}.bak"
-                if os.path.exists(backup_file):
-                    os.remove(backup_file)
-            
-            if self.debug_logger:
-                self.debug_logger.memory(f"Memory file {self.memory_file} cleared")
-            
-            return True
-            
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to clear memory file: {e}")
-            return False
-    
-    def get_memory_file_info(self) -> Dict[str, Any]:
-        """Get memory file information for status reporting"""
-        try:
-            if not os.path.exists(self.memory_file):
-                return {
-                    "file_exists": False,
-                    "file_path": self.memory_file,
-                    "auto_save_enabled": self.auto_save_enabled
-                }
-            
-            stat = os.stat(self.memory_file)
-            
-            with self.lock:
-                return {
-                    "file_exists": True,
-                    "file_path": self.memory_file,
-                    "file_size": stat.st_size,
-                    "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "message_count": len(self.messages),
-                    "auto_save_enabled": self.auto_save_enabled,
-                    "backup_exists": os.path.exists(f"{self.memory_file}.bak")
-                }
-                
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to get memory file info: {e}")
-            return {
-                "file_exists": False,
-                "error": str(e),
-                "auto_save_enabled": self.auto_save_enabled
-            }
-    
-    def backup_memory_file(self, backup_filename: Optional[str] = None) -> bool:
-        """Create backup of memory file"""
-        try:
-            if not os.path.exists(self.memory_file):
-                return False
-            
-            if not backup_filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_filename = f"memory_backup_{timestamp}.json"
-            
-            shutil.copy2(self.memory_file, backup_filename)
-            
-            if self.debug_logger:
-                self.debug_logger.memory(f"Memory backed up to {backup_filename}")
-            
-            return True
-            
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to backup memory file: {e}")
-            return False
-
-# Chunk 2/3 - emm.py - LLM Semantic Analysis and Condensation Logic
-
     def get_messages(self, limit: Optional[int] = None) -> List[Message]:
         """Retrieve messages with optional limit"""
         with self.lock:
@@ -261,14 +129,16 @@ class EnhancedMemoryManager:
                 "condensations_performed": self.condensation_count
             }
 
+# Chunk 2 - LLM Semantic Analysis and Condensation Logic
+
     async def _call_llm(self, messages: List[Dict[str, str]]) -> Optional[str]:
         """Make LLM request for semantic analysis"""
         try:
             async with httpx.AsyncClient(timeout=self.mcp_config.get("timeout", 30)) as client:
                 response = await client.post(
-                    self.mcp_config["server_url"],
+                    f"{self.mcp_config['server_url']}/api/chat",
                     json={
-                        "model": self.mcp_config["model"],
+                        "model": self.mcp_config.get("model", "llama3.1:8b"),
                         "messages": messages,
                         "stream": False
                     }
@@ -421,8 +291,10 @@ Return JSON:
             
         return None
 
+# Chunk 3 - Condensation Execution and File Persistence
+
     def _perform_semantic_condensation(self) -> None:
-        """Execute LLM-powered semantic condensation with auto-save"""
+        """Execute LLM-powered semantic condensation"""
         if len(self.messages) < 10:  # Need minimum messages for context
             return
             
@@ -435,7 +307,7 @@ Return JSON:
             loop.close()
     
     async def _async_condensation(self) -> None:
-        """Async condensation with category-weighted preservation and auto-save"""
+        """Async condensation with category-weighted preservation"""
         aggressiveness_level = 0
         max_passes = 3
         
@@ -479,9 +351,6 @@ Return JSON:
                     # Replace condensed messages with summary
                     self.messages = [condensed_message] + preserve_messages
                     self.condensation_count += 1
-                    
-                    # Auto-save after successful condensation
-                    self._auto_save()
                     
                     if self.debug_logger:
                         new_tokens = sum(msg.token_estimate for msg in self.messages)
@@ -542,11 +411,9 @@ Return JSON:
             )
         
         return None
-
-# Chunk 3/3 - emm.py - File Persistence and Utility Methods
-
+    
     def save_conversation(self, filename: Optional[str] = None) -> bool:
-        """Save conversation to file with robust error handling"""
+        """Save conversation to file"""
         if not filename:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"chat_history_{timestamp}.json"
@@ -558,24 +425,13 @@ Return JSON:
                         "saved_at": datetime.now().isoformat(),
                         "message_count": len(self.messages),
                         "total_tokens": sum(msg.token_estimate for msg in self.messages),
-                        "condensations": self.condensation_count,
-                        "auto_save_enabled": self.auto_save_enabled
+                        "condensations": self.condensation_count
                     },
                     "messages": [msg.to_dict() for msg in self.messages]
                 }
             
-            # Create backup if file already exists
-            if os.path.exists(filename):
-                backup_filename = f"{filename}.bak"
-                shutil.copy2(filename, backup_filename)
-            
-            # Write to temporary file first, then move to prevent corruption
-            temp_filename = f"{filename}.tmp"
-            with open(temp_filename, "w", encoding="utf-8") as f:
+            with open(filename, "w", encoding="utf-8") as f:
                 json.dump(conversation_data, f, indent=2, ensure_ascii=False)
-            
-            # Atomic move
-            shutil.move(temp_filename, filename)
             
             if self.debug_logger:
                 self.debug_logger.system(f"Conversation saved to {filename}")
@@ -585,72 +441,44 @@ Return JSON:
         except Exception as e:
             if self.debug_logger:
                 self.debug_logger.error(f"Failed to save conversation: {e}")
-            
-            # Clean up temporary file if it exists
-            temp_filename = f"{filename}.tmp"
-            if os.path.exists(temp_filename):
-                try:
-                    os.remove(temp_filename)
-                except:
-                    pass
-            
             return False
     
     def load_conversation(self, filename: str) -> bool:
-        """Load conversation from file with corruption recovery"""
+        """Load conversation from file"""
         try:
             if not os.path.exists(filename):
-                if self.debug_logger:
-                    self.debug_logger.memory(f"File does not exist: {filename}")
                 return False
-            
-            # Try loading main file
-            try:
-                with open(filename, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                if self.debug_logger:
-                    self.debug_logger.error(f"Main file corrupted, trying backup: {e}")
                 
-                # Try backup file
-                backup_filename = f"{filename}.bak"
-                if os.path.exists(backup_filename):
-                    with open(backup_filename, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    if self.debug_logger:
-                        self.debug_logger.memory("Recovered from backup file")
-                else:
-                    raise e
+            with open(filename, "r", encoding="utf-8") as f:
+                data = json.load(f)
             
             with self.lock:
-                # Load messages
                 self.messages = [
                     Message.from_dict(msg_data) 
                     for msg_data in data.get("messages", [])
                 ]
                 
-                # Load metadata
                 metadata = data.get("metadata", {})
                 self.condensation_count = metadata.get("condensations", 0)
             
             if self.debug_logger:
-                self.debug_logger.system(f"Conversation loaded from {filename}: {len(self.messages)} messages")
+                self.debug_logger.system(f"Conversation loaded from {filename}")
             
             return True
             
         except Exception as e:
             if self.debug_logger:
-                self.debug_logger.error(f"Failed to load conversation from {filename}: {e}")
+                self.debug_logger.error(f"Failed to load conversation: {e}")
             return False
     
     def clear_memory(self) -> None:
-        """Clear all stored messages (in-memory only)"""
+        """Clear all stored messages"""
         with self.lock:
             self.messages.clear()
             self.condensation_count = 0
             
         if self.debug_logger:
-            self.debug_logger.memory("In-memory state cleared")
+            self.debug_logger.memory("Memory cleared")
     
     def analyze_conversation_patterns(self) -> Dict[str, Any]:
         """Generate conversation statistics for debugging"""
@@ -674,18 +502,15 @@ Return JSON:
                 "memory_utilization": round(total_tokens / self.max_memory_tokens, 3),
                 "condensations_performed": self.condensation_count,
                 "oldest_message": self.messages[0].timestamp if self.messages else None,
-                "newest_message": self.messages[-1].timestamp if self.messages else None,
-                "auto_save_enabled": self.auto_save_enabled,
-                "memory_file": self.memory_file
+                "newest_message": self.messages[-1].timestamp if self.messages else None
             }
 
 # Module test functionality
 if __name__ == "__main__":
-    print("DevName RPG Client - Enhanced Memory Manager with Auto-Save")
+    print("DevName RPG Client - Enhanced Memory Manager Module")
     print("Testing memory management functionality...")
     
-    # Test with auto-save enabled
-    emm = EnhancedMemoryManager(auto_save_enabled=True, memory_file="test_memory.json")
+    emm = EnhancedMemoryManager()
     
     # Test basic functionality
     emm.add_message("Hello there!", MessageType.USER)
@@ -694,13 +519,7 @@ if __name__ == "__main__":
     stats = emm.get_memory_stats()
     print(f"Memory stats: {stats}")
     
-    file_info = emm.get_memory_file_info()
-    print(f"Memory file info: {file_info}")
-    
     patterns = emm.analyze_conversation_patterns()
     print(f"Conversation patterns: {patterns}")
-    
-    # Test memory clearing
-    emm.clear_memory_file()
     
     print("Memory manager test completed successfully.")

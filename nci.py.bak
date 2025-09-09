@@ -69,11 +69,8 @@ class CursesInterface:
         self.display_messages: List[DisplayMessage] = []
         self.display_lines: List[Tuple[str, str]] = []  # (line_text, msg_type)
         
-        # Module interconnects with auto-save enabled
-        self.memory_manager = EnhancedMemoryManager(
-            debug_logger=debug_logger,
-            auto_save_enabled=True
-        )
+        # Module interconnects
+        self.memory_manager = EnhancedMemoryManager(debug_logger=debug_logger)
         self.mcp_client = MCPClient(debug_logger=debug_logger)
         self.sme = StoryMomentumEngine(debug_logger=debug_logger)
         
@@ -219,22 +216,13 @@ class CursesInterface:
 # Chunk 2/4 - nci.py with Dynamic Box Coordinate System - Main Loop and Resize Handling
 
     def _populate_welcome_content(self):
-        """Add welcome messages with memory load status"""
+        """Add welcome messages WITHOUT MCP connection testing"""
         # Welcome message
         welcome_msg = DisplayMessage(
             "DevName RPG Client started. Type /help for commands.",
             "system"
         )
         self._add_message_immediate(welcome_msg)
-        
-        # Memory load status
-        mem_stats = self.memory_manager.get_memory_stats()
-        if mem_stats.get('message_count', 0) > 0:
-            memory_msg = DisplayMessage(
-                f"Restored {mem_stats['message_count']} messages from previous session.",
-                "system"
-            )
-            self._add_message_immediate(memory_msg)
         
         # Prompt status
         prompt_status = []
@@ -258,7 +246,7 @@ class CursesInterface:
             )
             self._add_message_immediate(status_msg)
         
-        # Ready message
+        # Ready message (NO MCP testing)
         ready_msg = DisplayMessage(
             "Ready for adventure! Enter your first action or command.",
             "system"
@@ -447,31 +435,15 @@ class CursesInterface:
             self.set_processing_state_immediate(False)
     
     def _process_command(self, command: str):
-        """Process commands with new memory management commands"""
+        """Process commands"""
         cmd = command.lower().strip()
         
         if cmd == '/help':
             self._show_help()
         elif cmd == '/quit' or cmd == '/exit':
             self.running = False
-        elif cmd.startswith('/clearmemory'):
-            # Parse optional backup filename
-            parts = command.split(None, 1)
-            backup_filename = parts[1] if len(parts) > 1 else None
-            self._clear_memory(backup_filename)
-        elif cmd.startswith('/savememory'):
-            # Parse optional filename
-            parts = command.split(None, 1)
-            filename = parts[1] if len(parts) > 1 else None
-            self._save_memory(filename)
-        elif cmd.startswith('/loadmemory'):
-            # Parse required filename
-            parts = command.split(None, 1)
-            if len(parts) < 2:
-                self.add_error_message_immediate("Usage: /loadmemory <filename>")
-            else:
-                filename = parts[1]
-                self._load_memory(filename)
+        elif cmd == '/clear':
+            self._clear_display()
         elif cmd == '/stats':
             self._show_stats()
         elif cmd.startswith('/theme '):
@@ -480,103 +452,7 @@ class CursesInterface:
         else:
             self.add_error_message_immediate(f"Unknown command: {command}")
 
-# Chunk 3/4 - nci.py with Dynamic Box Coordinate System - Memory Management and MCP Processing
-
-    def _clear_memory(self, backup_filename: Optional[str] = None):
-        """Clear memory with optional backup"""
-        try:
-            # Save backup if filename provided
-            if backup_filename:
-                success = self.memory_manager.save_conversation(backup_filename)
-                if success:
-                    self.add_system_message_immediate(f"Backup saved to {backup_filename}")
-                else:
-                    self.add_error_message_immediate(f"Failed to save backup to {backup_filename}")
-                    return
-            
-            # Clear memory file and in-memory state
-            success = self.memory_manager.clear_memory_file()
-            if success:
-                # Also clear display
-                self.display_messages.clear()
-                self.display_lines.clear()
-                
-                # Reset scroll manager
-                self.scroll_manager.scroll_offset = 0
-                self.scroll_manager.max_scroll = 0
-                self.scroll_manager.in_scrollback = False
-                
-                # Clear and refresh output window
-                if self.output_win:
-                    self.output_win.clear()
-                    self.output_win.refresh()
-                
-                # Show confirmation
-                if backup_filename:
-                    self.add_system_message_immediate(f"Memory cleared (backup saved to {backup_filename})")
-                else:
-                    self.add_system_message_immediate("Memory cleared")
-            else:
-                self.add_error_message_immediate("Failed to clear memory")
-                
-        except Exception as e:
-            self.add_error_message_immediate(f"Error clearing memory: {e}")
-            self._log_debug(f"Memory clear error: {e}")
-
-    def _save_memory(self, filename: Optional[str] = None):
-        """Save memory to file"""
-        try:
-            if not filename:
-                import time
-                filename = f"chat_backup_{int(time.time())}.json"
-            
-            success = self.memory_manager.save_conversation(filename)
-            if success:
-                self.add_system_message_immediate(f"Memory saved to {filename}")
-            else:
-                self.add_error_message_immediate(f"Failed to save memory to {filename}")
-                
-        except Exception as e:
-            self.add_error_message_immediate(f"Error saving memory: {e}")
-            self._log_debug(f"Memory save error: {e}")
-
-    def _load_memory(self, filename: str):
-        """Load memory from file"""
-        try:
-            success = self.memory_manager.load_conversation(filename)
-            if success:
-                # Clear current display
-                self.display_messages.clear()
-                self.display_lines.clear()
-                
-                # Reset scroll manager
-                self.scroll_manager.scroll_offset = 0
-                self.scroll_manager.max_scroll = 0
-                self.scroll_manager.in_scrollback = False
-                
-                # Clear output window
-                if self.output_win:
-                    self.output_win.clear()
-                    self.output_win.refresh()
-                
-                # Show loaded conversation
-                messages = self.memory_manager.get_messages()
-                for msg in messages:
-                    if msg.message_type.value == "user":
-                        self.add_user_message_immediate(msg.content)
-                    elif msg.message_type.value == "assistant":
-                        self.add_assistant_message_immediate(msg.content)
-                    elif msg.message_type.value == "system":
-                        self.add_system_message_immediate(msg.content)
-                
-                # Show confirmation
-                self.add_system_message_immediate(f"Loaded {len(messages)} messages from {filename}")
-            else:
-                self.add_error_message_immediate(f"Failed to load memory from {filename}")
-                
-        except Exception as e:
-            self.add_error_message_immediate(f"Error loading memory: {e}")
-            self._log_debug(f"Memory load error: {e}")
+# Chunk 3/4 - nci.py with Dynamic Box Coordinate System - MCP Processing and Display Updates
 
     def _send_mcp_request(self, user_input: str):
         """Send MCP request with improved error handling"""
@@ -794,9 +670,7 @@ class CursesInterface:
         
         self.output_win.refresh()
         self._ensure_cursor_in_input()
-
-# Chunk 4/4 - nci.py with Dynamic Box Coordinate System - Commands, Status Display and Utilities
-
+    
     def _update_status_display(self):
         """Update status with scroll indicators using dynamic coordinates"""
         if not self.current_layout or not self.status_win:
@@ -833,22 +707,10 @@ class CursesInterface:
         prompt_count = len([p for p in self.loaded_prompts.values() if p.strip()])
         status_parts.append(f"Prompts: {prompt_count}")
         
-        # Scroll indicator with error handling
-        try:
-            scroll_info = self.scroll_manager.get_scroll_info()
-            if scroll_info.get("in_scrollback", False):
-                status_parts.append(f"SCROLLBACK ({scroll_info.get('percentage', 0)}%)")
-        except Exception as e:
-            # Scroll manager not ready or error occurred
-            self._log_debug(f"Scroll status error: {e}")
-        
-        # Auto-save indicator
-        try:
-            file_info = self.memory_manager.get_memory_file_info()
-            if file_info.get('auto_save_enabled', False):
-                status_parts.append("AutoSave: ON")
-        except:
-            pass
+        # Scroll indicator
+        scroll_info = self.scroll_manager.get_scroll_info()
+        if scroll_info["in_scrollback"]:
+            status_parts.append(f"SCROLLBACK ({scroll_info['percentage']}%)")
         
         # Terminal size (for debugging)
         if self.debug_logger:
@@ -874,6 +736,8 @@ class CursesInterface:
         
         self.status_win.refresh()
         self._ensure_cursor_in_input()
+
+# Chunk 4/4 - nci.py with Dynamic Box Coordinate System - Cursor Management, Commands and Utilities
 
     def _ensure_cursor_in_input(self):
         """Ensure cursor is positioned correctly using dynamic coordinates"""
@@ -962,15 +826,31 @@ class CursesInterface:
         
         self._log_debug(f"Processing state: {processing}")
     
+    def _clear_display(self):
+        """Clear message display with immediate refresh"""
+        self.display_messages.clear()
+        self.display_lines.clear()
+        
+        # Reset scroll manager
+        self.scroll_manager.scroll_offset = 0
+        self.scroll_manager.max_scroll = 0
+        self.scroll_manager.in_scrollback = False
+        
+        # Clear and refresh output window
+        if self.output_win:
+            self.output_win.clear()
+            self.output_win.refresh()
+        
+        # Add clear confirmation message
+        self.add_system_message_immediate("Display cleared")
+    
     def _show_help(self):
-        """Show help information with updated commands"""
+        """Show help information"""
         help_messages = [
             "Available commands:",
             "/help - Show this help",
             "/quit, /exit - Exit application", 
-            "/clearmemory [filename] - Clear memory with optional backup",
-            "/savememory [filename] - Save memory to file (auto-timestamped if no filename)",
-            "/loadmemory <filename> - Load memory from file",
+            "/clear - Clear message display",
             "/stats - Show system statistics",
             "/theme <name> - Change color theme (classic, dark, bright)",
             "",
@@ -984,51 +864,22 @@ class CursesInterface:
             "Backspace - Delete character or merge lines",
             "",
             "Multi-line input automatically submits when content ends with",
-            "punctuation or is a command. Use Enter for new lines otherwise.",
-            "",
-            "Memory Management:",
-            "- Memory automatically saves after each message",
-            "- Previous conversations restore on startup",
-            "- Use /clearmemory to start fresh (optionally with backup)",
-            "- Use /savememory for manual backups"
+            "punctuation or is a command. Use Enter for new lines otherwise."
         ]
         
         for msg in help_messages:
             self.add_system_message_immediate(msg)
-
+    
     def _show_stats(self):
-        """Show comprehensive system statistics with memory file information"""
+        """Show comprehensive system statistics using dynamic coordinates"""
         try:
-            # Memory stats with file information
+            # Memory stats
             mem_stats = self.memory_manager.get_memory_stats()
-            file_info = self.memory_manager.get_memory_file_info()
-            
-            self.add_system_message_immediate(
-                f"Memory: {mem_stats.get('message_count', 0)} messages, "
-                f"{mem_stats.get('total_tokens', 0)} tokens, "
-                f"{mem_stats.get('condensations_performed', 0)} condensations"
-            )
-            
-            # Memory file details
-            if file_info.get('file_exists', False):
-                file_size = file_info.get('file_size', 0)
-                file_size_kb = file_size / 1024 if file_size > 0 else 0
-                last_modified = file_info.get('last_modified', 'unknown')
-                backup_status = "yes" if file_info.get('backup_exists', False) else "no"
-                
-                self.add_system_message_immediate(
-                    f"Memory file: {file_info.get('file_path', 'unknown')} "
-                    f"({file_size_kb:.1f}KB, modified: {last_modified[:19]}, backup: {backup_status})"
-                )
-                
-                auto_save_status = "enabled" if file_info.get('auto_save_enabled', False) else "disabled"
-                self.add_system_message_immediate(f"Auto-save: {auto_save_status}")
-            else:
-                self.add_system_message_immediate("Memory file: Not found")
-                
-        except Exception as e:
+            self.add_system_message_immediate(f"Memory: {mem_stats.get('message_count', 0)} messages, "
+                                           f"{mem_stats.get('total_tokens', 0)} tokens, "
+                                           f"{mem_stats.get('condensations_performed', 0)} condensations")
+        except:
             self.add_system_message_immediate("Memory: Stats unavailable")
-            self._log_debug(f"Memory stats error: {e}")
         
         try:
             # Story stats
@@ -1038,61 +889,40 @@ class CursesInterface:
                 arc = sme_stats.get('current_arc', 'unknown')
                 updates = sme_stats.get('total_updates', 0)
                 self.add_system_message_immediate(f"Story: Pressure {pressure:.2f}, Arc {arc}, {updates} updates")
-        except Exception as e:
+        except:
             self.add_system_message_immediate("Story: Stats unavailable")
-            self._log_debug(f"Story stats error: {e}")
         
         # MCP stats
-        try:
-            mcp_info = self.mcp_client.get_server_info()
-            self.add_system_message_immediate(f"MCP: {mcp_info.get('server_url', 'unknown')}")
-            self.add_system_message_immediate(f"Model: {mcp_info.get('model', 'unknown')}")
-        except Exception as e:
-            self.add_system_message_immediate("MCP: Stats unavailable")
-            self._log_debug(f"MCP stats error: {e}")
+        mcp_info = self.mcp_client.get_server_info()
+        self.add_system_message_immediate(f"MCP: {mcp_info.get('server_url', 'unknown')}")
+        self.add_system_message_immediate(f"Model: {mcp_info.get('model', 'unknown')}")
         
-        # Display stats with scroll manager error handling
-        try:
-            scroll_info = self.scroll_manager.get_scroll_info()
-            self.add_system_message_immediate(f"Display: {len(self.display_lines)} lines, "
-                                           f"Scroll: {scroll_info.get('offset', 0)}/{scroll_info.get('max', 0)}")
-        except Exception as e:
-            self.add_system_message_immediate(f"Display: {len(self.display_lines)} lines, Scroll: Error")
-            self._log_debug(f"Scroll stats error: {e}")
+        # Display stats using dynamic coordinates
+        scroll_info = self.scroll_manager.get_scroll_info()
+        self.add_system_message_immediate(f"Display: {len(self.display_lines)} lines, "
+                                       f"Scroll: {scroll_info['offset']}/{scroll_info['max']}")
         
         # Terminal stats with layout info
-        try:
-            if self.current_layout:
-                layout = self.current_layout
-                self.add_system_message_immediate(f"Terminal: {layout.terminal_width}x{layout.terminal_height}")
-                self.add_system_message_immediate(f"Layout: Output {layout.output_box.inner_width}x{layout.output_box.inner_height}, "
-                                               f"Input {layout.input_box.inner_width}x{layout.input_box.inner_height}")
-            else:
-                self.add_system_message_immediate("Terminal: Layout not available")
-        except Exception as e:
-            self.add_system_message_immediate("Terminal: Stats unavailable")
-            self._log_debug(f"Terminal stats error: {e}")
+        if self.current_layout:
+            layout = self.current_layout
+            self.add_system_message_immediate(f"Terminal: {layout.terminal_width}x{layout.terminal_height}")
+            self.add_system_message_immediate(f"Layout: Output {layout.output_box.inner_width}x{layout.output_box.inner_height}, "
+                                           f"Input {layout.input_box.inner_width}x{layout.input_box.inner_height}")
+        else:
+            self.add_system_message_immediate("Terminal: Layout not available")
         
         # Input stats
-        try:
-            input_content = self.multi_input.get_content()
-            input_lines = len(self.multi_input.lines)
-            cursor_line, cursor_col = self.multi_input.get_cursor_position()
-            self.add_system_message_immediate(f"Input: {len(input_content)} chars, {input_lines} lines, "
-                                           f"cursor at {cursor_line}:{cursor_col}")
-        except Exception as e:
-            self.add_system_message_immediate("Input: Stats unavailable")
-            self._log_debug(f"Input stats error: {e}")
+        input_content = self.multi_input.get_content()
+        input_lines = len(self.multi_input.lines)
+        cursor_line, cursor_col = self.multi_input.get_cursor_position()
+        self.add_system_message_immediate(f"Input: {len(input_content)} chars, {input_lines} lines, "
+                                       f"cursor at {cursor_line}:{cursor_col}")
         
         # Prompt stats
-        try:
-            total_tokens = sum(len(content) // 4 for content in self.loaded_prompts.values() if content.strip())
-            active_prompts = [name for name, content in self.loaded_prompts.items() if content.strip()]
-            self.add_system_message_immediate(f"Prompts: {len(active_prompts)} active ({', '.join(active_prompts)}), "
-                                           f"{total_tokens:,} tokens")
-        except Exception as e:
-            self.add_system_message_immediate("Prompts: Stats unavailable")
-            self._log_debug(f"Prompt stats error: {e}")
+        total_tokens = sum(len(content) // 4 for content in self.loaded_prompts.values() if content.strip())
+        active_prompts = [name for name, content in self.loaded_prompts.items() if content.strip()]
+        self.add_system_message_immediate(f"Prompts: {len(active_prompts)} active ({', '.join(active_prompts)}), "
+                                       f"{total_tokens:,} tokens")
     
     def _change_theme(self, theme_name: str):
         """Change color theme with immediate display refresh"""

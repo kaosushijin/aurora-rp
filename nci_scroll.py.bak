@@ -1,9 +1,9 @@
+# Chunk 4/6 - nci_scroll.py - Scrolling System Module
 #!/usr/bin/env python3
 """
 DevName RPG Client - Scrolling System Module (nci_scroll.py)
 Module architecture and interconnects documented in genai.txt
 Extracted from nci.py for better separation of concerns
-FIXED: get_scroll_info() KeyError crash in /stats command
 """
 
 from typing import Dict, Any
@@ -71,29 +71,16 @@ class ScrollManager:
         self.in_scrollback = False
     
     def get_scroll_info(self) -> Dict[str, Any]:
-        """Get scroll information for status display - FIXED to prevent KeyError"""
-        # Handle case where scrolling isn't needed yet
-        if self.max_scroll <= 0 or self.window_height <= 0:
-            return {
-                "in_scrollback": False,
-                "percentage": 100,
-                "offset": 0,
-                "max": 0,
-                "scroll_needed": False
-            }
+        """Get scroll information for status display"""
+        if self.max_scroll == 0:
+            return {"in_scrollback": False, "percentage": 100}
         
-        # Calculate percentage safely
-        try:
-            percentage = int((self.scroll_offset / self.max_scroll) * 100) if self.max_scroll > 0 else 100
-        except (ZeroDivisionError, TypeError):
-            percentage = 100
-        
+        percentage = int((self.scroll_offset / self.max_scroll) * 100) if self.max_scroll > 0 else 100
         return {
             "in_scrollback": self.in_scrollback,
             "percentage": percentage,
             "offset": self.scroll_offset,
-            "max": self.max_scroll,
-            "scroll_needed": True
+            "max": self.max_scroll
         }
     
     def get_visible_range(self) -> tuple[int, int]:
