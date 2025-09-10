@@ -2,600 +2,166 @@ GENAI.TXT - AI ANALYSIS REFERENCE FOR DEVNAME RPG CLIENT
 ================================================================
 
 PROJECT SCOPE:
-Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Control Protocol). Features innovative Story Momentum Engine, intelligent memory management with background auto-save, and completely rewritten ncurses interface with dynamic box coordinate system and modular architecture.
+Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Context Protocol). Features modular architecture with complete LLM semantic analysis, dynamic coordinate system, and background processing for responsive user experience.
 
-MODULE ARCHITECTURE:
-main.py - Application coordination, prompt management, and lifecycle control
-nci.py - Main ncurses interface controller with dynamic coordinate system
-nci_terminal.py - Dynamic box coordinate system and terminal management
-nci_input.py - Multi-line input system with cursor navigation
-nci_scroll.py - Enhanced scrolling with page navigation and scroll position tracking
-nci_display.py - Message formatting and display logic
-nci_colors.py - Color theme management system
-mcp.py - HTTP client for MCP/Ollama server communication
-emm.py - Enhanced Memory Manager with background auto-save and LLM-powered semantic condensation
-sme.py - Story Momentum Engine for narrative pressure management
+CORE MODULE ARCHITECTURE:
+main.py - Application coordination, prompt management, lifecycle control
+├── PromptManager: LLM-powered prompt condensation within token budgets
+├── DevNameRPGClient: Main application coordinator with signal handling
+└── ApplicationConfig: Hardcoded configuration values (no file creation)
+
+nci.py - Primary interface controller with complete LLM integration
+├── CursesInterface: Main coordination class linking all modules
+├── Dynamic coordinate integration for all display operations
+├── Complete LLM analysis coordination (semantic + momentum)
+└── Background processing coordination to prevent interface blocking
+
+Supporting Interface Modules:
+nci_terminal.py - BoxCoordinates system, LayoutGeometry calculations
+nci_input.py - MultiLineInput with cursor navigation and word wrapping
+nci_scroll.py - ScrollManager with error-protected position tracking
+nci_display.py - DisplayMessage formatting with type-specific rendering
+nci_colors.py - ColorManager with theme switching (classic/dark/bright)
+
+Core Backend Modules:
+mcp.py - MCPClient for HTTP communication with context integration
+emm.py - EnhancedMemoryManager with LLM semantic analysis and background auto-save
+sme.py - StoryMomentumEngine with comprehensive LLM narrative analysis
 
 CRITICAL INTERCONNECTS:
-main.py → nci.py: Creates CursesInterface with loaded prompt configuration
-nci.py → nci_terminal.py: Uses TerminalManager for dynamic coordinate calculations
-nci.py → nci_input.py: Manages MultiLineInput for enhanced text entry
-nci.py → nci_scroll.py: Controls ScrollManager for history navigation with error handling
-nci.py → nci_display.py: Uses DisplayMessage for formatted output
-nci.py → nci_colors.py: Applies ColorManager for theme support
-nci.py → mcp.py: Sends integrated system messages via MCPClient methods
-nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager with background auto-save
-nci.py → sme.py: Updates narrative pressure via StoryMomentumEngine.process_user_input()
-mcp.py ← sme.py: Receives story context via get_story_context()
-mcp.py ← emm.py: Receives conversation history via get_conversation_for_mcp()
+main.py → nci.py: Passes optimized prompts via config dict
+nci.py → nci_terminal.py: Uses LayoutGeometry for all window positioning
+nci.py → emm.py: Background auto-save prevents interface blocking
+nci.py → sme.py: Triggers 15-message comprehensive LLM analysis cycles
+nci.py → mcp.py: Sends integrated system messages with story context
+emm.py ↔ sme.py: Bidirectional state persistence through momentum_state storage
 
 DATA FLOW:
-1. Prompts loaded and optimized in main.py during startup
-2. Dynamic coordinate system calculates optimal window layout in nci_terminal.py
-3. User input captured through nci_input.py multi-line system with cursor navigation
-4. Message stored in emm.py with background auto-save and semantic analysis
-5. Narrative pressure updated in sme.py based on input patterns
-6. System messages built from loaded prompts + story context + conversation history
-7. MCP request sent with complete message chain, response received
-8. Response displayed through nci_display.py with immediate refresh pattern using dynamic coordinates
+1. Prompts loaded/optimized in main.py with LLM condensation if needed
+2. Dynamic coordinates calculated for responsive terminal layout
+3. User input processed through MultiLineInput with intelligent submission
+4. Messages stored in EMM with background semantic categorization
+5. SME pattern analysis provides immediate feedback
+6. Every 15 messages: comprehensive LLM momentum analysis in background
+7. MCP requests built with prompts + story context + conversation history
+8. Responses displayed with immediate refresh using dynamic coordinates
+9. Background threads handle auto-save and semantic condensation
 
-CONFIGURATION SYSTEM:
-- Hardcoded configuration values in ApplicationConfig class
-- memory.json: Persistent conversation memory with background auto-save
-- Prompt files: critrules.prompt (required), companion.prompt, lowrules.prompt
-- debug.log: Debug logging when --debug flag enabled
+ENHANCED MEMORY MANAGER (emm.py):
+- Background auto-save system using daemon threads prevents UI blocking
+- 6-category LLM semantic analysis: story_critical, character_focused, relationship_dynamics, emotional_significance, world_building, standard
+- Multi-pass condensation with progressive aggressiveness (3 passes max)
+- Category-aware preservation ratios (0.4-0.9 based on semantic importance)
+- 5-strategy defensive JSON parsing for robust LLM response handling
+- Atomic file operations with backup/recovery for data integrity
+- Thread-safe operations with proper locking mechanisms
 
-APPLICATION ENTRY POINT (main.py):
-================================================================
-
-ENHANCED PROMPT MANAGEMENT SYSTEM:
-- PromptManager class with intelligent loading and condensation
-- Token budget allocation (5,000 tokens for all prompts combined)
-- Automatic prompt condensation using LLM when budget exceeded
-- Critical validation ensuring critrules.prompt exists
-- Graceful handling of missing optional prompt files
-
-MAIN CLASS STRUCTURE:
-- DevNameRPGClient: Primary application coordinator with prompt integration
-- DebugLogger: Centralized logging system shared across modules
-- ApplicationConfig: Hardcoded configuration management (no file creation)
-- PromptManager: Handles prompt loading, optimization, and condensation
-
-INITIALIZATION SEQUENCE:
-1. Argument parsing and environment setup
-2. Module verification and dependency checking
-3. Hardcoded configuration loading
-4. Debug logger initialization if enabled
-5. Async prompt loading and optimization phase
-6. CursesInterface creation with prompt injection
-7. Signal handlers for graceful shutdown
-
-PROMPT OPTIMIZATION ALGORITHM:
-1. Load all available prompt files with graceful missing file handling
-2. Calculate combined token usage with conservative estimation
-3. Apply LLM-powered condensation if exceeding 5k token budget
-4. Individual prompt condensation for files >1/3 of total budget
-5. Verification of condensation effectiveness
-6. Pass optimized prompts to interface configuration
-
-CONFIGURATION DEFAULTS:
-- MCP server: http://127.0.0.1:3456/chat
-- MCP model: qwen2.5:14b-instruct-q4_k_m
-- MCP timeout: 300 seconds
-- Memory max tokens: 16,000
-- Interface color theme: classic
-- Story pressure decay: 0.05
-- Antagonist threshold: 0.6
-
-DEPENDENCY MANAGEMENT:
-- Required: curses module (with platform-specific guidance)
-- Required: httpx for MCP communication and prompt condensation
-- Module verification system for all components
-- Graceful degradation messaging for missing dependencies
-
-DYNAMIC BOX COORDINATE SYSTEM (nci_terminal.py):
-================================================================
-
-COORDINATE SYSTEM ARCHITECTURE:
-- BoxCoordinates dataclass: Defines outer boundaries and inner text fields
-- LayoutGeometry dataclass: Complete terminal layout with all box definitions
-- Dynamic layout calculation based on terminal dimensions
-- Automatic proportional scaling (90% output, 10% input by default)
-
-BOX COORDINATE CALCULATIONS:
-1. Reserve 1 line for status at bottom
-2. Reserve 2 lines for borders (between output/input, above status)
-3. Split remaining lines with configurable ratio between output/input
-4. Calculate inner coordinates for each box (excluding borders)
-5. Generate complete layout geometry with metadata
-
-TERMINAL MANAGEMENT:
-- TerminalManager class: Handles resize detection and layout updates
-- Periodic resize checking (every 0.5 seconds)
-- Minimum size validation (80x24) with helpful error messages
-- Complete layout recalculation on resize events
-- Box border drawing with dynamic coordinate positioning
-
-LAYOUT BENEFITS:
-- Eliminates hardcoded coordinate assumptions
-- Automatic adaptation to any terminal size
-- Consistent proportional layouts across platforms
-- Simplified resize handling with no manual calculations
-- Robust coordinate system prevents curses NULL returns
-
-NCURSES INTERFACE MODULE (nci.py) - DYNAMIC COORDINATES:
-================================================================
-
-DYNAMIC COORDINATE INTEGRATION:
-- All window operations use BoxCoordinates from LayoutGeometry
-- Automatic window recreation on resize with new coordinates
-- Content rewrapping based on inner width calculations
-- No manual coordinate calculations in display methods
-- Simplified resize logic with consistent layout preservation
-
-MODULAR ARCHITECTURE INTEGRATION:
-- CursesInterface: Main controller coordinating all modules
-- TerminalManager: Dynamic coordinate calculations and layout
-- MultiLineInput: Advanced input handling from nci_input.py
-- ScrollManager: Enhanced scrolling from nci_scroll.py with error handling
-- DisplayMessage: Message formatting from nci_display.py
-- ColorManager: Theme management from nci_colors.py
-
-CORE INTERFACE FUNCTIONALITY:
-- Immediate display pattern: All updates trigger instant refresh
-- Message prefix improvements: AI→GM branding, clean system formatting
-- True blank line separation between GM responses
-- Enhanced navigation: page-based scrolling, home/end positioning
-- Multi-line input with intelligent submission detection
-- Command processing: /help, /quit, /clearmemory, /savememory, /loadmemory, /stats, /theme
-
-RESIZE HANDLING WITH DYNAMIC COORDINATES:
-1. TerminalManager detects size change and calculates new layout
-2. Component dimensions updated from new LayoutGeometry
-3. Windows recreated using new BoxCoordinates
-4. Content rewrapped for new inner dimensions
-5. Complete display refresh with preserved scroll position
-
-PROMPT INTEGRATION WORKFLOW:
-- _build_system_messages(): Constructs integrated prompt chain
-- Primary prompt (critrules) enhanced with story context injection
-- Companion and narrative prompts added as separate system messages
-- Custom MCP request building with complete message structure
-- Fallback to standard send_message if custom approach fails
-
-NO MCP CONNECTION TESTING:
-- Eliminated startup connection testing entirely
-- Errors only displayed during actual communication attempts
-- Specific error types: ConnectionError, TimeoutError, general exceptions
-- Graceful fallback patterns for MCP communication failures
-- Clean startup experience without unnecessary error messages
-
-ENHANCED MEMORY MANAGEMENT COMMANDS:
-- /clearmemory [filename]: Clear memory with optional backup
-- /savememory [filename]: Save memory to file (auto-timestamped if no filename)
-- /loadmemory <filename>: Load memory from file
-- Complete conversation restoration from saved files
-- Backup and recovery system for memory files
-
-MULTI-LINE INPUT SYSTEM (nci_input.py):
-================================================================
-
-ADVANCED INPUT HANDLING:
-- MultiLineInput class with cursor navigation support
-- Full arrow key navigation (left/right/up/down movement)
-- Word wrapping at terminal boundaries with intelligent break points
-- Intelligent submission detection based on content ending
-- Line merging on backspace across line boundaries
-- Character limit (4000) and line limit (10) for reasonable usage
-
-CURSOR MANAGEMENT:
-- Real-time cursor position tracking (line, column)
-- Visual cursor mapping from logical to display coordinates
-- Proper cursor positioning with prompt prefix consideration
-- Navigation preservation during multi-line editing
-- Automatic scroll adjustment to keep cursor visible
-
-INPUT FEATURES:
-- Smart Enter handling: new line vs submission based on context
-- Automatic submission for commands (/) or punctuation endings
-- Word wrapping with break point optimization
-- Content validation with token estimation
-- Multi-line display formatting within window constraints
-
-ENHANCED SCROLLING SYSTEM (nci_scroll.py):
-================================================================
-
-SCROLLING CAPABILITIES:
-- ScrollManager class with comprehensive navigation support
-- Line-based scrolling with arrow keys when not in input mode
-- Page-based navigation with PgUp/PgDn keys
-- Home/End keys for instant top/bottom navigation
-- Scroll indicators in status bar showing position and state
-
-SCROLLBACK MANAGEMENT:
-- SCROLLBACK indicator when viewing history (not at bottom)
-- Auto-return to bottom on new message submission
-- Scroll position preservation during terminal resize
-- Maximum scroll calculation based on content and window height
-- Intelligent scroll offset management
-
-ERROR HANDLING IMPROVEMENTS:
-- Fixed get_scroll_info() KeyError crash in /stats command
-- Robust error handling in scroll statistics calculation
-- Safe fallback values when scroll data unavailable
-- Protection against division by zero in percentage calculations
-
-MESSAGE DISPLAY SYSTEM (nci_display.py):
-================================================================
-
-DISPLAY MESSAGE FORMATTING:
-- DisplayMessage class with type-specific formatting
-- Updated prefix system: "You:", "GM:", " :", "Error:"
-- Message wrapping with proper line continuation indentation
-- Timestamp integration with configurable format
-- Content-aware wrapping with break optimization
-
-INPUT VALIDATION:
-- InputValidator class with multi-line support awareness
-- Token estimation for content length validation
-- Line count validation (maximum 20 lines)
-- Specific error messages for different validation failures
-- Integration with input system for real-time feedback
-
-COLOR THEME SYSTEM (nci_colors.py):
-================================================================
-
-THEME MANAGEMENT:
-- ColorManager class with dynamic theme switching
-- Three built-in themes: classic, dark, bright
-- Runtime theme changing with immediate refresh
-- Graceful fallback for terminals without color support
-- Color pair management with proper initialization
-
-COLOR ASSIGNMENTS:
-- Classic theme: Cyan users, green GM, yellow system, red errors, blue borders
-- Dark theme: White users, cyan GM, magenta system, red errors, white borders
-- Bright theme: Blue users, green GM, yellow system, red errors, magenta borders
-
-MCP COMMUNICATION MODULE (mcp.py):
-================================================================
-
-STREAMLINED ARCHITECTURE:
-- MCPClient class with essential HTTP communication
-- Single retry mechanism (MCP_MAX_RETRIES = 2)
-- Clean context integration from EMM and SME modules
-- Eliminated performance monitoring for simplicity
-
-CORE FUNCTIONALITY:
-- MCPClient.send_message(): Primary interface with story context integration
-- MCPClient._execute_request(): Direct request execution for custom message chains
-- MCPClient.test_connection(): Async connection verification
-- MCPClient.get_server_info(): Basic diagnostics
-- MCPClient.update_system_prompt(): Dynamic prompt modification
-
-ERROR HANDLING:
-- Single exception type for all MCP failures
-- Debug-only verbose logging
-- Graceful fallback when httpx unavailable
-- Brief retry delays (1 second) without complex backoff
-
-CONTEXT INTEGRATION DESIGN:
-- Story context from SME injected as system message
-- Conversation history from EMM limited to last 10 messages
-- System prompt + story context + history + user input = complete chain
-- Minimal response validation for essential structure checking
-
-ENHANCED MEMORY MANAGER MODULE (emm.py) - BACKGROUND AUTO-SAVE:
-================================================================
-
-BACKGROUND AUTO-SAVE ARCHITECTURE:
-- Non-blocking auto-save system using daemon threads
-- Immediate message addition without file I/O blocking
-- Background thread handles all file operations asynchronously
-- Thread-safe memory operations with proper locking
-
-AUTO-SAVE PROCESS:
-- add_message() returns immediately after memory addition
-- _background_auto_save() handles file operations in separate thread
-- File backup, JSON serialization, and atomic writes happen asynchronously
-- Semantic condensation deferred to background to prevent main thread blocking
-
-THREAD SAFETY IMPLEMENTATION:
-- threading.Lock() protects message list operations
-- Background threads operate independently of main application flow
-- Named threads ("EMM-AutoSave", "EMM-Condensation") for debugging
-- Daemon threads prevent hanging on application shutdown
-
-SEMANTIC ANALYSIS SYSTEM:
-- LLM-powered message categorization with 6 semantic categories
-- Context-aware analysis using 11-message window (5 before + target + 5 after)
-- 3-tier retry system: Full Analysis → Simple Analysis → Binary Decision
-- Pure LLM-driven semantic decisions with programmatic fallbacks
-
-SEMANTIC CATEGORIES & PRESERVATION RATIOS:
-- story_critical: 0.9 (90% preservation) - Major plot developments, character deaths, world-changing events
-- character_focused: 0.8 (80% preservation) - Relationship changes, character development, personality reveals
-- relationship_dynamics: 0.8 (80% preservation) - Evolving relationships between characters
-- emotional_significance: 0.75 (75% preservation) - Dramatic moments, trust/betrayal, conflict resolution
-- world_building: 0.7 (70% preservation) - New locations, lore, cultural info, political changes
-- standard: 0.4 (40% preservation) - General interactions, travel, routine activities
-
-PROGRESSIVE CONDENSATION SYSTEM:
-- Multi-pass condensation with increasing aggressiveness (up to 3 passes)
-- Aggressiveness reduces preservation ratios by 0.1 per pass
-- Minimum preservation ratio of 0.2 to prevent critical information loss
-- Recent messages (last 5) always protected from condensation
-
-MEMORY FILE OPERATIONS:
-- Atomic file operations with temporary files and moves
-- Automatic backup creation before saves
-- Corruption recovery with backup file fallback
-- Comprehensive error handling for file system issues
-
-STORY MOMENTUM ENGINE MODULE (sme.py):
-================================================================
-
-NARRATIVE PRESSURE SYSTEM:
-- Dynamic pressure tracking on 0.0-1.0 scale with pattern-based calculation
-- Real-time story arc progression: Setup → Rising Action → Climax → Resolution
-- Context-adaptive antagonist generation based on user input patterns
-- Rate limiting (2-second cooldown) to prevent spam-induced pressure spikes
-
-PRESSURE CALCULATION ALGORITHM:
-- Pattern-based analysis using 6 momentum categories
-- Weighted keyword matching with dynamic pressure deltas per category
-- Length/complexity factors and punctuation intensity analysis
-- Natural pressure decay over time (0.05 per minute) to prevent inflation
-- Maximum single increase cap of 0.3 to prevent extreme spikes
-
-MOMENTUM PATTERN CATEGORIES:
-- conflict: Keywords trigger +0.15 pressure (fight, attack, defend, battle, combat, strike)
-- tension: Keywords trigger +0.12 pressure (danger, threat, fear, worry, concern, risk)
-- mystery: Keywords trigger +0.08 pressure (strange, unusual, mysterious, hidden, secret, whisper)
-- exploration: Keywords trigger +0.05 pressure (examine, search, look, investigate, explore, discover)
-- social: Keywords trigger +0.03 pressure (talk, speak, negotiate, persuade, convince, ask)
-- resolution: Keywords trigger -0.10 pressure (resolve, solution, answer, complete, finish, end)
-
-ANTAGONIST MANAGEMENT:
-- Context-adaptive antagonist generation at 0.6 pressure threshold
-- Dynamic antagonist types based on recent user input analysis:
-  * magical_opposition: Corrupted Mage (magic/spell keywords detected)
-  * environmental_threat: Ancient Guardian (exploration/dungeon keywords)
-  * social_conflict: Corrupt Official (town/people keywords)
-  * adaptive_threat: Shadow Entity (default context-adaptive)
-- Threat level scaling with current pressure level
-- Automatic deactivation during Resolution arc
+STORY MOMENTUM ENGINE (sme.py):
+- Immediate pattern-based feedback + comprehensive LLM analysis every 15 messages
+- 5-strategy defensive JSON parsing for momentum and antagonist responses
+- Dynamic antagonist generation with quality validation and commitment escalation
+- Pressure floor ratcheting system prevents infinite narrative stalling
+- Resource loss tracking affects antagonist behavior and responses
+- Background LLM analysis prevents main thread blocking
+- Complete state persistence through EMM momentum_state storage
 
 PROMPT SYSTEM INTEGRATION:
-================================================================
-
-PROMPT FILE ARCHITECTURE:
-- critrules.prompt: Core GM rules and character control boundaries (REQUIRED)
-- companion.prompt: Active companion character definition (OPTIONAL)
-- lowrules.prompt: World generation and environmental storytelling rules (OPTIONAL)
-
-COMPANION PROMPT TEMPLATES:
-- tsundere_companion.prompt: Seraphina knight companion template
-- dandere_companion.prompt: Elena healer companion template
-- kuudere_companion.prompt: Lysander mage companion template
-- himedere_companion.prompt: Victoria noble companion template
-
-INTELLIGENT PROMPT LOADING:
-- Graceful handling of missing files with user warnings
-- Automatic token estimation and budget management
-- LLM-powered condensation when exceeding 5k token allocation
-- Preservation of essential functionality during condensation
-- Status display showing active prompt components in interface
-
-PROMPT INTEGRATION WORKFLOW:
-1. Load available prompt files during startup
-2. Apply condensation if budget exceeded
-3. Pass optimized prompts to interface configuration
-4. Build dynamic system messages with story context injection
-5. Combine prompts + context + history for complete message chain
-6. Real-time status display showing active prompt count
-
-TOKEN BUDGET ALLOCATION:
-- Total Context Window: 32,000 tokens
-- System Prompts: 5,000 tokens (auto-optimized)
-- Memory Storage: 16,000 tokens (semantic categorization)
-- Input Buffer: Remaining capacity with validation
-
-INTERFACE REWRITE ACHIEVEMENTS:
-================================================================
+- Token budget: 5,000 total for all prompts combined
+- LLM-powered condensation when budget exceeded
+- critrules.prompt: REQUIRED - Core GM rules and boundaries
+- companion.prompt: OPTIONAL - Character definitions  
+- lowrules.prompt: OPTIONAL - Narrative generation rules
+- Dynamic system message construction with story context injection
+- Status display shows active prompt components and token usage
 
 DYNAMIC COORDINATE SYSTEM:
-- Eliminated all hardcoded coordinate assumptions
-- Automatic adaptation to any terminal size with proportional scaling
-- Consistent layout behavior across different platforms
-- Simplified resize handling with no manual coordinate calculations
-- Robust window positioning prevents curses NULL returns
+- BoxCoordinates dataclass: outer/inner boundaries with calculated dimensions
+- LayoutGeometry: complete terminal layout with proportional scaling
+- Automatic adaptation to any terminal size (minimum 80x24)
+- Eliminates hardcoded coordinates, prevents curses positioning errors
+- Consistent proportional layouts: 90% output, 10% input by default
+- Content rewrapping only when necessary for performance
 
-MODULAR ARCHITECTURE:
-- Clean separation of concerns across 6 interface modules
-- Each module handles specific functionality independently
-- Clear interfaces between modules with minimal coupling
-- Easier maintenance and testing of individual components
-- Simplified debugging with focused module responsibilities
-
-ENHANCED USER EXPERIENCE:
-- Multi-line input with intelligent submission detection
-- Enhanced scrolling with page navigation and position indicators
-- True blank line separation between GM responses for readability
-- Improved message prefixes (AI→GM) for better immersion
-- Real-time status display with comprehensive system information
-
-BACKGROUND PROCESSING:
-- Non-blocking auto-save prevents interface freezing
-- Background semantic condensation maintains responsiveness
-- Thread-safe memory operations with proper synchronization
+BACKGROUND PROCESSING ARCHITECTURE:
+- Non-blocking auto-save prevents interface freezing during file operations
+- Semantic analysis threads: "EMM-AutoSave", "EMM-Condensation"  
+- Momentum analysis threads: "SME-Comprehensive-Analysis"
+- Thread-safe memory operations with proper locking
 - Daemon threads prevent application hanging on shutdown
 
-TECHNICAL EXCELLENCE:
-================================================================
+DEFENSIVE ERROR HANDLING:
+- 5-strategy JSON parsing prevents LLM response failures:
+  1. Direct JSON parsing
+  2. Substring extraction  
+  3. Regex field extraction
+  4. Keyword-based inference
+  5. Fallback defaults
+- Robust scroll position error handling (fixed KeyError crashes)
+- Graceful degradation with missing prompt files
+- Connection error handling with specific error types
+- Memory corruption recovery with backup file fallback
 
-PERFORMANCE OPTIMIZATIONS:
-- Immediate display pattern with minimal refresh overhead
-- Efficient content rewrapping only when necessary
-- Optimized scroll calculations with cached dimensions
-- Real-time input validation without blocking interface
-- Lazy evaluation of layout calculations
+CONFIGURATION & TOKEN MANAGEMENT:
+- Total context window: 32,000 tokens
+- System prompts: 5,000 tokens (auto-optimized)
+- Memory storage: 16,000 tokens (semantic categorization)  
+- User input validation with helpful feedback
+- MCP: http://127.0.0.1:3456/chat with qwen2.5:14b-instruct-q4_k_m
+- Hardcoded config prevents file creation, simplifies deployment
 
-ROBUSTNESS FEATURES:
-- Graceful degradation with missing components or terminals
-- Comprehensive error handling with contextual messages
-- Safe fallback patterns for all critical operations
-- Protection against curses exceptions and terminal limitations
-- Automatic recovery from resize-related disruptions
-
-THREADING ARCHITECTURE:
-- Background auto-save threads prevent main thread blocking
-- Thread-safe memory operations with proper locking mechanisms
-- Named daemon threads for easier debugging and monitoring
-- Asynchronous file operations maintain interface responsiveness
-
-DEBUGGING CAPABILITIES:
-- Comprehensive debug logging across all modules
-- Real-time status monitoring with detailed metrics
-- Interface state inspection utilities for development
-- Terminal dimension tracking and layout validation
-- Module interconnect verification and troubleshooting
-
-ARCHITECTURAL INNOVATIONS:
-================================================================
-
-DYNAMIC BOX COORDINATE SYSTEM:
-- Mathematical layout calculation eliminates coordinate assumptions
-- Proportional scaling maintains visual consistency across terminal sizes
-- Box coordinate abstraction simplifies window management
-- Layout geometry provides complete spatial context
-- Automatic border positioning and content area calculation
-
-MODULAR INTERFACE ARCHITECTURE:
-- Clean separation enables independent module development
-- Interface modules can be modified without affecting core logic
-- Simplified testing through focused module responsibilities
-- Consistent API contracts between interface components
-- Easier maintenance and feature extension
-
-INTEGRATED PROMPT SYSTEM:
-- Dynamic prompt loading with intelligent optimization
-- LLM-powered condensation preserves functionality within token limits
-- Story context injection enhances narrative coherence
-- Multi-prompt integration with hierarchical message construction
-- Real-time prompt status monitoring and validation
-
-STORY MOMENTUM ENGINE INTEGRATION:
-- Mathematical pressure modeling prevents common AI storytelling pitfalls
-- Context-adaptive antagonist generation based on player behavior
-- Natural pressure decay prevents artificial tension inflation
-- Seamless integration with interface for enhanced user experience
-
-BACKGROUND AUTO-SAVE SYSTEM:
-- Non-blocking file operations maintain interface responsiveness
-- Thread-safe memory management with proper synchronization
-- Atomic file operations prevent data corruption
-- Automatic backup and recovery mechanisms
-
-MODULAR PRESERVATION RULES:
-================================================================
-
-1. Dynamic coordinate system must be preserved across all interface components
-2. Modular architecture boundaries must be maintained for clean separation
-3. Prompt integration workflow must preserve token budget management
-4. Story momentum engine integration must maintain pressure calculation accuracy
-5. Background auto-save system must preserve thread safety and non-blocking operation
-6. Memory management semantic categorization must preserve content quality
-7. MCP communication must maintain context integration from EMM and SME
-8. Interface immediate display pattern must preserve real-time user feedback
-9. Multi-line input system must preserve cursor navigation functionality
-10. Terminal resize handling must preserve content and scroll position
-11. Color theme system must preserve accessibility and visual hierarchy
-12. Scroll position tracking must preserve error handling for edge cases
-
-ERROR HANDLING HIERARCHY:
-- main.py: Application-level errors, prompt loading failures, graceful shutdown
-- nci.py: Interface coordination errors, module integration failures
-- nci_terminal.py: Terminal size validation, coordinate calculation errors
-- nci_input.py: Input processing errors, cursor positioning failures
-- nci_scroll.py: Scroll position validation with KeyError protection, history navigation errors
-- nci_display.py: Message formatting errors, display validation failures
-- nci_colors.py: Color initialization errors, theme switching failures
-- mcp.py: Network errors and communication failures
-- emm.py: Background thread errors, file operation failures, semantic analysis failures
-- sme.py: Narrative analysis and pressure calculation errors
+KEY FEATURES:
+- Multi-line input with intelligent submission detection
+- Page-based scrolling with position indicators (PgUp/PgDn/Home/End)
+- Real-time status with comprehensive system information
+- Command system: /help, /stats, /analyze, /clearmemory, /theme, etc.
+- Complete state preservation across sessions
+- Theme switching with immediate visual refresh
+- Background LLM processing maintains interface responsiveness
 
 DEBUGGING INFRASTRUCTURE:
-- Centralized DebugLogger class shared across all modules
-- Module-specific debug categories for focused troubleshooting
-- Real-time interface state inspection and validation
-- Dynamic coordinate system layout debugging
-- Multi-line input state analysis and cursor tracking
-- Scroll position monitoring with error protection and history navigation testing
-- Background thread monitoring and auto-save process tracking
-- Memory management semantic analysis tracking
-- Story pressure calculation and antagonist lifecycle monitoring
-- Prompt loading and condensation process logging
-- MCP communication with simplified debug output
+- Centralized DebugLogger shared across modules with category-specific logging
+- Real-time interface state inspection with /stats command
+- Module-specific debug categories for focused troubleshooting  
+- Background thread monitoring and process tracking
+- Comprehensive error attribution through module boundaries
 
-DEPENDENCY REQUIREMENTS:
-- Python 3.8+ with curses support
-- httpx library for HTTP communication (REQUIRED for full functionality)
-- asyncio for non-blocking LLM calls in memory management
-- JSON for configuration and history storage
-- Threading for background auto-save and semantic condensation
-- textwrap for multi-line input word wrapping
-
-AI MODIFICATION GUIDELINES:
-================================================================
-
-1. PRESERVE dynamic box coordinate system when modifying interface components
-2. MAINTAIN modular architecture boundaries between interface modules
-3. UPDATE coordinate calculations only through TerminalManager and LayoutGeometry
-4. VERIFY that interface changes work with all three color themes
-5. TEST multi-line input functionality after cursor-related modifications
-6. ENSURE scroll position preservation during resize operations
-7. VALIDATE that prompt integration maintains token budget constraints
-8. MAINTAIN immediate display pattern for all message additions
-9. PRESERVE story momentum engine integration for narrative coherence
-10. TEST background auto-save functionality after EMM modifications
-11. VERIFY thread safety in memory management operations
-12. MAINTAIN non-blocking operation in auto-save and condensation
-13. VERIFY MCP context integration after communication changes
-14. MAINTAIN graceful degradation patterns for missing components
-15. UPDATE genai.txt documentation when making architectural changes
-16. PRESERVE the modular separation that enables independent development
-17. ENSURE that coordinate system changes maintain visual consistency
-18. PROTECT scroll error handling improvements in nci_scroll.py
-19. MAINTAIN background thread architecture for memory operations
-
-INTERFACE MODULE ARCHITECTURE BENEFITS:
-================================================================
-
-DEVELOPMENT EFFICIENCY:
-- Independent module development without affecting other components
-- Focused testing scope for each interface functionality
-- Simplified debugging through clear module boundaries
-- Easier feature addition through modular extension points
-- Reduced complexity in individual module maintenance
-
-SYSTEM RELIABILITY:
-- Failure isolation prevents cascading interface problems
-- Graceful degradation when individual modules encounter errors
-- Clear error attribution through module-specific logging
-- Simplified recovery procedures through module restart capabilities
-- Consistent behavior patterns across all interface components
-
-USER EXPERIENCE CONSISTENCY:
-- Unified behavior patterns across all interface interactions
-- Consistent visual feedback through coordinated color theming
-- Reliable input handling through dedicated input module
-- Smooth scrolling experience through specialized scroll management with error protection
-- Professional appearance through dynamic coordinate system precision
-
-BACKGROUND PROCESSING BENEFITS:
-- Non-blocking auto-save maintains interface responsiveness
-- Background semantic analysis prevents user interruption
+ARCHITECTURAL BENEFITS:
+- Clean separation enables independent module development
+- Background processing prevents UI blocking during LLM operations
+- Dynamic coordinates eliminate platform-specific display issues
+- Modular failure isolation prevents cascading problems
 - Thread-safe operations ensure data integrity
-- Asynchronous file operations improve user experience
-- Daemon threads prevent application hanging during shutdown
+- Defensive parsing handles unreliable LLM responses gracefully
+
+CRITICAL PRESERVATION RULES:
+1. Dynamic coordinate system must be preserved across interface components
+2. Background auto-save threading must maintain non-blocking operation
+3. 5-strategy JSON parsing must be preserved for LLM response reliability
+4. Semantic categorization must preserve content quality during condensation  
+5. 15-message momentum analysis cycle timing must be maintained
+6. Thread safety in memory operations must be preserved
+7. Prompt integration workflow must maintain token budget constraints
+8. Error handling improvements in scroll manager must be preserved
+
+DEVELOPMENT GUIDELINES:
+- Update coordinate calculations only through TerminalManager/LayoutGeometry
+- Maintain thread safety in all EMM/SME operations  
+- Preserve immediate display pattern for user feedback
+- Test background processing after memory management changes
+- Verify LLM integration after communication modifications
+- Maintain graceful degradation for missing components
+- Preserve modular boundaries for independent development
+- Update genai.txt when making architectural changes
+
+DEPENDENCIES:
+- Python 3.8+ with curses support
+- httpx (REQUIRED for MCP communication and LLM calls)
+- asyncio for background LLM operations
+- threading for non-blocking auto-save and semantic analysis
+- json for state persistence and configuration
+
+USAGE:
+Run `python main.py` to start with hardcoded configuration.
+Use `python main.py --debug` for comprehensive logging.
+Ensure critrules.prompt exists (required) - companion.prompt and lowrules.prompt optional.
+Terminal minimum size: 80x24 characters.

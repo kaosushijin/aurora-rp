@@ -1,218 +1,203 @@
-# Aurora RPG Client
+# DevName RPG Client
 
-A terminal-based RPG storyteller client that leverages Large Language Model capabilities through MCP (Model Control Protocol) to create immersive, interactive high-fantasy narratives powered by the innovative Story Momentum Engine and intelligent memory management.
+A terminal-based RPG storytelling client that transcends traditional language model limitations through **intelligent semantic processing** and **emergent narrative generation**. Built with a sophisticated multi-threaded architecture, DevName creates truly dynamic stories that evolve organically based on player behavior and semantic content analysis.
 
-## Features
+## 🧠 Breakthrough: Semantic-Driven Emergent Storytelling
 
-### Story Momentum Engine (SME)
-Aurora's flagship feature - a sophisticated narrative progression system that creates compelling, evolving stories:
+Unlike conventional AI RPG systems that rely on simple prompt engineering, DevName implements **two complementary intelligence layers** that work together to create emergent storylines:
 
-- **Unified Analysis System**: Single function handles both first-time and ongoing momentum analysis
-- **Intelligent Antagonist Generation**: AI creates contextually appropriate villains with detailed motivations and backgrounds
-- **Antagonist Persistence**: Villains evolve with commitment levels (testing → engaged → desperate → cornered)
-- **Resource Loss Tracking**: Monitors antagonist setbacks and adapts behavior accordingly
-- **Pressure Ratcheting**: Mathematical floor system prevents infinite stalling tactics
-- **15-Message Analysis Cycles**: Automated momentum evaluation for optimal story pacing
-- **Quality Validation**: Ensures compelling, well-developed antagonists through multi-attempt generation
+### Enhanced Memory Manager (EMM) - The Story Brain
+The EMM doesn't just store conversation history—it **understands** it. Using advanced LLM semantic analysis, every message is automatically categorized into six semantic types:
 
-### Advanced Memory Management
-- **Semantic Content Categorization**: AI categorizes conversation into four types with tailored preservation:
-  - **Story-critical**: 80% preservation (plot developments, key decisions, world-changing events)
-  - **Character-focused**: 70% preservation (relationships, personality reveals, character development)
-  - **World-building**: 60% preservation (locations, lore, cultural information, discoveries)
-  - **Standard**: 40% preservation (general interactions, travel, routine activities)
-- **Progressive Condensation**: Multiple passes with increasing compression based on content age
-- **Intelligent Context Retention**: Maintains story continuity across extended gameplay sessions
-- **Batch Processing**: Efficient 10-message batches for LLM-powered analysis
+- **story_critical** (90% preservation): Plot developments, character deaths, world-changing events
+- **character_focused** (80% preservation): Relationship changes, personality reveals, character development  
+- **relationship_dynamics** (80% preservation): Trust, betrayal, alliances between characters
+- **emotional_significance** (75% preservation): Dramatic moments, conflict resolution
+- **world_building** (70% preservation): Locations, lore, cultural discoveries
+- **standard** (40% preservation): General interactions, routine activities
 
-### Robust System Architecture
-- **Graceful Prompt Handling**: System continues operating even with missing prompt files
-- **Intelligent Prompt Optimization**: Automatic condensation of oversized prompts while preserving functionality
-- **Error Recovery**: Comprehensive retry logic with exponential backoff for network issues
-- **Token Budget Management**: Optimized 32k context window allocation with real-time monitoring
-- **Debug Transparency**: Extensive logging system for development and troubleshooting
+This semantic understanding means that when memory needs to be condensed, **the system knows what matters**. Critical story elements are preserved while routine interactions are compressed, maintaining narrative continuity across extended gameplay sessions.
 
-### Interactive Storytelling
-- **Multi-line Input System**: Natural conversation flow with double-enter submission
-- **Flexible Companion System**: Support for multiple companion characters via prompt files
-- **Rich Narrative Context**: Momentum-aware system prompts that adapt to story state
-- **Input Validation**: Prevents token budget overflow with helpful user feedback
+### Story Momentum Engine (SME) - The Narrative Director
+The SME acts as an invisible narrative director, analyzing player behavior patterns and dynamically generating story pressure:
 
-## Installation
+**Immediate Pattern Recognition**: Real-time analysis of player input for conflict, exploration, social interaction, mystery, tension, and resolution patterns provides instant narrative feedback.
+
+**Comprehensive LLM Analysis Every 15 Messages**: Deep narrative analysis that:
+- Generates contextually appropriate antagonists with detailed motivations
+- Tracks resource losses and escalates antagonist commitment levels (testing → engaged → desperate → cornered)
+- Implements pressure floor ratcheting that prevents infinite narrative stalling
+- Adapts story arc progression (Setup → Rising Action → Climax → Resolution)
+
+## 🎭 How Emergent Storylines Overcome AI Limitations
+
+Traditional AI RPGs suffer from:
+- **Memory Loss**: Important events forgotten as conversation grows
+- **Repetitive Patterns**: Same antagonists and conflicts recycled
+- **Narrative Stagnation**: Stories that lose momentum and direction
+- **Context Collapse**: Rich world-building lost over time
+
+DevName solves these through **intelligent emergence**:
+
+### 1. Semantic Memory Preservation
+The EMM's 6-category semantic analysis ensures that:
+- Character relationships evolve naturally and are remembered
+- World-building accumulates into rich, consistent lore  
+- Emotional story beats maintain their impact over time
+- Plot threads remain coherent across long sessions
+
+### 2. Dynamic Antagonist Evolution  
+The SME generates antagonists that:
+- Emerge naturally from story context rather than being randomly introduced
+- Have believable motivations tied to player actions
+- Escalate their commitment based on actual narrative pressure
+- Lose resources and adapt tactics based on player successes
+
+### 3. Pressure Floor Ratcheting
+Prevents the common AI problem of tension deflation:
+- Story pressure can only decrease so far before hitting a "floor"
+- Each escalation raises this floor permanently
+- Prevents infinite stalling tactics and maintains forward momentum
+- Creates genuine stakes and consequences
+
+### 4. Contextual Narrative Intelligence
+Every GM response is enhanced with:
+- Current pressure level and story arc awareness
+- Active antagonist status and commitment level
+- Recent semantic patterns and player behavioral analysis  
+- Rich story context that informs appropriate narrative responses
+
+## 💻 Technical Architecture
+
+### Modular Design with Background Processing
+```
+┌─ main.py ──────────────────────────────────────────┐
+│  • Prompt loading with LLM-powered condensation    │
+│  • Token budget management (32K context window)    │
+│  • Application lifecycle and signal handling       │
+└─────────────────────────────────────────────────────┘
+                           │
+┌─ nci.py ───────────────────────────────────────────┐
+│  • Dynamic coordinate system (responsive layout)   │
+│  • Complete LLM integration coordination           │
+│  • Multi-line input with intelligent submission    │
+│  • Background thread coordination                  │
+└─────────────────────────────────────────────────────┘
+                           │
+┌─ EMM ──────────┐   ┌─ SME ──────────┐   ┌─ MCP ──────┐
+│ Semantic       │   │ Narrative      │   │ Model      │
+│ Analysis       │   │ Pressure       │   │ Communication│
+│                │   │ Management     │   │ Protocol   │
+│ • 6-category   │   │                │   │            │
+│   classification│   │ • Pattern      │   │ • Context  │
+│ • Multi-pass   │   │   recognition  │   │   integration│
+│   condensation │   │ • Antagonist   │   │ • Story    │
+│ • Background   │   │   generation   │   │   context  │
+│   auto-save    │   │ • Pressure     │   │   injection│
+│                │   │   ratcheting   │   │            │
+└────────────────┘   └────────────────┘   └────────────┘
+```
+
+### Key Features
+
+**🧵 Background Processing**: All LLM operations (semantic analysis, momentum calculation, antagonist generation) run in background threads, keeping the interface responsive.
+
+**🎯 Dynamic Coordinates**: Responsive terminal layout that adapts to any screen size, eliminating display issues across different terminals.
+
+**🛡️ Defensive Error Handling**: 5-strategy JSON parsing prevents LLM response failures, ensuring reliable operation even with inconsistent model outputs.
+
+**💾 Intelligent Persistence**: Complete story state (semantic categories, momentum data, antagonist details) preserved across sessions with atomic file operations.
+
+## 🚀 Installation
 
 ### Requirements
-- Python 3.10+
-- MCP server running on `127.0.0.1:3456`
-- Qwen2.5 14B Instruct model (`qwen2.5:14b-instruct-q4_k_m`)
-
-### Dependencies
-```bash
-pip install httpx colorama
-```
+- Python 3.8+
+- httpx library (`pip install httpx`)
+- Terminal with ncurses support (built-in on Unix/Linux/macOS)
 
 ### Setup
-1. Ensure your MCP server is running with the configured model
-2. Create prompt files (system will warn about missing files but continue operating):
-   - `critrules.prompt` - **Required**: Game Master core rules and behavior
-   - `companion.prompt` - Optional: Companion character definition
-   - `lowrules.prompt` - Optional: Narrative generation guidelines
-3. Run the client:
-```bash
-python aurora3.sme.py
-```
+1. Clone the repository
+2. Install dependencies: `pip install httpx colorama`
+3. Ensure MCP server running on `127.0.0.1:3456` with `qwen2.5:14b-instruct-q4_k_m`
+4. Create `critrules.prompt` file (required - see prompt templates)
+5. Run: `python main.py`
 
-For comprehensive debug logging:
-```bash
-python aurora3.sme.py --debug
-```
+### Prompt System
+- **critrules.prompt** (REQUIRED): Core game master rules and behavior
+- **companion.prompt** (OPTIONAL): Character definitions for companions  
+- **lowrules.prompt** (OPTIONAL): Narrative generation guidelines
 
-## Program Flow
+The system includes intelligent prompt condensation - if your prompts exceed the 5,000 token budget, they'll be automatically optimized using LLM compression while preserving functionality.
 
-### Startup Sequence
-1. **Configuration Validation**: Verify token allocation within 32k context window
-2. **Prompt Loading & Optimization**:
-   - Load available prompt files with graceful missing file handling
-   - Calculate combined token usage
-   - Apply intelligent condensation if exceeding 5k token budget
-   - Display warnings for missing files while continuing operation
-3. **Critical Validation**: Ensure `critrules.prompt` exists (required for GM functionality)
-4. **Memory Restoration**: Load previous conversation with semantic categories
-5. **Momentum Analysis**: Check if SME analysis needed (every 15 messages)
-6. **Memory Optimization**: Trigger intelligent management if approaching token limits
-7. **Session Display**: Show current momentum state, active antagonist, and prompt status
+## 🎮 Usage
 
-### Story Momentum Engine Cycle
-The SME operates on a 15-message cycle to maintain optimal story pacing:
+### Basic Commands
+- **Multi-line Input**: Type naturally, double-enter to submit
+- **Navigation**: PgUp/PgDn for scrolling, Home/End for quick navigation
+- **Commands**: `/help`, `/stats`, `/analyze`, `/theme <name>`, `/clearmemory`
 
-1. **Trigger Analysis**: Every 15 user/assistant message exchanges
-2. **Context Preparation**: Extract recent conversation within 6k token budget (25% reserved for instructions)
-3. **Antagonist Management**:
-   - Generate high-quality antagonist if first analysis or missing
-   - Validate existing antagonist quality
-   - Regenerate if quality validation fails
-4. **Resource Loss Detection**: Analyze recent events for antagonist setbacks
-5. **Pressure Floor Calculation**: Apply ratcheting mechanism (prevents infinite retreats)
-6. **Momentum Analysis**: LLM evaluates:
-   - Narrative pressure level (0.0-1.0 scale)
-   - Pressure source (antagonist/environment/social/discovery)
-   - Manifestation type (exploration/tension/conflict/resolution)
-   - Player behavioral patterns
-   - Antagonist response strategies
-7. **State Validation**: Sanitize and save updated momentum state
-8. **Context Integration**: Generate momentum-aware system prompts for next interactions
+### Advanced Features
+- **Semantic Analysis**: Watch your story evolve as the EMM categorizes interactions
+- **Momentum Tracking**: Monitor narrative pressure through the status bar
+- **Background Processing**: LLM analysis happens seamlessly without blocking gameplay
+- **Complete State Persistence**: Return to exactly where you left off
 
-### Main Interaction Loop
-1. **Multi-line Input Collection**: Gather user input until double-enter
-2. **Input Validation**: Check token limits with helpful feedback
-3. **Memory Addition**: Store user input with timestamp
-4. **Momentum Context Generation**: Create dynamic system prompts based on current story state
-5. **Message Assembly**: Combine system prompts, memory, and current input
-6. **Response Generation**: Call MCP with retry logic and error handling
-7. **Response Processing**: Display, store, and trigger follow-up analysis
-8. **Periodic Maintenance**: Memory management every 50 messages
+### Debug Mode
+Run with `python main.py --debug` for comprehensive logging of:
+- Semantic categorization decisions
+- Momentum analysis results  
+- Antagonist generation process
+- Background thread operations
+- Token budget management
 
-### Token Budget Allocation
-**Total Context Window**: 32,000 tokens
-- **System Prompts**: 5,000 tokens (auto-optimized)
-- **Momentum Analysis**: 6,000 tokens (SME operations)
-- **Memory Storage**: 14,700 tokens (semantic categorization)
-- **User Input**: 6,300 tokens (validated)
+## 🎨 Interface
 
-## Configuration
+The interface features:
+- **Responsive Design**: Adapts to any terminal size (minimum 80x24)
+- **Theme Support**: Classic, dark, and bright color schemes
+- **Multi-line Input**: Natural text entry with cursor navigation
+- **Real-time Status**: Shows message count, story pressure, active prompts
+- **Scroll Indicators**: Clear navigation feedback during history browsing
 
-### Model Settings
-- **MCP URL**: `http://127.0.0.1:3456/chat`
-- **Model**: `qwen2.5:14b-instruct-q4_k_m`
-- **Timeout**: 300 seconds
-- **Retry Logic**: 3 attempts with exponential backoff
+## 📊 System Monitoring
 
-### Story Momentum Engine
-- **Analysis Frequency**: Every 15 message exchanges
-- **Pressure Scale**: 0.0-1.0 with named ranges (low/building/critical/explosive)
-- **Commitment Progression**: testing → engaged → desperate → cornered
-- **Pressure Floor**: Ratcheting system with 0.02 increment per escalation
-- **Quality Validation**: Multi-attempt antagonist generation with fallback
+The `/stats` command provides detailed insight into:
+- **Memory Usage**: Token utilization, semantic categories, condensation statistics
+- **Story Momentum**: Current pressure, antagonist status, analysis cycles  
+- **Background Threads**: Active LLM processing operations
+- **File Operations**: Auto-save status, backup availability
 
-### Memory Management
-- **Categorization**: Automatic semantic analysis in 20-message chunks
-- **Preservation Ratios**: Content-type specific (40%-80%)
-- **Condensation Thresholds**: Age-based triggers (40-100 messages)
-- **Batch Processing**: 10-message groups for efficient LLM calls
+## 🧪 Advanced Capabilities
 
-## Commands & Usage
+### Semantic Memory Management
+- **Multi-pass Condensation**: Up to 3 passes with increasing aggressiveness
+- **Category-aware Preservation**: Different retention rates for different content types
+- **Context Window Optimization**: Maintains coherence while fitting token constraints
 
-### Input Commands
-- `quit` - Exit application gracefully
-- Double-enter - Submit multi-line input
-- `--debug` flag - Enable comprehensive logging
+### Story Momentum Features  
+- **Dynamic Antagonist Generation**: Context-appropriate villains with detailed motivations
+- **Commitment Escalation**: Antagonists become more dangerous as they lose resources
+- **Pressure Floor System**: Prevents narrative backsliding and stagnation
+- **Behavioral Pattern Analysis**: Adapts to player exploration, combat, and social preferences
 
-### File Structure
-- `aurora3.sme.py` - Main application with Story Momentum Engine
-- `memory.json` - Persistent conversation memory (auto-created)
-- `critrules.prompt` - **Required**: Game Master rules
-- `companion.prompt` - Optional: Companion character definition
-- `lowrules.prompt` - Optional: Narrative generation guidelines
+### Background Processing
+- **Non-blocking Operations**: All LLM calls happen in background threads
+- **Thread Safety**: Proper locking ensures data integrity
+- **Graceful Degradation**: System continues operating if individual components fail
 
-## Technical Innovation
+## 🤝 Contributing
 
-### Story Momentum Engine Breakthroughs
-The SME represents a paradigm shift in AI-powered narrative progression:
+This codebase demonstrates advanced patterns in:
+- **Semantic AI Integration**: LLM-powered content understanding and categorization
+- **Dynamic Story Generation**: Emergent narrative systems that overcome AI limitations  
+- **Responsive Terminal Interfaces**: Modern ncurses applications with dynamic layouts
+- **Background Processing**: Non-blocking AI operations in interactive applications
+- **Defensive Programming**: Robust handling of unreliable LLM responses
 
-- **Unified State Management**: Single analysis function eliminates complexity
-- **Antagonist Quality Assurance**: Multi-attempt generation ensures compelling villains
-- **Mathematical Pressure Modeling**: Prevents common AI storytelling pitfalls
-- **Organic Conflict Resolution**: Sophisticated outcomes beyond simple win/lose
-- **Contextual Adaptability**: System responds to player behavior patterns
-
-### Memory System Architecture
-- **Semantic Intelligence**: LLM categorizes content by narrative importance
-- **Adaptive Preservation**: Different ratios optimize for content type
-- **Progressive Compression**: Multiple passes with increasing aggressiveness
-- **Continuity Maintenance**: Story coherence across extended sessions
-
-### Error Handling & Reliability
-- **Graceful Degradation**: System continues operating with missing components
-- **Network Resilience**: Comprehensive retry logic for unreliable connections
-- **Input Protection**: Token budget validation prevents system overflow
-- **State Recovery**: Robust fallback mechanisms for analysis failures
-
-## Development Features
-
-### Debug Capabilities
-Enable comprehensive logging with `--debug` flag:
-- Token allocation breakdown
-- Momentum analysis context preparation
-- Antagonist generation attempts
-- Memory categorization results
-- Prompt condensation statistics
-- Network retry attempts
-
-### Error Messages & Warnings
-- Missing prompt file notifications
-- Token budget violations with specific guidance
-- Memory optimization triggers
-- Momentum analysis failures with fallbacks
-
-### System Status Display
-Real-time information during operation:
-- Current momentum pressure level
-- Active antagonist name and status
-- Available prompt components
-- Memory optimization results
-
-## Contributing
-
-Aurora demonstrates advanced LLM integration principles:
-
-- **Semantic Partnership**: AI handles complex narrative decisions intelligently
-- **Structured Reliability**: Combines creativity with programmatic robustness
-- **Resource Optimization**: Efficient token usage within hardware constraints
-- **User Agency Preservation**: Maintains meaningful player choice throughout
-
-## License
+## 📝 License
 
 GNU Affero General Public License v3.0 - See LICENSE file for details.
 
 ---
 
-**Note**: Aurora requires the `critrules.prompt` file to function properly. The system will display an error and exit if this critical file is missing. Companion and narrative prompts are optional but enhance the experience.
+*DevName RPG Client represents a breakthrough in AI-powered interactive storytelling, moving beyond simple chatbots to create truly emergent narratives that evolve organically through intelligent semantic processing and dynamic story momentum management.*
