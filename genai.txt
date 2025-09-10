@@ -2,29 +2,29 @@ GENAI.TXT - AI ANALYSIS REFERENCE FOR DEVNAME RPG CLIENT
 ================================================================
 
 PROJECT SCOPE:
-Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Control Protocol). Features innovative Story Momentum Engine, intelligent memory management, and completely rewritten ncurses interface with dynamic box coordinate system and modular architecture.
+Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Control Protocol). Features innovative Story Momentum Engine, intelligent memory management with background auto-save, and completely rewritten ncurses interface with dynamic box coordinate system and modular architecture.
 
 MODULE ARCHITECTURE:
 main.py - Application coordination, prompt management, and lifecycle control
 nci.py - Main ncurses interface controller with dynamic coordinate system
 nci_terminal.py - Dynamic box coordinate system and terminal management
 nci_input.py - Multi-line input system with cursor navigation
-nci_scroll.py - Enhanced scrolling with page navigation
+nci_scroll.py - Enhanced scrolling with page navigation and scroll position tracking
 nci_display.py - Message formatting and display logic
 nci_colors.py - Color theme management system
-mcp.py - HTTP client for MCP/Ollama server communication  
-emm.py - Enhanced Memory Manager with LLM-powered semantic condensation
+mcp.py - HTTP client for MCP/Ollama server communication
+emm.py - Enhanced Memory Manager with background auto-save and LLM-powered semantic condensation
 sme.py - Story Momentum Engine for narrative pressure management
 
 CRITICAL INTERCONNECTS:
 main.py → nci.py: Creates CursesInterface with loaded prompt configuration
 nci.py → nci_terminal.py: Uses TerminalManager for dynamic coordinate calculations
 nci.py → nci_input.py: Manages MultiLineInput for enhanced text entry
-nci.py → nci_scroll.py: Controls ScrollManager for history navigation
+nci.py → nci_scroll.py: Controls ScrollManager for history navigation with error handling
 nci.py → nci_display.py: Uses DisplayMessage for formatted output
 nci.py → nci_colors.py: Applies ColorManager for theme support
 nci.py → mcp.py: Sends integrated system messages via MCPClient methods
-nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager
+nci.py → emm.py: Stores/retrieves messages via EnhancedMemoryManager with background auto-save
 nci.py → sme.py: Updates narrative pressure via StoryMomentumEngine.process_user_input()
 mcp.py ← sme.py: Receives story context via get_story_context()
 mcp.py ← emm.py: Receives conversation history via get_conversation_for_mcp()
@@ -33,7 +33,7 @@ DATA FLOW:
 1. Prompts loaded and optimized in main.py during startup
 2. Dynamic coordinate system calculates optimal window layout in nci_terminal.py
 3. User input captured through nci_input.py multi-line system with cursor navigation
-4. Message stored in emm.py with automatic semantic analysis
+4. Message stored in emm.py with background auto-save and semantic analysis
 5. Narrative pressure updated in sme.py based on input patterns
 6. System messages built from loaded prompts + story context + conversation history
 7. MCP request sent with complete message chain, response received
@@ -41,7 +41,7 @@ DATA FLOW:
 
 CONFIGURATION SYSTEM:
 - Hardcoded configuration values in ApplicationConfig class
-- memory.json: Persistent conversation memory (auto-created)
+- memory.json: Persistent conversation memory with background auto-save
 - Prompt files: critrules.prompt (required), companion.prompt, lowrules.prompt
 - debug.log: Debug logging when --debug flag enabled
 
@@ -137,7 +137,7 @@ MODULAR ARCHITECTURE INTEGRATION:
 - CursesInterface: Main controller coordinating all modules
 - TerminalManager: Dynamic coordinate calculations and layout
 - MultiLineInput: Advanced input handling from nci_input.py
-- ScrollManager: Enhanced scrolling from nci_scroll.py
+- ScrollManager: Enhanced scrolling from nci_scroll.py with error handling
 - DisplayMessage: Message formatting from nci_display.py
 - ColorManager: Theme management from nci_colors.py
 
@@ -147,7 +147,7 @@ CORE INTERFACE FUNCTIONALITY:
 - True blank line separation between GM responses
 - Enhanced navigation: page-based scrolling, home/end positioning
 - Multi-line input with intelligent submission detection
-- Command processing: /help, /quit, /clear, /stats, /theme
+- Command processing: /help, /quit, /clearmemory, /savememory, /loadmemory, /stats, /theme
 
 RESIZE HANDLING WITH DYNAMIC COORDINATES:
 1. TerminalManager detects size change and calculates new layout
@@ -169,6 +169,13 @@ NO MCP CONNECTION TESTING:
 - Specific error types: ConnectionError, TimeoutError, general exceptions
 - Graceful fallback patterns for MCP communication failures
 - Clean startup experience without unnecessary error messages
+
+ENHANCED MEMORY MANAGEMENT COMMANDS:
+- /clearmemory [filename]: Clear memory with optional backup
+- /savememory [filename]: Save memory to file (auto-timestamped if no filename)
+- /loadmemory <filename>: Load memory from file
+- Complete conversation restoration from saved files
+- Backup and recovery system for memory files
 
 MULTI-LINE INPUT SYSTEM (nci_input.py):
 ================================================================
@@ -211,6 +218,12 @@ SCROLLBACK MANAGEMENT:
 - Scroll position preservation during terminal resize
 - Maximum scroll calculation based on content and window height
 - Intelligent scroll offset management
+
+ERROR HANDLING IMPROVEMENTS:
+- Fixed get_scroll_info() KeyError crash in /stats command
+- Robust error handling in scroll statistics calculation
+- Safe fallback values when scroll data unavailable
+- Protection against division by zero in percentage calculations
 
 MESSAGE DISPLAY SYSTEM (nci_display.py):
 ================================================================
@@ -272,8 +285,26 @@ CONTEXT INTEGRATION DESIGN:
 - System prompt + story context + history + user input = complete chain
 - Minimal response validation for essential structure checking
 
-ENHANCED MEMORY MANAGER MODULE (emm.py):
+ENHANCED MEMORY MANAGER MODULE (emm.py) - BACKGROUND AUTO-SAVE:
 ================================================================
+
+BACKGROUND AUTO-SAVE ARCHITECTURE:
+- Non-blocking auto-save system using daemon threads
+- Immediate message addition without file I/O blocking
+- Background thread handles all file operations asynchronously
+- Thread-safe memory operations with proper locking
+
+AUTO-SAVE PROCESS:
+- add_message() returns immediately after memory addition
+- _background_auto_save() handles file operations in separate thread
+- File backup, JSON serialization, and atomic writes happen asynchronously
+- Semantic condensation deferred to background to prevent main thread blocking
+
+THREAD SAFETY IMPLEMENTATION:
+- threading.Lock() protects message list operations
+- Background threads operate independently of main application flow
+- Named threads ("EMM-AutoSave", "EMM-Condensation") for debugging
+- Daemon threads prevent hanging on application shutdown
 
 SEMANTIC ANALYSIS SYSTEM:
 - LLM-powered message categorization with 6 semantic categories
@@ -294,6 +325,12 @@ PROGRESSIVE CONDENSATION SYSTEM:
 - Aggressiveness reduces preservation ratios by 0.1 per pass
 - Minimum preservation ratio of 0.2 to prevent critical information loss
 - Recent messages (last 5) always protected from condensation
+
+MEMORY FILE OPERATIONS:
+- Atomic file operations with temporary files and moves
+- Automatic backup creation before saves
+- Corruption recovery with backup file fallback
+- Comprehensive error handling for file system issues
 
 STORY MOMENTUM ENGINE MODULE (sme.py):
 ================================================================
@@ -388,12 +425,11 @@ ENHANCED USER EXPERIENCE:
 - Improved message prefixes (AI→GM) for better immersion
 - Real-time status display with comprehensive system information
 
-ELIMINATED COMPLEXITY:
-- Removed MCP connection testing at startup for cleaner initialization
-- Simplified command system with focused functionality
-- Streamlined resize handling through dynamic coordinate system
-- Reduced coordinate-related bugs through systematic approach
-- Cleaner API surface without backwards compatibility concerns
+BACKGROUND PROCESSING:
+- Non-blocking auto-save prevents interface freezing
+- Background semantic condensation maintains responsiveness
+- Thread-safe memory operations with proper synchronization
+- Daemon threads prevent application hanging on shutdown
 
 TECHNICAL EXCELLENCE:
 ================================================================
@@ -411,6 +447,12 @@ ROBUSTNESS FEATURES:
 - Safe fallback patterns for all critical operations
 - Protection against curses exceptions and terminal limitations
 - Automatic recovery from resize-related disruptions
+
+THREADING ARCHITECTURE:
+- Background auto-save threads prevent main thread blocking
+- Thread-safe memory operations with proper locking mechanisms
+- Named daemon threads for easier debugging and monitoring
+- Asynchronous file operations maintain interface responsiveness
 
 DEBUGGING CAPABILITIES:
 - Comprehensive debug logging across all modules
@@ -449,36 +491,38 @@ STORY MOMENTUM ENGINE INTEGRATION:
 - Natural pressure decay prevents artificial tension inflation
 - Seamless integration with interface for enhanced user experience
 
-SEMANTIC MEMORY MANAGEMENT:
-- LLM-powered categorization with intelligent preservation strategies
-- Progressive condensation maintains story continuity
-- Thread-safe operations with async LLM calls
-- Content-type specific preservation ratios optimize memory usage
+BACKGROUND AUTO-SAVE SYSTEM:
+- Non-blocking file operations maintain interface responsiveness
+- Thread-safe memory management with proper synchronization
+- Atomic file operations prevent data corruption
+- Automatic backup and recovery mechanisms
 
 MODULAR PRESERVATION RULES:
 ================================================================
 
 1. Dynamic coordinate system must be preserved across all interface components
-2. ModuLinear architecture boundaries must be maintained for clean separation
+2. Modular architecture boundaries must be maintained for clean separation
 3. Prompt integration workflow must preserve token budget management
 4. Story momentum engine integration must maintain pressure calculation accuracy
-5. Memory management semantic categorization must preserve content quality
-6. MCP communication must maintain context integration from EMM and SME
-7. Interface immediate display pattern must preserve real-time user feedback
-8. Multi-line input system must preserve cursor navigation functionality
-9. Terminal resize handling must preserve content and scroll position
-10. Color theme system must preserve accessibility and visual hierarchy
+5. Background auto-save system must preserve thread safety and non-blocking operation
+6. Memory management semantic categorization must preserve content quality
+7. MCP communication must maintain context integration from EMM and SME
+8. Interface immediate display pattern must preserve real-time user feedback
+9. Multi-line input system must preserve cursor navigation functionality
+10. Terminal resize handling must preserve content and scroll position
+11. Color theme system must preserve accessibility and visual hierarchy
+12. Scroll position tracking must preserve error handling for edge cases
 
 ERROR HANDLING HIERARCHY:
 - main.py: Application-level errors, prompt loading failures, graceful shutdown
 - nci.py: Interface coordination errors, module integration failures
 - nci_terminal.py: Terminal size validation, coordinate calculation errors
 - nci_input.py: Input processing errors, cursor positioning failures
-- nci_scroll.py: Scroll position validation, history navigation errors
+- nci_scroll.py: Scroll position validation with KeyError protection, history navigation errors
 - nci_display.py: Message formatting errors, display validation failures
 - nci_colors.py: Color initialization errors, theme switching failures
 - mcp.py: Network errors and communication failures
-- emm.py: Memory management errors, semantic analysis failures
+- emm.py: Background thread errors, file operation failures, semantic analysis failures
 - sme.py: Narrative analysis and pressure calculation errors
 
 DEBUGGING INFRASTRUCTURE:
@@ -487,7 +531,8 @@ DEBUGGING INFRASTRUCTURE:
 - Real-time interface state inspection and validation
 - Dynamic coordinate system layout debugging
 - Multi-line input state analysis and cursor tracking
-- Scroll position monitoring and history navigation testing
+- Scroll position monitoring with error protection and history navigation testing
+- Background thread monitoring and auto-save process tracking
 - Memory management semantic analysis tracking
 - Story pressure calculation and antagonist lifecycle monitoring
 - Prompt loading and condensation process logging
@@ -498,7 +543,7 @@ DEPENDENCY REQUIREMENTS:
 - httpx library for HTTP communication (REQUIRED for full functionality)
 - asyncio for non-blocking LLM calls in memory management
 - JSON for configuration and history storage
-- Threading for thread-safe memory operations
+- Threading for background auto-save and semantic condensation
 - textwrap for multi-line input word wrapping
 
 AI MODIFICATION GUIDELINES:
@@ -513,12 +558,16 @@ AI MODIFICATION GUIDELINES:
 7. VALIDATE that prompt integration maintains token budget constraints
 8. MAINTAIN immediate display pattern for all message additions
 9. PRESERVE story momentum engine integration for narrative coherence
-10. TEST semantic memory management after EMM modifications
-11. VERIFY MCP context integration after communication changes
-12. MAINTAIN graceful degradation patterns for missing components
-13. UPDATE genai.txt documentation when making architectural changes
-14. PRESERVE the modular separation that enables independent development
-15. ENSURE that coordinate system changes maintain visual consistency
+10. TEST background auto-save functionality after EMM modifications
+11. VERIFY thread safety in memory management operations
+12. MAINTAIN non-blocking operation in auto-save and condensation
+13. VERIFY MCP context integration after communication changes
+14. MAINTAIN graceful degradation patterns for missing components
+15. UPDATE genai.txt documentation when making architectural changes
+16. PRESERVE the modular separation that enables independent development
+17. ENSURE that coordinate system changes maintain visual consistency
+18. PROTECT scroll error handling improvements in nci_scroll.py
+19. MAINTAIN background thread architecture for memory operations
 
 INTERFACE MODULE ARCHITECTURE BENEFITS:
 ================================================================
@@ -541,5 +590,12 @@ USER EXPERIENCE CONSISTENCY:
 - Unified behavior patterns across all interface interactions
 - Consistent visual feedback through coordinated color theming
 - Reliable input handling through dedicated input module
-- Smooth scrolling experience through specialized scroll management
+- Smooth scrolling experience through specialized scroll management with error protection
 - Professional appearance through dynamic coordinate system precision
+
+BACKGROUND PROCESSING BENEFITS:
+- Non-blocking auto-save maintains interface responsiveness
+- Background semantic analysis prevents user interruption
+- Thread-safe operations ensure data integrity
+- Asynchronous file operations improve user experience
+- Daemon threads prevent application hanging during shutdown
