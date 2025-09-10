@@ -135,21 +135,41 @@ class EnhancedMemoryManager:
                 self.debug_logger.error(f"Auto-save error: {e}")
     
     def add_message(self, content: str, message_type: MessageType) -> None:
-        """Add new message and manage memory with auto-save"""
+        """Add new message and manage memory with background auto-save"""
         with self.lock:
             message = Message(content, message_type)
             self.messages.append(message)
-            
+
             if self.debug_logger:
                 self.debug_logger.memory(f"Added {message_type.value} message: {len(content)} chars, {message.token_estimate} tokens")
-            
-            # Auto-save after adding message
+
+        # Move ALL auto-save operations to background thread to avoid blocking main thread
+        if self.auto_save_enabled:
+            auto_save_thread = threading.Thread(
+                target=self._background_auto_save,
+                daemon=True,
+                name="EMM-AutoSave"
+            )
+            auto_save_thread.start()
+
+    def _background_auto_save(self) -> None:
+        """Handle auto-save and condensation in background thread"""
+        try:
+            # Auto-save first (file operations)
             self._auto_save()
-            
+
             # Check if condensation needed
-            current_tokens = sum(msg.token_estimate for msg in self.messages)
+            with self.lock:
+                current_tokens = sum(msg.token_estimate for msg in self.messages)
+
             if current_tokens > self.max_memory_tokens:
+                if self.debug_logger:
+                    self.debug_logger.memory(f"Starting background condensation: {current_tokens} > {self.max_memory_tokens}")
                 self._perform_semantic_condensation()
+
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Background auto-save failed: {e}")
     
     def clear_memory_file(self) -> bool:
         """Clear memory file and reset in-memory state"""
@@ -262,22 +282,23 @@ class EnhancedMemoryManager:
             }
 
     async def _call_llm(self, messages: List[Dict[str, str]]) -> Optional[str]:
-        """Make LLM request for semantic analysis"""
+        """Make LLM request for semantic analysis - FIXED to match working MCP format"""
         try:
             async with httpx.AsyncClient(timeout=self.mcp_config.get("timeout", 30)) as client:
-                response = await client.post(
-                    self.mcp_config["server_url"],
-                    json={
-                        "model": self.mcp_config["model"],
-                        "messages": messages,
-                        "stream": False
-                    }
-                )
-                
+                # Use same payload format as working mcp.py
+                payload = {
+                    "model": self.mcp_config["model"],
+                    "messages": messages,
+                    "stream": False
+                }
+
+                response = await client.post(self.mcp_config["server_url"], json=payload)
+                response.raise_for_status()
+
                 if response.status_code == 200:
                     result = response.json()
                     return result.get("message", {}).get("content", "")
-                    
+
         except Exception as e:
             if self.debug_logger:
                 self.debug_logger.error(f"LLM call failed: {e}")
