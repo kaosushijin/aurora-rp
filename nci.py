@@ -1,9 +1,8 @@
-# Chunk 1/4 - nci.py - Imports and Initialization with Narrative Time Integration
 #!/usr/bin/env python3
 """
-DevName RPG Client - Ncurses Interface Module (nci.py) - NARRATIVE TIME INTEGRATION
+DevName RPG Client - Ncurses Interface Module (nci.py) - COMPLETE LLM INTEGRATION
 Module architecture and interconnects documented in genai.txt
-Integrates narrative time tracking and semantic analysis with momentum management
+Integrates complete LLM-driven semantic analysis and momentum management
 """
 
 import curses
@@ -19,7 +18,7 @@ from nci_display import DisplayMessage, InputValidator
 from nci_scroll import ScrollManager
 from nci_input import MultiLineInput
 
-# Import core dependencies with narrative time integration
+# Import core dependencies with complete LLM integration
 try:
     from mcp import MCPClient
     from emm import EnhancedMemoryManager, MessageType
@@ -33,12 +32,11 @@ MAX_USER_INPUT_TOKENS = 2000
 
 class CursesInterface:
     """
-    NARRATIVE TIME INTEGRATION: Ncurses interface with semantic time detection and momentum management
+    COMPLETE LLM INTEGRATION: Ncurses interface with full semantic analysis and robust momentum management
     
     FEATURES:
     - Dynamic window positioning eliminates coordinate assumption bugs
     - Automatic adaptation to terminal geometry changes
-    - Narrative time tracking separates story progression from real time
     - Complete LLM-driven semantic memory management with multi-pass condensation
     - Robust 15-message momentum analysis cycle with 5-strategy JSON parsing
     - Background processing prevents interface blocking
@@ -75,7 +73,7 @@ class CursesInterface:
         self.display_messages: List[DisplayMessage] = []
         self.display_lines: List[Tuple[str, str]] = []  # (line_text, msg_type)
         
-        # Module interconnects with narrative time integration
+        # Module interconnects with complete LLM integration
         self.memory_manager = EnhancedMemoryManager(
             debug_logger=debug_logger,
             auto_save_enabled=True
@@ -92,13 +90,13 @@ class CursesInterface:
         self._configure_components()
     
     def _initialize_sme_state(self):
-        """Initialize SME state from EMM on startup with narrative time restoration"""
+        """Initialize SME state from EMM on startup"""
         try:
             momentum_state = self.memory_manager.get_momentum_state()
             if momentum_state:
                 success = self.sme.load_state_from_dict(momentum_state)
                 if success and self.debug_logger:
-                    self.debug_logger.debug("SME state loaded from EMM on startup with narrative time tracking")
+                    self.debug_logger.debug("SME state loaded from EMM on startup")
             else:
                 if self.debug_logger:
                     self.debug_logger.debug("No existing SME state found in EMM")
@@ -183,7 +181,7 @@ class CursesInterface:
         self._populate_welcome_content()
         self._ensure_cursor_in_input()
         
-        self._log_debug(f"Interface initialized with narrative time integration: {width}x{height}")
+        self._log_debug(f"Interface initialized with complete LLM integration: {width}x{height}")
     
     def _update_component_dimensions(self):
         """Update component dimensions from current layout"""
@@ -240,40 +238,35 @@ class CursesInterface:
         border_color = self.color_manager.get_color('border')
         self.terminal_manager.draw_box_borders(layout, border_color)
 
-# Chunk 2/4 - nci.py - Welcome Content and Input Processing with Narrative Time
-
     def _populate_welcome_content(self):
-        """Add welcome messages with memory load status and narrative time capabilities"""
-        # Welcome message with narrative time integration
+        """Add welcome messages with memory load status and complete LLM capabilities"""
+        # Welcome message with full LLM integration
         welcome_msg = DisplayMessage(
-            "DevName RPG Client started with narrative time tracking and LLM-powered story analysis.",
+            "DevName RPG Client started with complete LLM-powered narrative analysis.",
             "system"
         )
         self._add_message_immediate(welcome_msg)
         
-        # Memory load status with semantic analysis and narrative time info
+        # Memory load status with semantic analysis info
         mem_stats = self.memory_manager.get_memory_stats()
         if mem_stats.get('message_count', 0) > 0:
-            narrative_time = mem_stats.get('narrative_time_formatted', '0s')
             memory_msg = DisplayMessage(
                 f"Restored {mem_stats['message_count']} messages from previous session "
-                f"({mem_stats.get('condensations_performed', 0)} condensations performed, "
-                f"{narrative_time} narrative time).",
+                f"({mem_stats.get('condensations_performed', 0)} condensations performed).",
                 "system"
             )
             self._add_message_immediate(memory_msg)
         
-        # SME state status with narrative time info
+        # SME state status with enhanced info
         sme_stats = self.sme.get_pressure_stats()
         if sme_stats.get('status') != 'no_data':
             pressure = sme_stats.get('current_pressure', 0.0)
             arc = sme_stats.get('current_arc', 'setup')
             floor = sme_stats.get('pressure_floor', 0.0)
             escalations = sme_stats.get('escalation_count', 0)
-            narrative_time = sme_stats.get('narrative_time_formatted', '0s')
             sme_msg = DisplayMessage(
                 f"Story momentum restored: {pressure:.2f} pressure (floor {floor:.2f}), "
-                f"{arc} arc, {escalations} escalations, {narrative_time} elapsed",
+                f"{arc} arc, {escalations} escalations",
                 "system"
             )
             self._add_message_immediate(sme_msg)
@@ -300,10 +293,10 @@ class CursesInterface:
             )
             self._add_message_immediate(status_msg)
         
-        # Ready message with narrative time features
+        # Ready message with complete feature list
         ready_msg = DisplayMessage(
-            "Ready for adventure! Narrative time tracking will enhance story pacing, "
-            "while LLM analysis continues every 15 messages with semantic memory management.",
+            "Ready for adventure! Complete LLM analysis will enhance narrative every 15 messages "
+            "with semantic memory management and robust antagonist generation.",
             "system"
         )
         self._add_message_immediate(ready_msg)
@@ -463,24 +456,21 @@ class CursesInterface:
             self.scroll_manager.auto_scroll_to_bottom()
             self._update_output_display()
             
-            # Process input with narrative time integration
+            # Process input with complete LLM integration
             self._process_user_input(content)
     
     def _process_user_input(self, user_input: str):
-        """Process user input with narrative time tracking and integrated LLM analysis"""
+        """Process user input with complete integrated LLM analysis coordination"""
         try:
             if user_input.startswith('/'):
                 self._process_command(user_input)
                 self.set_processing_state_immediate(False)
                 return
             
-            # Calculate semantic narrative duration before storing
-            narrative_duration = self.sme.narrative_tracker.calculate_semantic_duration(user_input)
+            # Store in memory first
+            self.memory_manager.add_message(user_input, MessageType.USER)
             
-            # Store in memory with calculated narrative duration
-            self.memory_manager.add_message(user_input, MessageType.USER, narrative_duration)
-            
-            # Update story momentum with narrative time tracking
+            # Update story momentum (immediate pattern-based feedback)
             momentum_result = self.sme.process_user_input(user_input)
             
             # Check if LLM analysis is needed (precise 15-message count for USER/ASSISTANT only)
@@ -490,7 +480,7 @@ class CursesInterface:
             
             if self.sme.should_analyze_momentum(total_conversation_messages):
                 # Show analysis notification
-                self.add_system_message_immediate("Analyzing story momentum with narrative time context...")
+                self.add_system_message_immediate("Analyzing story momentum with complete LLM integration...")
                 
                 # Trigger comprehensive background LLM analysis
                 self._trigger_comprehensive_momentum_analysis(total_conversation_messages)
@@ -503,7 +493,7 @@ class CursesInterface:
             self.set_processing_state_immediate(False)
     
     def _trigger_comprehensive_momentum_analysis(self, total_messages: int):
-        """Trigger complete LLM momentum analysis in background thread with narrative time context"""
+        """Trigger complete LLM momentum analysis in background thread with robust error handling"""
         def run_comprehensive_analysis():
             try:
                 # Load current SME state from EMM
@@ -521,7 +511,7 @@ class CursesInterface:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    # Execute complete momentum analysis with narrative time context
+                    # Execute complete momentum analysis with all LLM components
                     analysis_result = loop.run_until_complete(
                         self.sme.analyze_momentum(conversation_messages, total_messages, is_first_analysis)
                     )
@@ -530,19 +520,14 @@ class CursesInterface:
                     updated_state = self.sme.save_state_to_dict()
                     self.memory_manager.update_momentum_state(updated_state)
                     
-                    # Show comprehensive analysis completion with narrative time details
+                    # Show comprehensive analysis completion with details
                     pressure = analysis_result.get("narrative_pressure", 0.0)
                     manifestation = analysis_result.get("manifestation_type", "unknown")
                     source = analysis_result.get("pressure_source", "unknown")
                     commitment_change = analysis_result.get("commitment_change", "no_change")
                     
-                    # Get narrative time stats for display
-                    narrative_stats = self.sme.narrative_tracker.get_stats()
-                    narrative_time = narrative_stats.get('narrative_time_formatted', '0s')
-                    
-                    completion_msg = (f"Story analysis complete: {pressure:.2f} pressure, "
-                                    f"{manifestation} manifestation from {source} source, "
-                                    f"{narrative_time} elapsed")
+                    completion_msg = (f"Complete story analysis finished: {pressure:.2f} pressure, "
+                                    f"{manifestation} manifestation from {source} source")
                     self.add_system_message_immediate(completion_msg)
                     
                     # Show antagonist updates if applicable
@@ -552,14 +537,13 @@ class CursesInterface:
                         self.add_system_message_immediate(antagonist_msg)
                     
                     if self.debug_logger:
-                        self.debug_logger.debug(f"Comprehensive momentum analysis complete: pressure {pressure:.2f}, "
-                                              f"narrative time {narrative_time}")
+                        self.debug_logger.debug(f"Comprehensive momentum analysis complete: pressure {pressure:.2f}")
                     
                 finally:
                     loop.close()
                     
             except Exception as e:
-                error_msg = f"Story analysis failed: {str(e)}"
+                error_msg = f"Complete story analysis failed: {str(e)}"
                 self.add_error_message_immediate(error_msg)
                 if self.debug_logger:
                     self.debug_logger.error(f"Comprehensive momentum analysis failed: {e}")
@@ -571,11 +555,9 @@ class CursesInterface:
             name="SME-Comprehensive-Analysis"
         )
         analysis_thread.start()
-
-# Chunk 3/4 - nci.py - Command Processing and Stats with Narrative Time
-
+    
     def _send_mcp_request(self, user_input: str):
-        """Send MCP request with enhanced story context including narrative time"""
+        """Send MCP request with enhanced story context from complete LLM analysis"""
         try:
             # Get context data with complete SME integration
             conversation_history = self.memory_manager.get_conversation_for_mcp()
@@ -598,8 +580,8 @@ class CursesInterface:
                     "stream": False
                 })
                 
-                # Store and display response with GM response duration
-                self.memory_manager.add_message(response_data, MessageType.ASSISTANT, narrative_duration=5.0)
+                # Store and display response
+                self.memory_manager.add_message(response_data, MessageType.ASSISTANT)
                 self.add_assistant_message_immediate(response_data)
                 
             except ConnectionError:
@@ -616,7 +598,7 @@ class CursesInterface:
                         story_context=context_str
                     )
                     
-                    self.memory_manager.add_message(response, MessageType.ASSISTANT, narrative_duration=5.0)
+                    self.memory_manager.add_message(response, MessageType.ASSISTANT)
                     self.add_assistant_message_immediate(response)
                     
                 except Exception as fallback_error:
@@ -628,7 +610,7 @@ class CursesInterface:
             self.set_processing_state_immediate(False)
     
     def _format_complete_story_context(self, context: Dict[str, Any]) -> str:
-        """Format complete story context with narrative time details"""
+        """Format complete story context with comprehensive LLM analysis details"""
         if not context:
             return ""
         
@@ -637,12 +619,9 @@ class CursesInterface:
         arc = context.get('story_arc', 'unknown')
         state = context.get('narrative_state', 'unknown')
         floor = context.get('pressure_floor', 0.0)
-        narrative_time = context.get('narrative_time', '0s')
-        total_exchanges = context.get('total_exchanges', 0)
         
-        # Core momentum info with pressure floor and narrative time
+        # Core momentum info with pressure floor
         parts.append(f"Pressure: {pressure:.2f} (floor: {floor:.2f}), Arc: {arc}, State: {state}")
-        parts.append(f"Narrative time: {narrative_time} ({total_exchanges} exchanges)")
         
         # Enhanced antagonist information with complete details
         if context.get('antagonist_present'):
@@ -683,345 +662,6 @@ class CursesInterface:
             system_messages.append({"role": "system", "content": self.loaded_prompts['lowrules']})
         
         return system_messages
-
-    def _process_command(self, command: str):
-        """Process commands with narrative time analysis commands"""
-        cmd = command.lower().strip()
-        
-        if cmd == '/help':
-            self._show_complete_help()
-        elif cmd == '/quit' or cmd == '/exit':
-            self.running = False
-        elif cmd.startswith('/clearmemory'):
-            # Parse optional backup filename
-            parts = command.split(None, 1)
-            backup_filename = parts[1] if len(parts) > 1 else None
-            self._clear_memory(backup_filename)
-        elif cmd.startswith('/savememory'):
-            # Parse optional filename
-            parts = command.split(None, 1)
-            filename = parts[1] if len(parts) > 1 else None
-            self._save_memory(filename)
-        elif cmd.startswith('/loadmemory'):
-            # Parse required filename
-            parts = command.split(None, 1)
-            if len(parts) < 2:
-                self.add_error_message_immediate("Usage: /loadmemory <filename>")
-            else:
-                filename = parts[1]
-                self._load_memory(filename)
-        elif cmd == '/stats':
-            self._show_complete_stats()
-        elif cmd == '/analyze':
-            self._force_comprehensive_analysis()
-        elif cmd == '/reset_momentum':
-            self._reset_complete_momentum()
-        elif cmd.startswith('/theme '):
-            theme_name = cmd[7:].strip()
-            self._change_theme(theme_name)
-        else:
-            self.add_error_message_immediate(f"Unknown command: {command}")
-    
-    def _force_comprehensive_analysis(self):
-        """Force immediate comprehensive momentum analysis for testing"""
-        try:
-            user_assistant_messages = [msg for msg in self.memory_manager.get_messages() 
-                                     if msg.message_type in [MessageType.USER, MessageType.ASSISTANT]]
-            total_messages = len(user_assistant_messages)
-            
-            if total_messages < 5:
-                self.add_error_message_immediate("Need at least 5 messages for meaningful analysis")
-                return
-            
-            self.add_system_message_immediate("Running forced comprehensive momentum analysis with narrative time context...")
-            self._trigger_comprehensive_momentum_analysis(total_messages)
-            
-        except Exception as e:
-            self.add_error_message_immediate(f"Failed to force comprehensive analysis: {e}")
-    
-    def _reset_complete_momentum(self):
-        """Reset complete story momentum state including narrative time"""
-        try:
-            self.sme.reset_story_state()
-            
-            # Clear momentum state from EMM
-            empty_state = self.sme.save_state_to_dict()
-            self.memory_manager.update_momentum_state(empty_state)
-            
-            self.add_system_message_immediate("Complete story momentum reset to initial state with narrative time tracking")
-            
-        except Exception as e:
-            self.add_error_message_immediate(f"Failed to reset complete momentum: {e}")
-    
-    def _clear_memory(self, backup_filename: Optional[str] = None):
-        """Clear memory with optional backup"""
-        try:
-            # Save backup if filename provided
-            if backup_filename:
-                success = self.memory_manager.save_conversation(backup_filename)
-                if success:
-                    self.add_system_message_immediate(f"Backup saved to {backup_filename}")
-                else:
-                    self.add_error_message_immediate(f"Failed to save backup to {backup_filename}")
-                    return
-            
-            # Clear memory file and in-memory state
-            success = self.memory_manager.clear_memory_file()
-            if success:
-                # Reset complete SME state
-                self.sme.reset_story_state()
-                
-                # Also clear display
-                self.display_messages.clear()
-                self.display_lines.clear()
-                
-                # Reset scroll manager
-                self.scroll_manager.scroll_offset = 0
-                self.scroll_manager.max_scroll = 0
-                self.scroll_manager.in_scrollback = False
-                
-                # Clear and refresh output window
-                if self.output_win:
-                    self.output_win.clear()
-                    self.output_win.refresh()
-                
-                # Show confirmation
-                if backup_filename:
-                    self.add_system_message_immediate(f"Memory cleared with complete state reset (backup saved to {backup_filename})")
-                else:
-                    self.add_system_message_immediate("Memory cleared with complete state reset")
-            else:
-                self.add_error_message_immediate("Failed to clear memory")
-                
-        except Exception as e:
-            self.add_error_message_immediate(f"Error clearing memory: {e}")
-            self._log_debug(f"Memory clear error: {e}")
-
-    def _save_memory(self, filename: Optional[str] = None):
-        """Save memory to file"""
-        try:
-            if not filename:
-                import time
-                filename = f"chat_backup_{int(time.time())}.json"
-            
-            success = self.memory_manager.save_conversation(filename)
-            if success:
-                self.add_system_message_immediate(f"Memory saved to {filename}")
-            else:
-                self.add_error_message_immediate(f"Failed to save memory to {filename}")
-                
-        except Exception as e:
-            self.add_error_message_immediate(f"Error saving memory: {e}")
-            self._log_debug(f"Memory save error: {e}")
-
-    def _load_memory(self, filename: str):
-        """Load memory from file and restore complete SME state with narrative time"""
-        try:
-            success = self.memory_manager.load_conversation(filename)
-            if success:
-                # Clear current display
-                self.display_messages.clear()
-                self.display_lines.clear()
-                
-                # Reset scroll manager
-                self.scroll_manager.scroll_offset = 0
-                self.scroll_manager.max_scroll = 0
-                self.scroll_manager.in_scrollback = False
-                
-                # Clear output window
-                if self.output_win:
-                    self.output_win.clear()
-                    self.output_win.refresh()
-                
-                # Restore complete SME state
-                momentum_state = self.memory_manager.get_momentum_state()
-                if momentum_state:
-                    self.sme.load_state_from_dict(momentum_state)
-                    self.add_system_message_immediate("Complete story momentum state restored with narrative time tracking")
-                
-                # Show loaded conversation
-                messages = self.memory_manager.get_messages()
-                for msg in messages:
-                    if msg.message_type == MessageType.USER:
-                        self.add_user_message_immediate(msg.content)
-                    elif msg.message_type == MessageType.ASSISTANT:
-                        self.add_assistant_message_immediate(msg.content)
-                    elif msg.message_type == MessageType.SYSTEM:
-                        self.add_system_message_immediate(msg.content)
-                
-                # Show confirmation with narrative time info
-                narrative_stats = self.memory_manager.get_narrative_time_stats()
-                narrative_time = narrative_stats.get('narrative_time_formatted', '0s')
-                self.add_system_message_immediate(f"Loaded {len(messages)} messages from {filename} "
-                                               f"with complete state restoration ({narrative_time} narrative time)")
-            else:
-                self.add_error_message_immediate(f"Failed to load memory from {filename}")
-                
-        except Exception as e:
-            self.add_error_message_immediate(f"Error loading memory: {e}")
-            self._log_debug(f"Memory load error: {e}")
-    
-    def _show_complete_stats(self):
-        """Show comprehensive system statistics with narrative time information"""
-        try:
-            # Enhanced memory stats with narrative time information
-            mem_stats = self.memory_manager.get_memory_stats()
-            file_info = self.memory_manager.get_memory_file_info()
-            patterns = self.memory_manager.analyze_conversation_patterns()
-            
-            # Basic memory info
-            self.add_system_message_immediate(
-                f"Memory: {mem_stats.get('message_count', 0)} messages, "
-                f"{mem_stats.get('total_tokens', 0)} tokens, "
-                f"{mem_stats.get('condensations_performed', 0)} multi-pass condensations"
-            )
-            
-            # Narrative time statistics
-            narrative_time = mem_stats.get('narrative_time_formatted', '0s')
-            if narrative_time != '0s':
-                self.add_system_message_immediate(f"Narrative time: {narrative_time}")
-            
-            # Detailed semantic categorization stats
-            if 'semantic_categories' in patterns:
-                categories = patterns['semantic_categories']
-                category_summary = ', '.join([f"{k}: {v}" for k, v in categories.items() if v > 0])
-                if category_summary:
-                    self.add_system_message_immediate(f"Semantic categories: {category_summary}")
-            
-            # Enhanced condensed message stats
-            condensed_count = patterns.get('condensed_messages', 0)
-            if condensed_count > 0:
-                utilization = mem_stats.get('utilization', 0.0)
-                self.add_system_message_immediate(f"Condensed messages: {condensed_count}, utilization: {utilization:.1%}")
-            
-            # Complete memory file details
-            if file_info.get('file_exists', False):
-                file_size = file_info.get('file_size', 0)
-                file_size_kb = file_size / 1024 if file_size > 0 else 0
-                last_modified = file_info.get('last_modified', 'unknown')
-                backup_status = "yes" if file_info.get('backup_exists', False) else "no"
-                file_narrative_time = file_info.get('narrative_time', '0s')
-                
-                self.add_system_message_immediate(
-                    f"Memory file: {file_info.get('file_path', 'unknown')} "
-                    f"({file_size_kb:.1f}KB, modified: {last_modified[:19]}, backup: {backup_status})"
-                )
-                
-                if file_narrative_time != '0s':
-                    self.add_system_message_immediate(f"File narrative time: {file_narrative_time}")
-                
-                auto_save_status = "enabled" if file_info.get('auto_save_enabled', False) else "disabled"
-                self.add_system_message_immediate(f"Auto-save: {auto_save_status}")
-            else:
-                self.add_system_message_immediate("Memory file: Not found")
-                
-        except Exception as e:
-            self.add_system_message_immediate("Memory: Stats unavailable")
-            self._log_debug(f"Memory stats error: {e}")
-        
-        try:
-            # Complete story stats with narrative time analysis information
-            sme_stats = self.sme.get_pressure_stats()
-            if 'current_pressure' in sme_stats:
-                pressure = sme_stats['current_pressure']
-                arc = sme_stats.get('current_arc', 'unknown')
-                updates = sme_stats.get('total_updates', 0)
-                floor = sme_stats.get('pressure_floor', 0.0)
-                escalations = sme_stats.get('escalation_count', 0)
-                last_analysis = sme_stats.get('last_analysis_count', 0)
-                variance = sme_stats.get('pressure_variance', 0.0)
-                narrative_time = sme_stats.get('narrative_time_formatted', '0s')
-                avg_duration = sme_stats.get('average_exchange_duration', 0.0)
-                
-                self.add_system_message_immediate(
-                    f"Story: Pressure {pressure:.2f} (floor {floor:.2f}, var {variance:.3f}), "
-                    f"Arc {arc}, {updates} updates, {escalations} escalations"
-                )
-                
-                self.add_system_message_immediate(f"Analysis: Last at message {last_analysis}")
-                
-                # Narrative time details
-                if narrative_time != '0s':
-                    self.add_system_message_immediate(f"Narrative time: {narrative_time} (avg {avg_duration:.1f}s per exchange)")
-                
-                # Enhanced antagonist information
-                story_context = self.sme.get_story_context()
-                if story_context.get('antagonist_present'):
-                    antagonist = story_context.get('antagonist', {})
-                    name = antagonist.get('name', 'Unknown')
-                    commitment = antagonist.get('commitment_level', 'unknown')
-                    threat = antagonist.get('threat_level', 0.0)
-                    losses = antagonist.get('resources_lost', 0)
-                    self.add_system_message_immediate(
-                        f"Antagonist: {name} ({commitment} commitment, threat {threat:.2f}, {losses} losses)"
-                    )
-        except Exception as e:
-            self.add_system_message_immediate("Story: Stats unavailable")
-            self._log_debug(f"Story stats error: {e}")
-        
-        # MCP stats
-        try:
-            mcp_info = self.mcp_client.get_server_info()
-            self.add_system_message_immediate(f"MCP: {mcp_info.get('server_url', 'unknown')}")
-            self.add_system_message_immediate(f"Model: {mcp_info.get('model', 'unknown')}")
-        except Exception as e:
-            self.add_system_message_immediate("MCP: Stats unavailable")
-            self._log_debug(f"MCP stats error: {e}")
-        
-        # Display stats with scroll manager error handling
-        try:
-            scroll_info = self.scroll_manager.get_scroll_info()
-            self.add_system_message_immediate(f"Display: {len(self.display_lines)} lines, "
-                                           f"Scroll: {scroll_info.get('offset', 0)}/{scroll_info.get('max', 0)}")
-        except Exception as e:
-            self.add_system_message_immediate(f"Display: {len(self.display_lines)} lines, Scroll: Error")
-            self._log_debug(f"Scroll stats error: {e}")
-        
-        # Terminal stats with layout info
-        try:
-            if self.current_layout:
-                layout = self.current_layout
-                self.add_system_message_immediate(f"Terminal: {layout.terminal_width}x{layout.terminal_height}")
-                self.add_system_message_immediate(f"Layout: Output {layout.output_box.inner_width}x{layout.output_box.inner_height}, "
-                                               f"Input {layout.input_box.inner_width}x{layout.input_box.inner_height}")
-            else:
-                self.add_system_message_immediate("Terminal: Layout not available")
-        except Exception as e:
-            self.add_system_message_immediate("Terminal: Stats unavailable")
-            self._log_debug(f"Terminal stats error: {e}")
-        
-        # Input stats
-        try:
-            input_content = self.multi_input.get_content()
-            input_lines = len(self.multi_input.lines)
-            cursor_line, cursor_col = self.multi_input.get_cursor_position()
-            self.add_system_message_immediate(f"Input: {len(input_content)} chars, {input_lines} lines, "
-                                           f"cursor at {cursor_line}:{cursor_col}")
-        except Exception as e:
-            self.add_system_message_immediate("Input: Stats unavailable")
-            self._log_debug(f"Input stats error: {e}")
-        
-        # Enhanced prompt stats
-        try:
-            total_tokens = sum(len(content) // 4 for content in self.loaded_prompts.values() if content.strip())
-            active_prompts = [name for name, content in self.loaded_prompts.items() if content.strip()]
-            self.add_system_message_immediate(f"Prompts: {len(active_prompts)} active ({', '.join(active_prompts)}), "
-                                           f"{total_tokens:,} tokens")
-        except Exception as e:
-            self.add_system_message_immediate("Prompts: Stats unavailable")
-            self._log_debug(f"Prompt stats error: {e}")
-        
-        # Background thread status
-        try:
-            active_threads = [t for t in threading.enumerate() 
-                            if t.name in ["SME-Comprehensive-Analysis", "EMM-AutoSave", "EMM-Condensation"]]
-            if active_threads:
-                thread_names = [t.name for t in active_threads]
-                self.add_system_message_immediate(f"Background: {len(active_threads)} active ({', '.join(thread_names)})")
-        except Exception as e:
-            self._log_debug(f"Thread stats error: {e}")
-
-# Chunk 4/4 - nci.py - Command Processing, Utilities, and Shutdown
 
     def _process_command(self, command: str):
         """Process commands with complete LLM analysis commands"""
@@ -1392,6 +1032,328 @@ class CursesInterface:
         
         for msg in help_messages:
             self.add_system_message_immediate(msg)
+
+    # Display update methods using dynamic box coordinates
+    def _add_message_immediate(self, message: DisplayMessage):
+        """Add message with immediate display refresh using dynamic coordinates"""
+        # Add to message storage
+        self.display_messages.append(message)
+        
+        # Generate wrapped lines using layout inner width
+        if self.current_layout:
+            content_width = self.current_layout.output_box.inner_width - 2
+        else:
+            content_width = 78  # Fallback width
+        
+        wrapped_lines = message.format_for_display(content_width)
+        
+        # Add to display lines cache
+        for line in wrapped_lines:
+            self.display_lines.append((line, message.msg_type))
+        
+        # Update scroll manager
+        self.scroll_manager.update_max_scroll(len(self.display_lines))
+        self.scroll_manager.auto_scroll_to_bottom()
+        
+        # Immediate display update
+        self._update_output_display()
+    
+    def _add_blank_line_immediate(self):
+        """Add a true blank line with immediate display"""
+        self.display_lines.append(("", ""))
+        self.scroll_manager.update_max_scroll(len(self.display_lines))
+        self.scroll_manager.auto_scroll_to_bottom()
+        self._update_output_display()
+    
+    def _update_input_display(self):
+        """Update input display with multi-line support using dynamic coordinates"""
+        if not self.current_layout or not self.input_win:
+            return
+        
+        self.input_win.clear()
+        
+        if self.mcp_processing:
+            prompt = "Processing... "
+            prompt_color = self.color_manager.get_color('system')
+        else:
+            prompt = "Input> "
+            prompt_color = self.color_manager.get_color('user')
+        
+        # Get display lines from multi-input using layout dimensions
+        available_width = self.current_layout.input_box.inner_width - 8
+        available_height = self.current_layout.input_box.inner_height - 1
+        
+        display_lines = self.multi_input.get_display_lines(available_width, available_height)
+        
+        # Display prompt and first line
+        try:
+            if prompt_color and self.color_manager.colors_available:
+                self.input_win.attron(curses.color_pair(prompt_color))
+                self.input_win.addstr(0, 0, prompt)
+                self.input_win.attroff(curses.color_pair(prompt_color))
+            else:
+                self.input_win.addstr(0, 0, prompt)
+            
+            # Display input content
+            if display_lines:
+                first_line = display_lines[0]
+                max_len = self.current_layout.input_box.inner_width - len(prompt) - 1
+                if len(first_line) > max_len:
+                    first_line = first_line[:max_len]
+                
+                self.input_win.addstr(0, len(prompt), first_line)
+                
+                # Display additional lines if multi-line
+                for i, line in enumerate(display_lines[1:], 1):
+                    if i >= self.current_layout.input_box.inner_height - 1:
+                        break
+                    
+                    max_len = self.current_layout.input_box.inner_width - 1
+                    if len(line) > max_len:
+                        line = line[:max_len]
+                    
+                    self.input_win.addstr(i, 0, line)
+            
+        except curses.error:
+            pass
+        
+        self.input_win.refresh()
+        self._ensure_cursor_in_input()
+    
+    def _update_output_display(self):
+        """Update output window with immediate refresh using dynamic coordinates"""
+        if not self.current_layout or not self.output_win:
+            return
+        
+        self.output_win.clear()
+        
+        # Get visible lines based on scroll position
+        start_idx, end_idx = self.scroll_manager.get_visible_range()
+        visible_lines = self.display_lines[start_idx:end_idx]
+        
+        # Display lines with proper colors using layout dimensions
+        max_display_lines = self.current_layout.output_box.inner_height
+        
+        for i, (line_text, msg_type) in enumerate(visible_lines):
+            if i >= max_display_lines:
+                break
+            
+            # Handle empty lines (true blank lines)
+            if not line_text and not msg_type:
+                try:
+                    self.output_win.addstr(i, 0, "")
+                except curses.error:
+                    pass
+                continue
+            
+            color = self.color_manager.get_color(msg_type)
+            max_line_width = self.current_layout.output_box.inner_width - 1
+            display_text = line_text[:max_line_width] if len(line_text) >= max_line_width else line_text
+            
+            try:
+                if color and self.color_manager.colors_available:
+                    self.output_win.attron(curses.color_pair(color))
+                    self.output_win.addstr(i, 0, display_text)
+                    self.output_win.attroff(curses.color_pair(color))
+                else:
+                    self.output_win.addstr(i, 0, display_text)
+            except curses.error:
+                pass
+        
+        self.output_win.refresh()
+        self._ensure_cursor_in_input()
+
+    def _update_status_display(self):
+        """Update status with complete LLM information using dynamic coordinates"""
+        if not self.current_layout or not self.status_win:
+            return
+        
+        self.status_win.clear()
+        
+        status_parts = []
+        
+        # Memory stats
+        try:
+            mem_stats = self.memory_manager.get_memory_stats()
+            msg_count = mem_stats.get('message_count', 0)
+            condensations = mem_stats.get('condensations_performed', 0)
+            if condensations > 0:
+                status_parts.append(f"Messages: {msg_count} ({condensations}c)")
+            else:
+                status_parts.append(f"Messages: {msg_count}")
+        except:
+            status_parts.append("Messages: 0")
+        
+        # Enhanced story pressure with complete LLM analysis indicator
+        try:
+            sme_stats = self.sme.get_pressure_stats()
+            if 'current_pressure' in sme_stats:
+                pressure = sme_stats['current_pressure']
+                floor = sme_stats.get('pressure_floor', 0.0)
+                last_analysis = sme_stats.get('last_analysis_count', 0)
+                
+                # Calculate messages since last analysis
+                user_assistant_messages = [msg for msg in self.memory_manager.get_messages() 
+                                         if msg.message_type in [MessageType.USER, MessageType.ASSISTANT]]
+                total_messages = len(user_assistant_messages)
+                since_analysis = total_messages - last_analysis
+                
+                # Show pressure with comprehensive analysis indicator
+                if since_analysis >= 15:
+                    status_parts.append(f"Pressure: {pressure:.2f}|{floor:.2f} (analysis due)")
+                else:
+                    status_parts.append(f"Pressure: {pressure:.2f}|{floor:.2f} ({15-since_analysis} to analysis)")
+        except:
+            pass
+        
+        # MCP status
+        if self.mcp_processing:
+            status_parts.append("GM: Processing")
+        else:
+            status_parts.append("GM: Ready")
+        
+        # Enhanced prompt count
+        prompt_count = len([p for p in self.loaded_prompts.values() if p.strip()])
+        status_parts.append(f"Prompts: {prompt_count}")
+        
+        # Scroll indicator with error handling
+        try:
+            scroll_info = self.scroll_manager.get_scroll_info()
+            if scroll_info.get("in_scrollback", False):
+                status_parts.append(f"SCROLLBACK ({scroll_info.get('percentage', 0)}%)")
+        except Exception as e:
+            # Scroll manager not ready or error occurred
+            self._log_debug(f"Scroll status error: {e}")
+        
+        # Auto-save indicator
+        try:
+            file_info = self.memory_manager.get_memory_file_info()
+            if file_info.get('auto_save_enabled', False):
+                status_parts.append("AutoSave: ON")
+        except:
+            pass
+        
+        # Complete LLM processing indicator
+        try:
+            # Check if any background threads are running
+            active_threads = [t for t in threading.enumerate() 
+                            if t.name in ["SME-Comprehensive-Analysis", "EMM-AutoSave", "EMM-Condensation"]]
+            if active_threads:
+                status_parts.append("LLM: Active")
+        except:
+            pass
+        
+        # Terminal size (for debugging)
+        if self.debug_logger:
+            status_parts.append(f"{self.current_layout.terminal_width}x{self.current_layout.terminal_height}")
+        
+        status_text = " | ".join(status_parts)
+        
+        # Use layout width for truncation
+        max_status_width = self.current_layout.status_line.inner_width - 1
+        if len(status_text) > max_status_width:
+            status_text = status_text[:max_status_width - 3] + "..."
+        
+        try:
+            status_color = self.color_manager.get_color('system')
+            if status_color and self.color_manager.colors_available:
+                self.status_win.attron(curses.color_pair(status_color))
+                self.status_win.addstr(0, 0, status_text)
+                self.status_win.attroff(curses.color_pair(status_color))
+            else:
+                self.status_win.addstr(0, 0, status_text)
+        except curses.error:
+            pass
+        
+        self.status_win.refresh()
+        self._ensure_cursor_in_input()
+
+    def _ensure_cursor_in_input(self):
+        """Ensure cursor is positioned correctly using dynamic coordinates"""
+        try:
+            if not self.mcp_processing and self.input_win and self.current_layout:
+                # Get actual cursor position from multi-line input
+                cursor_line, cursor_col = self.multi_input.get_cursor_position()
+
+                # For multi-line display, map logical cursor to display cursor
+                available_width = self.current_layout.input_box.inner_width - 8
+                available_height = self.current_layout.input_box.inner_height - 1
+                
+                display_lines = self.multi_input.get_display_lines(available_width, available_height)
+
+                if cursor_line == 0:
+                    # First line - add prompt length
+                    prompt_len = len("Input> ")
+                    visual_x = prompt_len + cursor_col
+                else:
+                    # Subsequent lines - no prompt prefix
+                    visual_x = cursor_col
+
+                # Clamp to layout boundaries
+                max_width = self.current_layout.input_box.inner_width - 1
+                max_height = self.current_layout.input_box.inner_height - 1
+                
+                visual_x = min(visual_x, max_width)
+                visual_y = min(cursor_line, max_height)
+
+                # Set cursor position
+                self.input_win.move(visual_y, visual_x)
+                self.input_win.refresh()
+                curses.curs_set(1)
+
+        except curses.error:
+            pass
+    
+    def _refresh_all_windows(self):
+        """Refresh all windows immediately using dynamic coordinates"""
+        try:
+            self._update_output_display()
+            self._update_input_display()
+            self._update_status_display()
+            
+            # Redraw borders using layout
+            if self.current_layout:
+                border_color = self.color_manager.get_color('border')
+                self.terminal_manager.draw_box_borders(self.current_layout, border_color)
+                
+        except curses.error as e:
+            self._log_debug(f"Display refresh error: {e}")
+    
+    # Message addition methods with immediate display
+    def add_user_message_immediate(self, content: str):
+        """Add user message with immediate display"""
+        msg = DisplayMessage(content, "user")
+        self._add_message_immediate(msg)
+    
+    def add_assistant_message_immediate(self, content: str):
+        """Add assistant message with proper blank line separation"""
+        # Add true blank line before GM response
+        self._add_blank_line_immediate()
+        
+        # Add the GM response
+        msg = DisplayMessage(content, "assistant")
+        self._add_message_immediate(msg)
+    
+    def add_system_message_immediate(self, content: str):
+        """Add system message with immediate display"""
+        msg = DisplayMessage(content, "system")
+        self._add_message_immediate(msg)
+    
+    def add_error_message_immediate(self, content: str):
+        """Add error message with immediate display"""
+        msg = DisplayMessage(content, "error")
+        self._add_message_immediate(msg)
+        self._log_debug(f"Error displayed: {content}")
+    
+    def set_processing_state_immediate(self, processing: bool):
+        """Set processing state with immediate visual feedback"""
+        self.mcp_processing = processing
+        self.input_blocked = processing
+        
+        # Immediate input display update
+        self._update_input_display()
+        
+        self._log_debug(f"Processing state: {processing}")
     
     def _change_theme(self, theme_name: str):
         """Change color theme with immediate display refresh"""
