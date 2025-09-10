@@ -1,0 +1,22 @@
+
+--- Debug session started: 2025-09-10T13:00:15.428056 ---
+[13:00:15.428] SYSTEM: DevName RPG Client starting
+[13:00:15.428] SYSTEM: Arguments: {'debug': True, 'config': 'devname_config.json'}
+[13:00:15.428] SYSTEM: Using hardcoded configuration values
+[13:00:15.428] SYSTEM: Configuration loaded with hardcoded values
+[13:00:16.428] SYSTEM: Application starting
+[13:00:16.428] PROMPT: Loaded critrules.prompt: 2916 chars
+[13:00:16.428] PROMPT: Prompt file not found: companion.prompt
+[13:00:16.428] PROMPT: Loaded lowrules.prompt: 3414 chars
+[13:00:16.428] PROMPT: Loaded prompts: 1,582 tokens total
+[13:00:16.428] PROMPT:   critrules: 729 tokens (2,916 chars)
+[13:00:16.428] PROMPT:   companion: MISSING
+[13:00:16.428] PROMPT:   lowrules: 853 tokens (3,414 chars)
+[13:00:16.428] SYSTEM: Prompts loaded: 1582 tokens
+[13:00:16.428] MAIN: No existing memory file found at memory.json
+[13:00:16.428] MAIN: No existing SME state found in EMM
+[13:00:16.429] INTERFACE: Base system prompt set from critrules
+[13:00:16.429] SYSTEM: Starting interface
+[13:00:16.429] INTERFACE: Interface error: 'CursesInterface' object has no attribute '_update_input_display'
+[13:00:16.429] INTERFACE: Curses wrapper error: 'CursesInterface' object has no attribute '_update_input_display'
+[13:00:16.429] SYSTEM: Application finished with exit code: 1
