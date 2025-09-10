@@ -1,4 +1,4 @@
-# Chunk 1/1 - emm.py - Enhanced Memory Manager with Complete LLM Semantic Analysis
+# Chunk 1/3 - emm.py - Enhanced Memory Manager with Restored LLM Semantic Analysis
 #!/usr/bin/env python3
 
 import json
@@ -170,7 +170,7 @@ class EnhancedMemoryManager:
 
         except Exception as e:
             if self.debug_logger:
-                self.debug_logger.error(f"EMM LLM call failed: {e}")
+                self.debug_logger.error(f"LLM call failed: {e}")
             return None
     
     async def _analyze_message_semantics(self, target_idx: int) -> Optional[Dict[str, Any]]:
@@ -188,7 +188,7 @@ class EnhancedMemoryManager:
         result = await self._call_llm([{"role": "system", "content": prompt1}])
         
         if result:
-            parsed = self._parse_semantic_response_robust(result, attempt=1)
+            parsed = self._parse_semantic_response(result, attempt=1)
             if parsed:
                 return parsed
         
@@ -197,7 +197,7 @@ class EnhancedMemoryManager:
         result = await self._call_llm([{"role": "system", "content": prompt2}])
         
         if result:
-            parsed = self._parse_semantic_response_robust(result, attempt=2)
+            parsed = self._parse_semantic_response(result, attempt=2)
             if parsed:
                 return parsed
         
@@ -206,7 +206,7 @@ class EnhancedMemoryManager:
         result = await self._call_llm([{"role": "system", "content": prompt3}])
         
         if result:
-            parsed = self._parse_semantic_response_robust(result, attempt=3)
+            parsed = self._parse_semantic_response(result, attempt=3)
             if parsed:
                 return parsed
         
@@ -276,107 +276,54 @@ Return JSON:
   "preserve": true/false
 }}"""
     
-    def _parse_semantic_response_robust(self, response: str, attempt: int) -> Optional[Dict[str, Any]]:
-        """Parse LLM semantic analysis response with 5-strategy defensive handling"""
-        
-        # Strategy 1: Direct JSON parsing
+    def _parse_semantic_response(self, response: str, attempt: int) -> Optional[Dict[str, Any]]:
+        """Parse LLM semantic analysis response"""
         try:
-            data = json.loads(response.strip())
-            if self._validate_semantic_data(data, attempt):
-                return self._inject_missing_fields(data, attempt)
-        except json.JSONDecodeError:
-            pass
-        
-        # Strategy 2: Substring extraction
-        try:
+            # Extract JSON from response
             start = response.find('{')
             end = response.rfind('}') + 1
             
             if start >= 0 and end > start:
                 json_str = response[start:end]
                 data = json.loads(json_str)
-                if self._validate_semantic_data(data, attempt):
-                    return self._inject_missing_fields(data, attempt)
-        except (json.JSONDecodeError, ValueError):
-            pass
-        
-        # Strategy 3: Field validation and extraction
-        try:
-            # Look for specific patterns in response
-            if attempt == 3:  # Binary response
-                if "true" in response.lower() or "preserve" in response.lower():
-                    return {"importance_score": 0.8, "categories": ["story_critical"], "fragments": None}
-                else:
-                    return {"importance_score": 0.2, "categories": ["standard"], "fragments": None}
+                
+                if attempt == 3:  # Binary response
+                    preserve = data.get("preserve", False)
+                    return {
+                        "importance_score": 0.8 if preserve else 0.2,
+                        "categories": ["story_critical"] if preserve else ["standard"],
+                        "fragments": None
+                    }
+                
+                elif attempt == 2:  # Simple response
+                    return {
+                        "importance_score": data.get("importance_score", 0.4),
+                        "categories": data.get("categories", ["standard"]),
+                        "fragments": None
+                    }
+                
+                else:  # Full response
+                    return data
+                    
+        except (json.JSONDecodeError, KeyError) as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Failed to parse semantic response attempt {attempt}: {e}")
             
-            # Try to extract numeric importance
-            import re
-            importance_match = re.search(r'"?importance_score"?\s*:\s*([0-9.]+)', response)
-            if importance_match:
-                importance = float(importance_match.group(1))
-                return {"importance_score": importance, "categories": ["standard"], "fragments": None}
-        except:
-            pass
-        
-        # Strategy 4: Default injection based on attempt type
-        if attempt == 3:  # Binary response
-            return {"importance_score": 0.4, "categories": ["standard"], "fragments": None}
-        elif attempt == 2:  # Simple response
-            return {"importance_score": 0.4, "categories": ["standard"], "fragments": None}
-        
-        # Strategy 5: Complete fallback
-        return {"importance_score": 0.4, "categories": ["standard"], "fragments": None}
-    
-    def _validate_semantic_data(self, data: Dict[str, Any], attempt: int) -> bool:
-        """Validate that semantic analysis data has required fields"""
-        if not isinstance(data, dict):
-            return False
-        
-        if attempt == 3:  # Binary response
-            return "preserve" in data
-        
-        required_fields = ["importance_score", "categories"]
-        return all(field in data for field in required_fields)
-    
-    def _inject_missing_fields(self, data: Dict[str, Any], attempt: int) -> Dict[str, Any]:
-        """Inject missing fields with sensible defaults"""
-        if attempt == 3:  # Binary response
-            preserve = data.get("preserve", False)
-            return {
-                "importance_score": 0.8 if preserve else 0.2,
-                "categories": ["story_critical"] if preserve else ["standard"],
-                "fragments": None
-            }
-        
-        # Ensure importance_score is valid
-        importance = data.get("importance_score", 0.4)
-        if not isinstance(importance, (int, float)) or importance < 0 or importance > 1:
-            importance = 0.4
-        data["importance_score"] = importance
-        
-        # Ensure categories is a list
-        categories = data.get("categories", ["standard"])
-        if not isinstance(categories, list):
-            categories = ["standard"]
-        data["categories"] = categories
-        
-        # Ensure fragments field exists
-        if "fragments" not in data:
-            data["fragments"] = None
-        
-        return data
-    
+        return None
+
+# Chunk 2/3 - emm.py - Semantic Condensation and Background Processing
+
     def _auto_load(self) -> None:
         """Auto-load memory from file if it exists"""
         try:
             if os.path.exists(self.memory_file):
                 success = self.load_conversation(self.memory_file)
                 if success and self.debug_logger:
-                    self.debug_logger.debug(f"Auto-loaded {len(self.messages)} messages from {self.memory_file}")
+                    self.debug_logger.memory(f"Auto-loaded {len(self.messages)} messages from {self.memory_file}")
                 elif not success and self.debug_logger:
                     self.debug_logger.error(f"Failed to auto-load from {self.memory_file}")
             elif self.debug_logger:
-                self.debug_logger.debug(f"No existing memory file found at {self.memory_file}")
+                self.debug_logger.memory(f"No existing memory file found at {self.memory_file}")
         except Exception as e:
             if self.debug_logger:
                 self.debug_logger.error(f"Auto-load error: {e}")
@@ -408,7 +355,7 @@ Return JSON:
             self.messages.append(message)
 
             if self.debug_logger:
-                self.debug_logger.debug(f"Added {message_type.value} message: {len(content)} chars, {message.token_estimate} tokens")
+                self.debug_logger.memory(f"Added {message_type.value} message: {len(content)} chars, {message.token_estimate} tokens")
 
         # Move ALL auto-save operations to background thread to avoid blocking main thread
         if self.auto_save_enabled:
@@ -431,15 +378,49 @@ Return JSON:
 
             if current_tokens > self.max_memory_tokens:
                 if self.debug_logger:
-                    self.debug_logger.debug(f"Starting background condensation: {current_tokens} > {self.max_memory_tokens}")
+                    self.debug_logger.memory(f"Starting background condensation: {current_tokens} > {self.max_memory_tokens}")
                 self._perform_semantic_condensation()
 
         except Exception as e:
             if self.debug_logger:
                 self.debug_logger.error(f"Background auto-save failed: {e}")
     
+    async def categorize_memory_content(self, memories: List[Message], start_idx: int = 0) -> List[Message]:
+        """Categorize memory content using LLM analysis for semantic understanding"""
+        if len(memories) <= start_idx:
+            return memories
+        
+        # Analyze in chunks to avoid token limits
+        analysis_window = memories[start_idx:start_idx + 20]
+        
+        for i, memory in enumerate(analysis_window):
+            if memory.message_type in [MessageType.USER, MessageType.ASSISTANT]:
+                analysis = await self._analyze_message_semantics(start_idx + i)
+                if analysis:
+                    categories = analysis.get("categories", ["standard"])
+                    # Use the highest-priority category
+                    if "story_critical" in categories:
+                        memory.content_category = "story_critical"
+                    elif "character_focused" in categories:
+                        memory.content_category = "character_focused"
+                    elif "relationship_dynamics" in categories:
+                        memory.content_category = "relationship_dynamics"
+                    elif "emotional_significance" in categories:
+                        memory.content_category = "emotional_significance"
+                    elif "world_building" in categories:
+                        memory.content_category = "world_building"
+                    else:
+                        memory.content_category = "standard"
+                else:
+                    memory.content_category = "standard"
+        
+        if self.debug_logger:
+            print(f"Categorized {len(analysis_window)} memory segments")
+        
+        return memories
+    
     def _perform_semantic_condensation(self) -> None:
-        """Execute multi-pass LLM-powered semantic condensation with auto-save"""
+        """Execute LLM-powered semantic condensation with auto-save"""
         if len(self.messages) < 10:  # Need minimum messages for context
             return
             
@@ -447,206 +428,120 @@ Return JSON:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self._async_multi_pass_condensation())
+            loop.run_until_complete(self._async_condensation())
         finally:
             loop.close()
     
-    async def _async_multi_pass_condensation(self) -> None:
-        """Multi-pass async condensation with increasing aggressiveness and auto-save"""
+    async def _async_condensation(self) -> None:
+        """Async condensation with category-weighted preservation and auto-save"""
+        aggressiveness_level = 0
         max_passes = 3
         
         for pass_num in range(max_passes):
             current_tokens = sum(msg.token_estimate for msg in self.messages)
             
             if current_tokens <= self.max_memory_tokens:
-                if self.debug_logger:
-                    self.debug_logger.debug(f"Condensation complete after {pass_num} passes: {current_tokens} tokens")
                 break
                 
             if self.debug_logger:
-                self.debug_logger.debug(f"Condensation pass {pass_num + 1}/{max_passes}, tokens: {current_tokens}")
+                self.debug_logger.memory(f"Condensation pass {pass_num + 1}, tokens: {current_tokens}")
             
-            # Ensure all messages have semantic categories
-            await self._categorize_uncategorized_messages()
+            # Ensure all messages have categories
+            await self.categorize_memory_content(self.messages)
             
-            # Collect preservation candidates with increasing aggressiveness
-            preserve_messages, condense_candidates = await self._collect_preservation_candidates(pass_num)
+            # Analyze messages for semantic importance
+            preserve_messages = []
+            condense_candidates = []
             
-            if not condense_candidates:
-                if self.debug_logger:
-                    self.debug_logger.debug(f"No condensation candidates found at aggressiveness level {pass_num}")
-                continue
+            # Skip recent messages (last 5) from condensation
+            condensable_range = len(self.messages) - 5
             
-            # Create condensed summary for candidates by category
-            condensed_message = await self._create_category_aware_summary(condense_candidates)
-            
-            if condensed_message:
-                # Replace candidates with condensed summary
-                with self.lock:
-                    self.messages = [condensed_message] + preserve_messages
-                    self.condensation_count += 1
+            for i in range(min(condensable_range, len(self.messages))):
+                message = self.messages[i]
+                analysis = await self._analyze_message_semantics(i)
                 
-                # Auto-save after successful condensation
-                self._auto_save()
+                # Determine preservation based on categories and aggressiveness
+                should_preserve = self._should_preserve_message(analysis, aggressiveness_level)
                 
-                new_tokens = sum(msg.token_estimate for msg in self.messages)
-                if self.debug_logger:
-                    self.debug_logger.debug(
-                        f"Pass {pass_num + 1} complete: condensed {len(condense_candidates)} messages, "
-                        f"tokens: {current_tokens} → {new_tokens}"
-                    )
+                if should_preserve:
+                    preserve_messages.append(message)
+                else:
+                    condense_candidates.append(message)
+            
+            # Always preserve recent messages
+            preserve_messages.extend(self.messages[condensable_range:])
+            
+            if condense_candidates:
+                # Create condensed summary of candidates
+                condensed_message = await self._create_condensed_summary(condense_candidates)
+                
+                if condensed_message:
+                    # Replace condensed messages with summary
+                    with self.lock:
+                        self.messages = [condensed_message] + preserve_messages
+                        self.condensation_count += 1
+                    
+                    # Auto-save after successful condensation
+                    self._auto_save()
+                    
+                    if self.debug_logger:
+                        new_tokens = sum(msg.token_estimate for msg in self.messages)
+                        self.debug_logger.memory(
+                            f"Condensed {len(condense_candidates)} messages, "
+                            f"tokens: {current_tokens} → {new_tokens}"
+                        )
+                else:
+                    break  # Condensation failed, exit
             else:
+                # No candidates for condensation, increase aggressiveness
+                aggressiveness_level += 1
                 if self.debug_logger:
-                    self.debug_logger.debug(f"Condensation failed at pass {pass_num + 1}")
-                break
-        
-        # Final status
-        final_tokens = sum(msg.token_estimate for msg in self.messages)
-        if final_tokens > self.max_memory_tokens:
-            if self.debug_logger:
-                self.debug_logger.debug(f"Condensation incomplete: {final_tokens} tokens still exceed limit")
+                    self.debug_logger.memory(f"Increased aggressiveness to level {aggressiveness_level}")
     
-    async def _categorize_uncategorized_messages(self) -> None:
-        """Ensure all messages have semantic categories"""
-        uncategorized = [
-            (i, msg) for i, msg in enumerate(self.messages)
-            if msg.message_type in [MessageType.USER, MessageType.ASSISTANT] 
-            and msg.content_category == "standard"
-            and not msg.condensed
-        ]
-        
-        if self.debug_logger and uncategorized:
-            self.debug_logger.debug(f"Categorizing {len(uncategorized)} uncategorized messages")
-        
-        # Process in batches to avoid overwhelming LLM
-        batch_size = 10
-        for batch_start in range(0, len(uncategorized), batch_size):
-            batch = uncategorized[batch_start:batch_start + batch_size]
-            
-            for msg_idx, message in batch:
-                analysis = await self._analyze_message_semantics(msg_idx)
-                if analysis:
-                    categories = analysis.get("categories", ["standard"])
-                    # Use highest-priority category
-                    message.content_category = self._get_highest_priority_category(categories)
-    
-    def _get_highest_priority_category(self, categories: List[str]) -> str:
-        """Get highest priority category from list"""
-        priority_order = [
-            "story_critical", "character_focused", "relationship_dynamics", 
-            "emotional_significance", "world_building", "standard"
-        ]
-        
-        for category in priority_order:
-            if category in categories:
-                return category
-        return "standard"
-    
-    async def _collect_preservation_candidates(self, aggressiveness_level: int) -> Tuple[List[Message], List[Message]]:
-        """Collect messages for preservation vs condensation with increasing aggressiveness"""
-        preserve_messages = []
-        condense_candidates = []
-        
-        # Always preserve recent messages (last 5)
-        recent_cutoff = max(0, len(self.messages) - 5)
-        
-        for i, message in enumerate(self.messages[:recent_cutoff]):
-            # Skip already condensed messages
-            if message.condensed:
-                preserve_messages.append(message)
-                continue
-            
-            # Skip non-conversation messages
-            if message.message_type not in [MessageType.USER, MessageType.ASSISTANT]:
-                preserve_messages.append(message)
-                continue
-            
-            # Analyze message for preservation decision
-            analysis = await self._analyze_message_semantics(i)
-            should_preserve = self._should_preserve_with_aggressiveness(analysis, aggressiveness_level)
-            
-            if should_preserve:
-                preserve_messages.append(message)
-            else:
-                condense_candidates.append(message)
-        
-        # Always preserve recent messages
-        preserve_messages.extend(self.messages[recent_cutoff:])
-        
-        if self.debug_logger:
-            self.debug_logger.debug(
-                f"Aggressiveness {aggressiveness_level}: preserve {len(preserve_messages)}, "
-                f"condense {len(condense_candidates)}"
-            )
-        
-        return preserve_messages, condense_candidates
-    
-    def _should_preserve_with_aggressiveness(self, analysis: Dict[str, Any], aggressiveness: int) -> bool:
-        """Determine preservation with increasing aggressiveness"""
+    def _should_preserve_message(self, analysis: Dict[str, Any], aggressiveness: int) -> bool:
+        """Determine if message should be preserved based on analysis and aggressiveness"""
         categories = analysis.get("categories", ["standard"])
         importance = analysis.get("importance_score", 0.4)
         
-        # Get base preservation ratio for highest priority category
-        highest_category = self._get_highest_priority_category(categories)
-        base_ratio = CONDENSATION_STRATEGIES.get(highest_category, CONDENSATION_STRATEGIES["standard"])["preservation_ratio"]
+        # Get highest preservation ratio for multi-category messages
+        max_ratio = max(
+            CONDENSATION_STRATEGIES.get(cat, CONDENSATION_STRATEGIES["standard"])["preservation_ratio"]
+            for cat in categories
+        )
         
         # Apply aggressiveness reduction
-        # Pass 0: base ratio, Pass 1: -0.15, Pass 2: -0.3
-        aggressiveness_reduction = aggressiveness * 0.15
-        adjusted_ratio = max(0.1, base_ratio - aggressiveness_reduction)
+        adjusted_ratio = max(0.2, max_ratio - (aggressiveness * 0.1))
         
-        # Preserve if importance exceeds adjusted threshold
-        preserve = importance >= adjusted_ratio
-        
-        return preserve
+        # Preserve based on importance score vs adjusted ratio
+        return importance >= adjusted_ratio
     
-    async def _create_category_aware_summary(self, messages: List[Message]) -> Optional[Message]:
-        """Create condensed summary organized by semantic categories"""
+    async def _create_condensed_summary(self, messages: List[Message]) -> Optional[Message]:
+        """Create condensed summary of message group"""
         if not messages:
             return None
-        
-        # Group messages by category
-        category_groups = {}
-        for msg in messages:
-            category = msg.content_category
-            if category not in category_groups:
-                category_groups[category] = []
-            category_groups[category].append(msg)
-        
-        # Create summaries for each category
-        category_summaries = []
-        
-        for category, category_messages in category_groups.items():
-            strategy = CONDENSATION_STRATEGIES.get(category, CONDENSATION_STRATEGIES["standard"])
-            instruction = strategy["instruction"]
             
-            content_to_condense = "\n".join([
-                f"[{msg.message_type.value}] {msg.content}"
-                for msg in category_messages
-            ])
-            
-            prompt = f"""Condense the following {category} conversation content according to these guidelines:
-
-{instruction}
-
-Content to condense:
-{content_to_condense}
-
-Return a concise summary that preserves the essential elements for this category while minimizing length. Maintain narrative continuity and emotional context."""
-            
-            summary_content = await self._call_llm([{"role": "system", "content": prompt}])
-            
-            if summary_content:
-                category_summaries.append(f"[{category.upper()}] {summary_content}")
+        # Format messages for condensation
+        content_to_condense = "\n".join([
+            f"[{msg.message_type.value}] {msg.content}"
+            for msg in messages
+        ])
         
-        if category_summaries:
-            final_summary = "\n\n".join(category_summaries)
+        prompt = (
+            "Condense the following conversation messages into a concise summary that preserves "
+            "key facts, character interactions, story developments, and emotional significance. "
+            "Maintain narrative continuity while minimizing length.\n\n"
+            f"{content_to_condense}\n\n"
+            "Return only the condensed summary text."
+        )
+        
+        summary_content = await self._call_llm([{"role": "system", "content": prompt}])
+        
+        if summary_content:
             condensed_msg = Message(
-                content=f"[CONDENSED - {len(messages)} messages] {final_summary}",
+                content=f"[CONDENSED] {summary_content}",
                 message_type=MessageType.SYSTEM
             )
             condensed_msg.condensed = True
-            condensed_msg.content_category = "condensed_summary"
             return condensed_msg
         
         return None
@@ -669,7 +564,7 @@ Return a concise summary that preserves the essential elements for this category
                     os.remove(backup_file)
             
             if self.debug_logger:
-                self.debug_logger.debug(f"Memory file {self.memory_file} cleared")
+                self.debug_logger.memory(f"Memory file {self.memory_file} cleared")
             
             return True
             
@@ -709,7 +604,9 @@ Return a concise summary that preserves the essential elements for this category
                 "error": str(e),
                 "auto_save_enabled": self.auto_save_enabled
             }
-    
+
+# Chunk 3/3 - emm.py - File Persistence and Utility Methods
+
     def backup_memory_file(self, backup_filename: Optional[str] = None) -> bool:
         """Create backup of memory file"""
         try:
@@ -723,7 +620,7 @@ Return a concise summary that preserves the essential elements for this category
             shutil.copy2(self.memory_file, backup_filename)
             
             if self.debug_logger:
-                self.debug_logger.debug(f"Memory backed up to {backup_filename}")
+                self.debug_logger.memory(f"Memory backed up to {backup_filename}")
             
             return True
             
@@ -793,7 +690,7 @@ Return a concise summary that preserves the essential elements for this category
             shutil.move(temp_filename, filename)
             
             if self.debug_logger:
-                self.debug_logger.debug(f"Conversation saved to {filename}")
+                self.debug_logger.system(f"Conversation saved to {filename}")
             
             return True
             
@@ -816,7 +713,7 @@ Return a concise summary that preserves the essential elements for this category
         try:
             if not os.path.exists(filename):
                 if self.debug_logger:
-                    self.debug_logger.debug(f"File does not exist: {filename}")
+                    self.debug_logger.memory(f"File does not exist: {filename}")
                 return False
             
             # Try loading main file
@@ -833,7 +730,7 @@ Return a concise summary that preserves the essential elements for this category
                     with open(backup_filename, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     if self.debug_logger:
-                        self.debug_logger.debug("Recovered from backup file")
+                        self.debug_logger.memory("Recovered from backup file")
                 else:
                     raise e
             
@@ -849,7 +746,7 @@ Return a concise summary that preserves the essential elements for this category
                 self.condensation_count = metadata.get("condensations", 0)
             
             if self.debug_logger:
-                self.debug_logger.debug(f"Conversation loaded from {filename}: {len(self.messages)} messages")
+                self.debug_logger.system(f"Conversation loaded from {filename}: {len(self.messages)} messages")
             
             return True
             
@@ -865,7 +762,7 @@ Return a concise summary that preserves the essential elements for this category
             self.condensation_count = 0
             
         if self.debug_logger:
-            self.debug_logger.debug("In-memory state cleared")
+            self.debug_logger.memory("In-memory state cleared")
     
     def analyze_conversation_patterns(self) -> Dict[str, Any]:
         """Generate conversation statistics for debugging"""
@@ -937,7 +834,7 @@ Return a concise summary that preserves the essential elements for this category
 
 # Module test functionality
 if __name__ == "__main__":
-    print("DevName RPG Client - Enhanced Memory Manager with Complete LLM Semantic Analysis")
+    print("DevName RPG Client - Enhanced Memory Manager with Restored LLM Semantic Analysis")
     print("Testing memory management functionality...")
     
     # Test with auto-save enabled
