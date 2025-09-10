@@ -1,5 +1,6 @@
-# Chunk 1/3 - emm.py - Enhanced Memory Manager with Restored LLM Semantic Analysis
 #!/usr/bin/env python3
+# Chunk 1/3 - emm.py - Enhanced Memory Manager with Auto-Save Infrastructure
+# CRITICAL: Read genai.txt to understand the holistic program across modules.
 
 import json
 import os
@@ -21,7 +22,6 @@ class MessageType(Enum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
-    MOMENTUM_STATE = "momentum_state"  # Special type for SME state storage
 
 class Message:
     """Individual conversation message with metadata"""
@@ -32,8 +32,6 @@ class Message:
         self.timestamp = timestamp or datetime.now().isoformat()
         self.token_estimate = self._estimate_tokens(content)
         self.id = str(uuid4())
-        self.content_category = "standard"  # Default category for semantic analysis
-        self.condensed = False
     
     def _estimate_tokens(self, text: str) -> int:
         """Conservative token estimation for memory planning"""
@@ -49,9 +47,7 @@ class Message:
             "content": self.content,
             "type": self.message_type.value,
             "timestamp": self.timestamp,
-            "tokens": self.token_estimate,
-            "content_category": self.content_category,
-            "condensed": self.condensed
+            "tokens": self.token_estimate
         }
     
     @classmethod
@@ -63,64 +59,7 @@ class Message:
             timestamp=data["timestamp"]
         )
         msg.id = data.get("id", str(uuid4()))
-        msg.content_category = data.get("content_category", "standard")
-        msg.condensed = data.get("condensed", False)
         return msg
-
-# Semantic category preservation ratios
-CONDENSATION_STRATEGIES = {
-    "story_critical": {
-        "threshold": 100,
-        "preservation_ratio": 0.8,
-        "instruction": (
-            "Preserve all major plot developments, character deaths, world-changing events, "
-            "key player decisions, and their consequences. Use decisive language highlighting "
-            "the significance of events. Compress dialogue while maintaining essential meaning."
-        )
-    },
-    "character_focused": {
-        "threshold": 80,
-        "preservation_ratio": 0.7,
-        "instruction": (
-            "Preserve relationship changes, trust/betrayal moments, character motivations, "
-            "personality reveals, Aurora's development, and NPC traits. Emphasize emotional "
-            "weight and relationship dynamics. Condense descriptions while keeping character essence."
-        )
-    },
-    "relationship_dynamics": {
-        "threshold": 80,
-        "preservation_ratio": 0.8,
-        "instruction": (
-            "Preserve evolving relationships between characters, trust building, conflicts, "
-            "alliances, and interpersonal dynamics. Maintain emotional context and progression."
-        )
-    },
-    "emotional_significance": {
-        "threshold": 70,
-        "preservation_ratio": 0.75,
-        "instruction": (
-            "Preserve dramatic moments, emotional peaks, character growth, conflict resolution, "
-            "and significant emotional revelations. Maintain the emotional weight of scenes."
-        )
-    },
-    "world_building": {
-        "threshold": 60,
-        "preservation_ratio": 0.6,
-        "instruction": (
-            "Preserve new locations, lore revelations, cultural information, political changes, "
-            "economic systems, magical discoveries, and historical context. Provide rich "
-            "foundational details. Compress atmospheric descriptions while keeping key world facts."
-        )
-    },
-    "standard": {
-        "threshold": 40,
-        "preservation_ratio": 0.4,
-        "instruction": (
-            "Preserve player actions and immediate consequences for continuity. Compress "
-            "everything else aggressively while maintaining basic story flow."
-        )
-    }
-}
 
 class EnhancedMemoryManager:
     """Memory management with LLM-powered semantic condensation and auto-persistence"""
@@ -135,13 +74,23 @@ class EnhancedMemoryManager:
         self.condensation_count = 0
         self.lock = threading.Lock()
         
+        # Semantic category preservation ratios
+        self.preservation_ratios = {
+            "story_critical": 0.9,
+            "character_focused": 0.8,
+            "relationship_dynamics": 0.8,
+            "emotional_significance": 0.75,
+            "world_building": 0.7,
+            "standard": 0.4
+        }
+        
         # MCP client configuration
         self.mcp_config = self._load_mcp_config()
         
         # Auto-load existing memory on initialization
         if self.auto_save_enabled:
             self._auto_load()
-    
+        
     def _load_mcp_config(self) -> Dict[str, Any]:
         """Load MCP configuration for LLM calls"""
         return {
@@ -150,8 +99,190 @@ class EnhancedMemoryManager:
             "timeout": 300
         }
     
+    def _auto_load(self) -> None:
+        """Auto-load memory from file if it exists"""
+        try:
+            if os.path.exists(self.memory_file):
+                success = self.load_conversation(self.memory_file)
+                if success and self.debug_logger:
+                    self.debug_logger.memory(f"Auto-loaded {len(self.messages)} messages from {self.memory_file}")
+                elif not success and self.debug_logger:
+                    self.debug_logger.error(f"Failed to auto-load from {self.memory_file}")
+            elif self.debug_logger:
+                self.debug_logger.memory(f"No existing memory file found at {self.memory_file}")
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Auto-load error: {e}")
+    
+    def _auto_save(self) -> None:
+        """Auto-save memory to file"""
+        if not self.auto_save_enabled:
+            return
+            
+        try:
+            # Create backup of existing file
+            if os.path.exists(self.memory_file):
+                backup_file = f"{self.memory_file}.bak"
+                shutil.copy2(self.memory_file, backup_file)
+            
+            # Save current state
+            success = self.save_conversation(self.memory_file)
+            if not success and self.debug_logger:
+                self.debug_logger.error(f"Auto-save failed to {self.memory_file}")
+                
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Auto-save error: {e}")
+    
+    def add_message(self, content: str, message_type: MessageType) -> None:
+        """Add new message and manage memory with background auto-save"""
+        with self.lock:
+            message = Message(content, message_type)
+            self.messages.append(message)
+
+            if self.debug_logger:
+                self.debug_logger.memory(f"Added {message_type.value} message: {len(content)} chars, {message.token_estimate} tokens")
+
+        # Move ALL auto-save operations to background thread to avoid blocking main thread
+        if self.auto_save_enabled:
+            auto_save_thread = threading.Thread(
+                target=self._background_auto_save,
+                daemon=True,
+                name="EMM-AutoSave"
+            )
+            auto_save_thread.start()
+
+    def _background_auto_save(self) -> None:
+        """Handle auto-save and condensation in background thread"""
+        try:
+            # Auto-save first (file operations)
+            self._auto_save()
+
+            # Check if condensation needed
+            with self.lock:
+                current_tokens = sum(msg.token_estimate for msg in self.messages)
+
+            if current_tokens > self.max_memory_tokens:
+                if self.debug_logger:
+                    self.debug_logger.memory(f"Starting background condensation: {current_tokens} > {self.max_memory_tokens}")
+                self._perform_semantic_condensation()
+
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Background auto-save failed: {e}")
+    
+    def clear_memory_file(self) -> bool:
+        """Clear memory file and reset in-memory state"""
+        try:
+            with self.lock:
+                # Clear in-memory state
+                self.messages.clear()
+                self.condensation_count = 0
+                
+                # Remove memory file if it exists
+                if os.path.exists(self.memory_file):
+                    os.remove(self.memory_file)
+                
+                # Remove backup file if it exists
+                backup_file = f"{self.memory_file}.bak"
+                if os.path.exists(backup_file):
+                    os.remove(backup_file)
+            
+            if self.debug_logger:
+                self.debug_logger.memory(f"Memory file {self.memory_file} cleared")
+            
+            return True
+            
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Failed to clear memory file: {e}")
+            return False
+    
+    def get_memory_file_info(self) -> Dict[str, Any]:
+        """Get memory file information for status reporting"""
+        try:
+            if not os.path.exists(self.memory_file):
+                return {
+                    "file_exists": False,
+                    "file_path": self.memory_file,
+                    "auto_save_enabled": self.auto_save_enabled
+                }
+            
+            stat = os.stat(self.memory_file)
+            
+            with self.lock:
+                return {
+                    "file_exists": True,
+                    "file_path": self.memory_file,
+                    "file_size": stat.st_size,
+                    "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "message_count": len(self.messages),
+                    "auto_save_enabled": self.auto_save_enabled,
+                    "backup_exists": os.path.exists(f"{self.memory_file}.bak")
+                }
+                
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Failed to get memory file info: {e}")
+            return {
+                "file_exists": False,
+                "error": str(e),
+                "auto_save_enabled": self.auto_save_enabled
+            }
+    
+    def backup_memory_file(self, backup_filename: Optional[str] = None) -> bool:
+        """Create backup of memory file"""
+        try:
+            if not os.path.exists(self.memory_file):
+                return False
+            
+            if not backup_filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_filename = f"memory_backup_{timestamp}.json"
+            
+            shutil.copy2(self.memory_file, backup_filename)
+            
+            if self.debug_logger:
+                self.debug_logger.memory(f"Memory backed up to {backup_filename}")
+            
+            return True
+            
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Failed to backup memory file: {e}")
+            return False
+
+# Chunk 2/3 - emm.py - LLM Semantic Analysis and Condensation Logic
+
+    def get_messages(self, limit: Optional[int] = None) -> List[Message]:
+        """Retrieve messages with optional limit"""
+        with self.lock:
+            if limit:
+                return self.messages[-limit:]
+            return self.messages.copy()
+    
+    def get_conversation_for_mcp(self) -> List[Dict[str, str]]:
+        """Format conversation for MCP requests"""
+        with self.lock:
+            return [
+                {"role": msg.message_type.value, "content": msg.content}
+                for msg in self.messages
+            ]
+    
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """Return current memory statistics"""
+        with self.lock:
+            total_tokens = sum(msg.token_estimate for msg in self.messages)
+            return {
+                "message_count": len(self.messages),
+                "total_tokens": total_tokens,
+                "max_tokens": self.max_memory_tokens,
+                "utilization": total_tokens / self.max_memory_tokens,
+                "condensations_performed": self.condensation_count
+            }
+
     async def _call_llm(self, messages: List[Dict[str, str]]) -> Optional[str]:
-        """Make LLM request for semantic analysis using working MCP format"""
+        """Make LLM request for semantic analysis - FIXED to match working MCP format"""
         try:
             async with httpx.AsyncClient(timeout=self.mcp_config.get("timeout", 30)) as client:
                 # Use same payload format as working mcp.py
@@ -311,114 +442,6 @@ Return JSON:
             
         return None
 
-# Chunk 2/3 - emm.py - Semantic Condensation and Background Processing
-
-    def _auto_load(self) -> None:
-        """Auto-load memory from file if it exists"""
-        try:
-            if os.path.exists(self.memory_file):
-                success = self.load_conversation(self.memory_file)
-                if success and self.debug_logger:
-                    self.debug_logger.memory(f"Auto-loaded {len(self.messages)} messages from {self.memory_file}")
-                elif not success and self.debug_logger:
-                    self.debug_logger.error(f"Failed to auto-load from {self.memory_file}")
-            elif self.debug_logger:
-                self.debug_logger.memory(f"No existing memory file found at {self.memory_file}")
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Auto-load error: {e}")
-    
-    def _auto_save(self) -> None:
-        """Auto-save memory to file"""
-        if not self.auto_save_enabled:
-            return
-            
-        try:
-            # Create backup of existing file
-            if os.path.exists(self.memory_file):
-                backup_file = f"{self.memory_file}.bak"
-                shutil.copy2(self.memory_file, backup_file)
-            
-            # Save current state
-            success = self.save_conversation(self.memory_file)
-            if not success and self.debug_logger:
-                self.debug_logger.error(f"Auto-save failed to {self.memory_file}")
-                
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Auto-save error: {e}")
-    
-    def add_message(self, content: str, message_type: MessageType) -> None:
-        """Add new message and manage memory with background auto-save"""
-        with self.lock:
-            message = Message(content, message_type)
-            self.messages.append(message)
-
-            if self.debug_logger:
-                self.debug_logger.memory(f"Added {message_type.value} message: {len(content)} chars, {message.token_estimate} tokens")
-
-        # Move ALL auto-save operations to background thread to avoid blocking main thread
-        if self.auto_save_enabled:
-            auto_save_thread = threading.Thread(
-                target=self._background_auto_save,
-                daemon=True,
-                name="EMM-AutoSave"
-            )
-            auto_save_thread.start()
-
-    def _background_auto_save(self) -> None:
-        """Handle auto-save and condensation in background thread"""
-        try:
-            # Auto-save first (file operations)
-            self._auto_save()
-
-            # Check if condensation needed
-            with self.lock:
-                current_tokens = sum(msg.token_estimate for msg in self.messages)
-
-            if current_tokens > self.max_memory_tokens:
-                if self.debug_logger:
-                    self.debug_logger.memory(f"Starting background condensation: {current_tokens} > {self.max_memory_tokens}")
-                self._perform_semantic_condensation()
-
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Background auto-save failed: {e}")
-    
-    async def categorize_memory_content(self, memories: List[Message], start_idx: int = 0) -> List[Message]:
-        """Categorize memory content using LLM analysis for semantic understanding"""
-        if len(memories) <= start_idx:
-            return memories
-        
-        # Analyze in chunks to avoid token limits
-        analysis_window = memories[start_idx:start_idx + 20]
-        
-        for i, memory in enumerate(analysis_window):
-            if memory.message_type in [MessageType.USER, MessageType.ASSISTANT]:
-                analysis = await self._analyze_message_semantics(start_idx + i)
-                if analysis:
-                    categories = analysis.get("categories", ["standard"])
-                    # Use the highest-priority category
-                    if "story_critical" in categories:
-                        memory.content_category = "story_critical"
-                    elif "character_focused" in categories:
-                        memory.content_category = "character_focused"
-                    elif "relationship_dynamics" in categories:
-                        memory.content_category = "relationship_dynamics"
-                    elif "emotional_significance" in categories:
-                        memory.content_category = "emotional_significance"
-                    elif "world_building" in categories:
-                        memory.content_category = "world_building"
-                    else:
-                        memory.content_category = "standard"
-                else:
-                    memory.content_category = "standard"
-        
-        if self.debug_logger:
-            print(f"Categorized {len(analysis_window)} memory segments")
-        
-        return memories
-    
     def _perform_semantic_condensation(self) -> None:
         """Execute LLM-powered semantic condensation with auto-save"""
         if len(self.messages) < 10:  # Need minimum messages for context
@@ -446,10 +469,8 @@ Return JSON:
             if self.debug_logger:
                 self.debug_logger.memory(f"Condensation pass {pass_num + 1}, tokens: {current_tokens}")
             
-            # Ensure all messages have categories
-            await self.categorize_memory_content(self.messages)
-            
             # Analyze messages for semantic importance
+            message_analyses = []
             preserve_messages = []
             condense_candidates = []
             
@@ -457,16 +478,16 @@ Return JSON:
             condensable_range = len(self.messages) - 5
             
             for i in range(min(condensable_range, len(self.messages))):
-                message = self.messages[i]
                 analysis = await self._analyze_message_semantics(i)
+                message_analyses.append((i, analysis))
                 
                 # Determine preservation based on categories and aggressiveness
                 should_preserve = self._should_preserve_message(analysis, aggressiveness_level)
                 
                 if should_preserve:
-                    preserve_messages.append(message)
+                    preserve_messages.append(self.messages[i])
                 else:
-                    condense_candidates.append(message)
+                    condense_candidates.append(self.messages[i])
             
             # Always preserve recent messages
             preserve_messages.extend(self.messages[condensable_range:])
@@ -477,9 +498,8 @@ Return JSON:
                 
                 if condensed_message:
                     # Replace condensed messages with summary
-                    with self.lock:
-                        self.messages = [condensed_message] + preserve_messages
-                        self.condensation_count += 1
+                    self.messages = [condensed_message] + preserve_messages
+                    self.condensation_count += 1
                     
                     # Auto-save after successful condensation
                     self._auto_save()
@@ -505,7 +525,7 @@ Return JSON:
         
         # Get highest preservation ratio for multi-category messages
         max_ratio = max(
-            CONDENSATION_STRATEGIES.get(cat, CONDENSATION_STRATEGIES["standard"])["preservation_ratio"]
+            self.preservation_ratios.get(cat, 0.4) 
             for cat in categories
         )
         
@@ -537,125 +557,14 @@ Return JSON:
         summary_content = await self._call_llm([{"role": "system", "content": prompt}])
         
         if summary_content:
-            condensed_msg = Message(
+            return Message(
                 content=f"[CONDENSED] {summary_content}",
                 message_type=MessageType.SYSTEM
             )
-            condensed_msg.condensed = True
-            return condensed_msg
         
         return None
-    
-    def clear_memory_file(self) -> bool:
-        """Clear memory file and reset in-memory state"""
-        try:
-            with self.lock:
-                # Clear in-memory state
-                self.messages.clear()
-                self.condensation_count = 0
-                
-                # Remove memory file if it exists
-                if os.path.exists(self.memory_file):
-                    os.remove(self.memory_file)
-                
-                # Remove backup file if it exists
-                backup_file = f"{self.memory_file}.bak"
-                if os.path.exists(backup_file):
-                    os.remove(backup_file)
-            
-            if self.debug_logger:
-                self.debug_logger.memory(f"Memory file {self.memory_file} cleared")
-            
-            return True
-            
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to clear memory file: {e}")
-            return False
-    
-    def get_memory_file_info(self) -> Dict[str, Any]:
-        """Get memory file information for status reporting"""
-        try:
-            if not os.path.exists(self.memory_file):
-                return {
-                    "file_exists": False,
-                    "file_path": self.memory_file,
-                    "auto_save_enabled": self.auto_save_enabled
-                }
-            
-            stat = os.stat(self.memory_file)
-            
-            with self.lock:
-                return {
-                    "file_exists": True,
-                    "file_path": self.memory_file,
-                    "file_size": stat.st_size,
-                    "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "message_count": len(self.messages),
-                    "auto_save_enabled": self.auto_save_enabled,
-                    "backup_exists": os.path.exists(f"{self.memory_file}.bak")
-                }
-                
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to get memory file info: {e}")
-            return {
-                "file_exists": False,
-                "error": str(e),
-                "auto_save_enabled": self.auto_save_enabled
-            }
 
 # Chunk 3/3 - emm.py - File Persistence and Utility Methods
-
-    def backup_memory_file(self, backup_filename: Optional[str] = None) -> bool:
-        """Create backup of memory file"""
-        try:
-            if not os.path.exists(self.memory_file):
-                return False
-            
-            if not backup_filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_filename = f"memory_backup_{timestamp}.json"
-            
-            shutil.copy2(self.memory_file, backup_filename)
-            
-            if self.debug_logger:
-                self.debug_logger.memory(f"Memory backed up to {backup_filename}")
-            
-            return True
-            
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to backup memory file: {e}")
-            return False
-
-    def get_messages(self, limit: Optional[int] = None) -> List[Message]:
-        """Retrieve messages with optional limit"""
-        with self.lock:
-            if limit:
-                return self.messages[-limit:]
-            return self.messages.copy()
-    
-    def get_conversation_for_mcp(self) -> List[Dict[str, str]]:
-        """Format conversation for MCP requests, excluding momentum state"""
-        with self.lock:
-            return [
-                {"role": msg.message_type.value, "content": msg.content}
-                for msg in self.messages
-                if msg.message_type != MessageType.MOMENTUM_STATE
-            ]
-    
-    def get_memory_stats(self) -> Dict[str, Any]:
-        """Return current memory statistics"""
-        with self.lock:
-            total_tokens = sum(msg.token_estimate for msg in self.messages)
-            return {
-                "message_count": len(self.messages),
-                "total_tokens": total_tokens,
-                "max_tokens": self.max_memory_tokens,
-                "utilization": total_tokens / self.max_memory_tokens,
-                "condensations_performed": self.condensation_count
-            }
 
     def save_conversation(self, filename: Optional[str] = None) -> bool:
         """Save conversation to file with robust error handling"""
@@ -771,25 +680,16 @@ Return JSON:
                 return {"status": "no_messages"}
             
             message_types = {}
-            category_counts = {}
-            
             for msg in self.messages:
                 msg_type = msg.message_type.value
                 message_types[msg_type] = message_types.get(msg_type, 0) + 1
-                
-                category = getattr(msg, 'content_category', 'unknown')
-                category_counts[category] = category_counts.get(category, 0) + 1
             
             total_tokens = sum(msg.token_estimate for msg in self.messages)
             avg_tokens = total_tokens / len(self.messages) if self.messages else 0
             
-            condensed_count = sum(1 for msg in self.messages if getattr(msg, 'condensed', False))
-            
             return {
                 "total_messages": len(self.messages),
                 "message_types": message_types,
-                "semantic_categories": category_counts,
-                "condensed_messages": condensed_count,
                 "total_tokens": total_tokens,
                 "average_tokens_per_message": round(avg_tokens, 2),
                 "memory_utilization": round(total_tokens / self.max_memory_tokens, 3),
@@ -800,41 +700,9 @@ Return JSON:
                 "memory_file": self.memory_file
             }
 
-    # SME Integration Methods
-    def get_momentum_state(self) -> Optional[Dict[str, Any]]:
-        """Retrieve current momentum state from memory for SME"""
-        with self.lock:
-            for message in reversed(self.messages):
-                if message.message_type == MessageType.MOMENTUM_STATE:
-                    try:
-                        if isinstance(message.content, str):
-                            return json.loads(message.content)
-                        else:
-                            return message.content
-                    except json.JSONDecodeError:
-                        continue
-            return None
-    
-    def update_momentum_state(self, state_data: Dict[str, Any]) -> None:
-        """Update or create momentum state in memory for SME"""
-        with self.lock:
-            # Remove existing momentum state
-            self.messages = [msg for msg in self.messages if msg.message_type != MessageType.MOMENTUM_STATE]
-            
-            # Add new momentum state
-            momentum_msg = Message(
-                content=json.dumps(state_data),
-                message_type=MessageType.MOMENTUM_STATE
-            )
-            self.messages.append(momentum_msg)
-        
-        # Trigger auto-save for momentum state
-        if self.auto_save_enabled:
-            self._auto_save()
-
 # Module test functionality
 if __name__ == "__main__":
-    print("DevName RPG Client - Enhanced Memory Manager with Restored LLM Semantic Analysis")
+    print("DevName RPG Client - Enhanced Memory Manager with Auto-Save")
     print("Testing memory management functionality...")
     
     # Test with auto-save enabled
@@ -852,21 +720,6 @@ if __name__ == "__main__":
     
     patterns = emm.analyze_conversation_patterns()
     print(f"Conversation patterns: {patterns}")
-    
-    # Test SME integration
-    test_state = {
-        "narrative_pressure": 0.3,
-        "pressure_source": "antagonist",
-        "manifestation_type": "tension",
-        "escalation_count": 1,
-        "base_pressure_floor": 0.0,
-        "last_analysis_count": 5,
-        "antagonist": {"name": "Test Villain", "motivation": "test purposes"}
-    }
-    
-    emm.update_momentum_state(test_state)
-    retrieved_state = emm.get_momentum_state()
-    print(f"SME state integration: {retrieved_state}")
     
     # Test memory clearing
     emm.clear_memory_file()

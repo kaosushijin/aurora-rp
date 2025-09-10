@@ -1,19 +1,14 @@
+# Chunk 1/3 - sme.py - Story Momentum Engine with Restored LLM Analysis
 #!/usr/bin/env python3
-"""
-# Chunk 1/3 - Core Classes and Enums
-
-DevName RPG Client - Story Momentum Engine Module (sme.py)
-
-For complete architecture documentation, see genai.txt
-Programmatic interconnects: Called by nci.py, provides context to mcp.py
-"""
 
 import json
 import time
+import asyncio
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple
 import re
+import httpx
 
 class StoryArc(Enum):
     """Narrative progression states"""
@@ -32,6 +27,11 @@ class Antagonist:
         self.context = context
         self.introduction_time = time.time()
         self.active = True
+        self.commitment_level = "testing"  # testing → engaged → desperate → cornered
+        self.resources_available = []
+        self.resources_lost = []
+        self.personality_traits = []
+        self.background = ""
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -40,7 +40,12 @@ class Antagonist:
             "threat_level": self.threat_level,
             "context": self.context,
             "introduction_time": self.introduction_time,
-            "active": self.active
+            "active": self.active,
+            "commitment_level": self.commitment_level,
+            "resources_available": self.resources_available,
+            "resources_lost": self.resources_lost,
+            "personality_traits": self.personality_traits,
+            "background": self.background
         }
     
     @classmethod
@@ -53,11 +58,16 @@ class Antagonist:
         )
         antagonist.introduction_time = data.get("introduction_time", time.time())
         antagonist.active = data.get("active", True)
+        antagonist.commitment_level = data.get("commitment_level", "testing")
+        antagonist.resources_available = data.get("resources_available", [])
+        antagonist.resources_lost = data.get("resources_lost", [])
+        antagonist.personality_traits = data.get("personality_traits", [])
+        antagonist.background = data.get("background", "")
         return antagonist
 
 class StoryMomentumEngine:
     """
-    Dynamic narrative pressure and antagonist management system.
+    Dynamic narrative pressure and antagonist management system with LLM analysis.
     Analyzes conversation for story pacing and provides context enhancement.
     """
     
@@ -70,13 +80,25 @@ class StoryMomentumEngine:
         self.last_analysis_time = 0.0
         self.user_input_buffer: List[str] = []
         
+        # Analysis cycle tracking (every 15 messages)
+        self.last_analysis_count = 0
+        self.escalation_count = 0
+        self.base_pressure_floor = 0.0
+        
         # Pressure calculation parameters
         self.pressure_decay_rate = 0.05
         self.pressure_threshold_antagonist = 0.6
         self.pressure_threshold_climax = 0.8
         self.analysis_cooldown = 2.0  # seconds
         
-        # Story momentum patterns
+        # MCP configuration for LLM calls
+        self.mcp_config = {
+            "server_url": "http://127.0.0.1:3456/chat",
+            "model": "qwen2.5:14b-instruct-q4_k_m",
+            "timeout": 300
+        }
+        
+        # Story momentum patterns (legacy pattern matching for immediate feedback)
         self.momentum_patterns = {
             "conflict": ["fight", "attack", "defend", "battle", "combat", "strike"],
             "exploration": ["examine", "search", "look", "investigate", "explore", "discover"],
@@ -91,15 +113,37 @@ class StoryMomentumEngine:
         if self.debug_logger:
             self.debug_logger.debug(f"SME: {message}", "SME")
     
+    async def _call_llm(self, messages: List[Dict[str, str]]) -> Optional[str]:
+        """Make LLM request for momentum analysis using working MCP format"""
+        try:
+            async with httpx.AsyncClient(timeout=self.mcp_config.get("timeout", 30)) as client:
+                payload = {
+                    "model": self.mcp_config["model"],
+                    "messages": messages,
+                    "stream": False
+                }
+
+                response = await client.post(self.mcp_config["server_url"], json=payload)
+                response.raise_for_status()
+
+                if response.status_code == 200:
+                    result = response.json()
+                    return result.get("message", {}).get("content", "")
+
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"SME LLM call failed: {e}")
+            return None
+    
     def _calculate_pressure_change(self, input_text: str) -> float:
-        """Calculate pressure change based on user input patterns"""
+        """Calculate immediate pressure change based on user input patterns (legacy system)"""
         if not input_text.strip():
             return 0.0
         
         text_lower = input_text.lower()
         pressure_delta = 0.0
         
-        # Pattern-based pressure calculation
+        # Pattern-based pressure calculation for immediate feedback
         for pattern_type, keywords in self.momentum_patterns.items():
             matches = sum(1 for keyword in keywords if keyword in text_lower)
             
@@ -131,12 +175,10 @@ class StoryMomentumEngine:
         
         return min(pressure_delta, 0.3)  # Cap maximum single increase
 
-# Chunk 2/3 - Main Processing Methods and Antagonist Generation
-
     def process_user_input(self, input_text: str) -> Dict[str, Any]:
         """
         Process user input and update story momentum.
-        Called by nci.py when user provides input.
+        Provides immediate feedback while deferring LLM analysis to 15-message cycles.
         """
         current_time = time.time()
         
@@ -154,10 +196,13 @@ class StoryMomentumEngine:
         # Apply pressure decay
         self._apply_pressure_decay()
         
-        # Calculate pressure change
+        # Calculate immediate pressure change using legacy patterns
         pressure_change = self._calculate_pressure_change(input_text)
         old_pressure = self.pressure_level
-        self.pressure_level = max(0.0, min(1.0, self.pressure_level + pressure_change))
+        
+        # Apply pressure floor ratcheting
+        effective_floor = max(self.base_pressure_floor, 0.0)
+        self.pressure_level = max(effective_floor, min(1.0, self.pressure_level + pressure_change))
         
         # Record pressure history
         self.pressure_history.append((current_time, self.pressure_level))
@@ -168,8 +213,8 @@ class StoryMomentumEngine:
         old_arc = self.story_arc
         self._update_story_arc()
         
-        # Antagonist management
-        antagonist_introduced = self._manage_antagonist()
+        # Antagonist management (basic threshold check)
+        antagonist_introduced = self._manage_antagonist_threshold()
         
         self._log_debug(f"Pressure: {old_pressure:.3f} → {self.pressure_level:.3f} (+{pressure_change:.3f})")
         
@@ -180,7 +225,8 @@ class StoryMomentumEngine:
             "arc": self.story_arc.value,
             "arc_changed": old_arc != self.story_arc,
             "antagonist_introduced": antagonist_introduced,
-            "antagonist_active": self.current_antagonist is not None
+            "antagonist_active": self.current_antagonist is not None,
+            "needs_llm_analysis": False  # Will be determined by message count
         }
     
     def _apply_pressure_decay(self):
@@ -190,7 +236,8 @@ class StoryMomentumEngine:
             last_update = self.pressure_history[-1][0]
             time_delta = current_time - last_update
             decay = self.pressure_decay_rate * (time_delta / 60.0)  # Per minute
-            self.pressure_level = max(0.0, self.pressure_level - decay)
+            floor_pressure = max(self.base_pressure_floor, 0.0)
+            self.pressure_level = max(floor_pressure, self.pressure_level - decay)
     
     def _update_story_arc(self):
         """Update story arc based on pressure level"""
@@ -203,12 +250,13 @@ class StoryMomentumEngine:
         else:
             self.story_arc = StoryArc.RESOLUTION
     
-    def _manage_antagonist(self) -> bool:
-        """Manage antagonist introduction and lifecycle"""
+    def _manage_antagonist_threshold(self) -> bool:
+        """Basic antagonist introduction based on pressure threshold"""
         if (self.pressure_level >= self.pressure_threshold_antagonist and 
             self.current_antagonist is None):
-            self.current_antagonist = self._generate_antagonist()
-            self._log_debug(f"Antagonist introduced: {self.current_antagonist.name}")
+            # Create basic antagonist - will be enhanced by LLM analysis
+            self.current_antagonist = self._create_basic_antagonist()
+            self._log_debug(f"Basic antagonist introduced: {self.current_antagonist.name}")
             return True
         
         # Deactivate antagonist during resolution
@@ -219,57 +267,430 @@ class StoryMomentumEngine:
         
         return False
     
-    def _generate_antagonist(self) -> Antagonist:
-        """Generate dynamic antagonist using LLM-oriented prompting"""
-        # Analyze recent user inputs for context
-        recent_inputs = self.user_input_buffer[-10:] if self.user_input_buffer else []
-        context_keywords = []
-        
-        for input_text in recent_inputs:
-            words = input_text.lower().split()
-            context_keywords.extend(words)
-        
-        # Determine threat level based on current pressure
-        threat_level = min(0.9, self.pressure_level + 0.1)
-        
-        # Context-driven antagonist generation
-        if any(keyword in context_keywords for keyword in ["magic", "spell", "wizard", "arcane"]):
-            antagonist_context = "magical_opposition"
-            base_name = "Corrupted Mage"
-            motivation = "seeks to drain magical essence"
-        elif any(keyword in context_keywords for keyword in ["explore", "dungeon", "cave", "ruins"]):
-            antagonist_context = "environmental_threat"
-            base_name = "Ancient Guardian"
-            motivation = "protects forbidden knowledge"
-        elif any(keyword in context_keywords for keyword in ["town", "city", "people", "merchant"]):
-            antagonist_context = "social_conflict"
-            base_name = "Corrupt Official"
-            motivation = "maintains oppressive control"
-        else:
-            # Default context-adaptive antagonist
-            antagonist_context = "adaptive_threat"
-            base_name = "Shadow Entity"
-            motivation = "feeds on narrative tension"
-        
-        return Antagonist(
-            name=base_name,
-            motivation=motivation,
-            threat_level=threat_level,
-            context=antagonist_context
+    def _create_basic_antagonist(self) -> Antagonist:
+        """Create basic antagonist for immediate use (enhanced later by LLM)"""
+        antagonist = Antagonist(
+            name="Shadow Entity",
+            motivation="opposes the player's progress",
+            threat_level=min(0.9, self.pressure_level + 0.1),
+            context="adaptive_threat"
         )
+        antagonist.commitment_level = "testing"
+        antagonist.resources_available = ["stealth", "cunning", "persistence"]
+        antagonist.personality_traits = ["mysterious", "adaptive", "persistent"]
+        return antagonist
+
+# Chunk 2/3 - sme.py - LLM Analysis and Antagonist Generation
+
+    def should_analyze_momentum(self, total_message_count: int) -> bool:
+        """Check if momentum analysis should be triggered (every 15 messages)"""
+        if total_message_count < 15:
+            return False  # Grace period for initial conversation
+        
+        return total_message_count - self.last_analysis_count >= 15
+    
+    def prepare_momentum_analysis_context(self, conversation_messages: List[Dict[str, Any]], max_tokens: int = 6000) -> Tuple[List[Dict[str, Any]], int]:
+        """Prepare context for momentum analysis within allocated budget"""
+        # Reserve 25% for analysis prompt overhead
+        analysis_overhead = max_tokens // 4
+        available_tokens = max_tokens - analysis_overhead
+        
+        # Start with recent messages and work backwards
+        context_messages = []
+        total_tokens = 0
+        
+        for message in reversed(conversation_messages):
+            content = message.get("content", "")
+            message_tokens = len(content) // 4  # Conservative token estimation
+            
+            if total_tokens + message_tokens <= available_tokens:
+                context_messages.insert(0, message)
+                total_tokens += message_tokens
+            else:
+                break
+        
+        self._log_debug(f"Momentum analysis context: {len(context_messages)} messages, {total_tokens} tokens")
+        return context_messages, total_tokens
+    
+    async def analyze_momentum(self, conversation_messages: List[Dict[str, Any]], total_message_count: int, is_first_analysis: bool = False) -> Dict[str, Any]:
+        """
+        Unified momentum analysis function that handles both first-time and regular analysis.
+        """
+        
+        # 1. Prepare context within token budget
+        context_messages, context_tokens = self.prepare_momentum_analysis_context(
+            conversation_messages, max_tokens=6000
+        )
+        
+        # 2. Handle antagonist generation/validation
+        if is_first_analysis or not self.current_antagonist or not self.validate_antagonist_quality(self.current_antagonist):
+            self._log_debug("Generating/enhancing antagonist for momentum analysis...")
+            antagonist = await self.generate_antagonist(context_messages)
+            if antagonist:
+                self.current_antagonist = antagonist
+        
+        # 3. Resource loss analysis
+        conversation_text = "\n".join([
+            f"{m.get('role', 'unknown')}: {m.get('content', '')}"
+            for m in context_messages[-10:]  # Last 10 messages
+        ])
+        
+        events_occurred = await self.analyze_resource_loss(conversation_text, self.current_antagonist)
+        
+        # 4. Calculate pressure floor ratcheting
+        new_pressure_floor = self.calculate_pressure_floor_ratchet(events_occurred.get("events", []))
+        
+        # 5. Main momentum analysis
+        current_state = self.get_current_state()
+        momentum_prompt = self._create_momentum_analysis_prompt(current_state, context_messages, events_occurred, new_pressure_floor)
+        
+        self._log_debug(f"Running momentum analysis with {len(context_messages)} context messages")
+        
+        # 6. Execute analysis with error handling
+        try:
+            response = await self._call_llm([{"role": "system", "content": momentum_prompt}])
+            if response:
+                analysis_result = self._parse_momentum_response(response)
+                if analysis_result:
+                    # Update state with analysis results
+                    self._update_state_from_analysis(analysis_result, new_pressure_floor, total_message_count)
+                    self._log_debug(f"Momentum analysis complete. Pressure: {self.pressure_level:.2f}")
+                    return analysis_result
+        
+        except Exception as e:
+            self._log_debug(f"Momentum analysis failed: {e}")
+        
+        # Return safe updated state on failure
+        safe_state = current_state.copy()
+        safe_state["last_analysis_count"] = total_message_count
+        safe_state["base_pressure_floor"] = new_pressure_floor
+        return safe_state
+    
+    def _create_momentum_analysis_prompt(self, current_state: Dict[str, Any], context_messages: List[Dict[str, Any]], events_occurred: Dict[str, Any], new_pressure_floor: float) -> str:
+        """Create comprehensive momentum analysis prompt"""
+        
+        conversation_text = "\n".join([
+            f"{m.get('role', 'unknown')}: {m.get('content', '')[:300]}"  # Truncate for efficiency
+            for m in context_messages
+        ])
+        
+        antagonist_info = "None"
+        if self.current_antagonist:
+            antagonist_info = f"{self.current_antagonist.name} - {self.current_antagonist.motivation} (commitment: {self.current_antagonist.commitment_level})"
+        
+        return f"""You are analyzing story momentum in an ongoing RPG narrative. Based on the conversation 
+and current momentum state, provide updated momentum metrics.
+
+Current Momentum State:
+- Narrative Pressure: {self.pressure_level:.2f}
+- Story Arc: {self.story_arc.value}
+- Antagonist: {antagonist_info}
+- Escalation Count: {self.escalation_count}
+- Pressure Floor: {self.base_pressure_floor:.2f} → {new_pressure_floor:.2f}
+
+Recent Events Detected: {events_occurred}
+
+Recent Conversation:
+{conversation_text}
+
+Analyze and provide updated momentum state:
+
+1. How has narrative pressure changed? (0.0-1.0 scale, considering floor of {new_pressure_floor:.2f})
+2. What is the pressure source? (antagonist/environment/social/discovery)
+3. How is momentum manifesting? (exploration/tension/conflict/resolution)
+4. What is the player's behavioral pattern? (aggressive/cautious/avoidant/diplomatic)
+5. How should the antagonist respond given their commitment level?
+6. Should the antagonist's commitment level change? (testing/engaged/desperate/cornered)
+
+Return JSON format:
+{{
+  "narrative_pressure": 0.0-1.0,
+  "pressure_source": "antagonist|environment|social|discovery",
+  "manifestation_type": "exploration|tension|conflict|resolution",
+  "player_behavior": "aggressive|cautious|avoidant|diplomatic",
+  "antagonist_response": "description of how antagonist should respond",
+  "commitment_change": "testing|engaged|desperate|cornered|no_change",
+  "escalation_events": ["event1", "event2"],
+  "pressure_reasoning": "explanation of pressure changes"
+}}"""
+    
+    def _parse_momentum_response(self, response: str) -> Optional[Dict[str, Any]]:
+        """Parse LLM momentum analysis response with defensive handling"""
+        try:
+            # Extract JSON from response
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            
+            if start >= 0 and end > start:
+                json_str = response[start:end]
+                data = json.loads(json_str)
+                
+                # Validate required fields
+                required_fields = ["narrative_pressure", "pressure_source", "manifestation_type"]
+                if all(field in data for field in required_fields):
+                    return data
+                    
+        except (json.JSONDecodeError, KeyError) as e:
+            self._log_debug(f"Failed to parse momentum response: {e}")
+        
+        return None
+    
+    def _update_state_from_analysis(self, analysis: Dict[str, Any], new_pressure_floor: float, total_message_count: int):
+        """Update internal state from LLM analysis results"""
+        # Update pressure with floor constraint
+        new_pressure = analysis.get("narrative_pressure", self.pressure_level)
+        self.pressure_level = max(new_pressure, new_pressure_floor)
+        
+        # Update pressure floor
+        self.base_pressure_floor = new_pressure_floor
+        
+        # Update analysis tracking
+        self.last_analysis_count = total_message_count
+        
+        # Update antagonist commitment if specified
+        if self.current_antagonist and "commitment_change" in analysis:
+            commitment = analysis["commitment_change"]
+            if commitment != "no_change":
+                self.current_antagonist.commitment_level = commitment
+                self._log_debug(f"Antagonist commitment updated to: {commitment}")
+        
+        # Track escalation events
+        escalation_events = analysis.get("escalation_events", [])
+        if escalation_events:
+            self.escalation_count += len(escalation_events)
+    
+    async def generate_antagonist(self, context_messages: List[Dict[str, Any]], max_attempts: int = 3) -> Optional[Antagonist]:
+        """Generate high-quality antagonist based on story context"""
+        
+        # Prepare story context from recent messages
+        story_context = "\n".join([
+            f"{msg.get('role', 'unknown')}: {msg.get('content', '')[:300]}"
+            for msg in context_messages[-15:]  # Recent context
+        ])
+        
+        antagonist_prompt = f"""You are creating an antagonist for an ongoing RPG story. Based on the story context, 
+generate a compelling antagonist that fits naturally into the narrative.
+
+Recent Story Context:
+{story_context}
+
+Create an antagonist with:
+1. Name: A fitting name for the setting
+2. Motivation: Clear, understandable goals that conflict with the player
+3. Commitment Level: Start at "testing" (will escalate based on story events)
+4. Resources: What power, influence, or assets do they have?
+5. Personality: Key traits that drive their behavior
+6. Background: Brief history that explains their motivation
+
+Provide a JSON response with these fields:
+{{
+    "name": "Antagonist Name",
+    "motivation": "Clear motivation that opposes player goals",
+    "commitment_level": "testing",
+    "resources_available": ["resource1", "resource2", "resource3"],
+    "resources_lost": [],
+    "personality_traits": ["trait1", "trait2", "trait3"],
+    "background": "Brief background story",
+    "threat_level": "moderate"
+}}"""
+        
+        for attempt in range(max_attempts):
+            try:
+                response = await self._call_llm([{"role": "system", "content": antagonist_prompt}])
+                if response:
+                    antagonist_data = self._parse_antagonist_response(response)
+                    if antagonist_data:
+                        antagonist = self._create_antagonist_from_data(antagonist_data)
+                        if self.validate_antagonist_quality(antagonist):
+                            self._log_debug(f"Generated antagonist: {antagonist.name}")
+                            return antagonist
+                        
+            except Exception as e:
+                self._log_debug(f"Antagonist generation attempt {attempt + 1} failed: {e}")
+        
+        # Fallback antagonist if generation fails
+        return self._create_fallback_antagonist()
+    
+    def _parse_antagonist_response(self, response: str) -> Optional[Dict[str, Any]]:
+        """Parse antagonist generation response"""
+        try:
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            
+            if start >= 0 and end > start:
+                json_str = response[start:end]
+                return json.loads(json_str)
+                
+        except json.JSONDecodeError as e:
+            self._log_debug(f"Failed to parse antagonist response: {e}")
+        
+        return None
+    
+    def _create_antagonist_from_data(self, data: Dict[str, Any]) -> Antagonist:
+        """Create Antagonist object from parsed data"""
+        threat_level_map = {"low": 0.3, "moderate": 0.5, "high": 0.7, "extreme": 0.9}
+        threat_level = threat_level_map.get(data.get("threat_level", "moderate"), 0.5)
+        
+        antagonist = Antagonist(
+            name=data.get("name", "Unknown Antagonist"),
+            motivation=data.get("motivation", "opposes the player"),
+            threat_level=threat_level,
+            context="llm_generated"
+        )
+        
+        antagonist.commitment_level = data.get("commitment_level", "testing")
+        antagonist.resources_available = data.get("resources_available", [])
+        antagonist.resources_lost = data.get("resources_lost", [])
+        antagonist.personality_traits = data.get("personality_traits", [])
+        antagonist.background = data.get("background", "")
+        
+        return antagonist
+    
+    def _create_fallback_antagonist(self) -> Antagonist:
+        """Create fallback antagonist if LLM generation fails"""
+        antagonist = Antagonist(
+            name="The Shadow",
+            motivation="seeks to disrupt the player's journey",
+            threat_level=min(0.9, self.pressure_level + 0.1),
+            context="fallback"
+        )
+        antagonist.commitment_level = "testing"
+        antagonist.resources_available = ["stealth", "cunning", "local knowledge"]
+        antagonist.personality_traits = ["mysterious", "patient", "observant"]
+        antagonist.background = "A mysterious figure who opposes those who disturb the natural order"
+        return antagonist
+    
+    def validate_antagonist_quality(self, antagonist: Optional[Antagonist]) -> bool:
+        """Validate that an antagonist has sufficient detail and quality"""
+        if not antagonist:
+            return False
+        
+        # Check for meaningful name (not just defaults)
+        if antagonist.name in ["Unknown Antagonist", "Unknown Adversary", "Shadow Entity"]:
+            return False
+        
+        # Check for meaningful motivation
+        if len(antagonist.motivation) < 10:
+            return False
+        
+        # Check for personality traits
+        if not antagonist.personality_traits:
+            return False
+        
+        return True
+    
+    async def analyze_resource_loss(self, conversation_text: str, antagonist: Optional[Antagonist]) -> Dict[str, Any]:
+        """Analyze recent conversation for antagonist resource losses"""
+        if not antagonist:
+            return {"events": [], "resources_lost": []}
+        
+        analysis_prompt = f"""Analyze this RPG conversation for events where the antagonist {antagonist.name} 
+might have lost resources, suffered setbacks, or been exposed.
+
+Antagonist: {antagonist.name} - {antagonist.motivation}
+Available Resources: {', '.join(antagonist.resources_available)}
+
+Recent Conversation:
+{conversation_text[-2000:]}
+
+Look for:
+- Direct confrontations or defeats
+- Exposure of plans or identity
+- Loss of allies, resources, or territory
+- Failed schemes or setbacks
+
+Provide JSON response:
+{{
+    "events": ["event1", "event2"],
+    "resources_lost": ["resource1", "resource2"]
+}}"""
+        
+        try:
+            response = await self._call_llm([{"role": "system", "content": analysis_prompt}])
+            if response:
+                return self._parse_resource_loss_response(response)
+        except Exception as e:
+            self._log_debug(f"Resource loss analysis failed: {e}")
+        
+        return {"events": [], "resources_lost": []}
+    
+    def _parse_resource_loss_response(self, response: str) -> Dict[str, Any]:
+        """Parse resource loss analysis response"""
+        try:
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            
+            if start >= 0 and end > start:
+                json_str = response[start:end]
+                return json.loads(json_str)
+                
+        except json.JSONDecodeError:
+            pass
+        
+        return {"events": [], "resources_lost": []}
+    
+    def calculate_pressure_floor_ratchet(self, recent_events: List[str]) -> float:
+        """Calculate the new pressure floor based on escalation events (ratcheting upward)"""
+        # Increment escalation count if significant events occurred
+        if recent_events:
+            self.escalation_count += len(recent_events)
+        
+        # Calculate new floor (ratcheting upward)
+        new_floor = min(0.3, self.base_pressure_floor + (self.escalation_count * 0.02))
+        
+        # Never decrease (ratchet mechanism)
+        return max(self.base_pressure_floor, new_floor)
+
+# Chunk 3/3 - sme.py - State Management and Utility Methods
+
+    def get_current_state(self) -> Dict[str, Any]:
+        """Get current momentum state for analysis"""
+        return {
+            "narrative_pressure": self.pressure_level,
+            "pressure_source": self._get_pressure_source(),
+            "manifestation_type": self._get_manifestation_type(),
+            "escalation_count": self.escalation_count,
+            "base_pressure_floor": self.base_pressure_floor,
+            "last_analysis_count": self.last_analysis_count,
+            "antagonist": self.current_antagonist.to_dict() if self.current_antagonist else None,
+            "story_arc": self.story_arc.value
+        }
+    
+    def _get_pressure_source(self) -> str:
+        """Determine current pressure source"""
+        if self.current_antagonist and self.current_antagonist.active:
+            return "antagonist"
+        elif self.pressure_level > 0.5:
+            return "environment"
+        elif len(self.user_input_buffer) > 0:
+            last_input = self.user_input_buffer[-1].lower()
+            if any(word in last_input for word in ["talk", "speak", "negotiate"]):
+                return "social"
+            elif any(word in last_input for word in ["examine", "search", "investigate"]):
+                return "discovery"
+        return "environment"
+    
+    def _get_manifestation_type(self) -> str:
+        """Determine how momentum is currently manifesting"""
+        if self.story_arc == StoryArc.SETUP:
+            return "exploration"
+        elif self.story_arc == StoryArc.RISING:
+            return "tension"
+        elif self.story_arc == StoryArc.CLIMAX:
+            return "conflict"
+        else:
+            return "resolution"
     
     def get_story_context(self) -> Dict[str, Any]:
-        """
-        Generate story context for MCP module integration.
-        Called by mcp.py to enhance prompting.
-        """
+        """Generate story context for MCP module integration"""
         context = {
             "pressure_level": round(self.pressure_level, 3),
             "story_arc": self.story_arc.value,
             "narrative_state": self._get_narrative_state_description(),
             "should_introduce_tension": self.pressure_level < 0.4,
             "climax_approaching": self.pressure_level > 0.7,
-            "antagonist_present": self.current_antagonist is not None
+            "antagonist_present": self.current_antagonist is not None and self.current_antagonist.active,
+            "pressure_floor": self.base_pressure_floor
         }
         
         if self.current_antagonist:
@@ -277,7 +698,9 @@ class StoryMomentumEngine:
                 "name": self.current_antagonist.name,
                 "motivation": self.current_antagonist.motivation,
                 "threat_level": self.current_antagonist.threat_level,
-                "active": self.current_antagonist.active
+                "active": self.current_antagonist.active,
+                "commitment_level": self.current_antagonist.commitment_level,
+                "resources_lost": len(self.current_antagonist.resources_lost)
             }
         
         # Recent pressure trend
@@ -307,9 +730,7 @@ class StoryMomentumEngine:
             return "peak_intensity"
         else:  # RESOLUTION
             return "concluding_action"
-
-# Chunk 3/3 - State Management and Utility Methods
-
+    
     def reset_story_state(self):
         """Reset story state for new session"""
         self.pressure_level = 0.0
@@ -318,6 +739,9 @@ class StoryMomentumEngine:
         self.pressure_history.clear()
         self.user_input_buffer.clear()
         self.last_analysis_time = 0.0
+        self.last_analysis_count = 0
+        self.escalation_count = 0
+        self.base_pressure_floor = 0.0
         self._log_debug("Story state reset")
     
     def get_pressure_stats(self) -> Dict[str, Any]:
@@ -336,7 +760,10 @@ class StoryMomentumEngine:
             "pressure_variance": self._calculate_variance(pressures),
             "session_duration": timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 0.0,
             "total_updates": len(self.pressure_history),
-            "current_arc": self.story_arc.value
+            "current_arc": self.story_arc.value,
+            "pressure_floor": self.base_pressure_floor,
+            "escalation_count": self.escalation_count,
+            "last_analysis_count": self.last_analysis_count
         }
         
         return stats
@@ -350,64 +777,16 @@ class StoryMomentumEngine:
         squared_diffs = [(x - mean) ** 2 for x in values]
         return sum(squared_diffs) / len(squared_diffs)
     
-    def save_state(self, filepath: str) -> bool:
-        """Save SME state to file"""
-        try:
-            state_data = {
-                "pressure_level": self.pressure_level,
-                "story_arc": self.story_arc.value,
-                "pressure_history": self.pressure_history,
-                "user_input_buffer": self.user_input_buffer[-10:],  # Save last 10 inputs
-                "last_analysis_time": self.last_analysis_time,
-                "current_antagonist": self.current_antagonist.to_dict() if self.current_antagonist else None,
-                "save_timestamp": time.time()
-            }
-            
-            with open(filepath, 'w') as f:
-                json.dump(state_data, f, indent=2)
-            
-            self._log_debug(f"State saved to {filepath}")
-            return True
-            
-        except Exception as e:
-            self._log_debug(f"State save failed: {e}")
-            return False
-    
-    def load_state(self, filepath: str) -> bool:
-        """Load SME state from file"""
-        try:
-            with open(filepath, 'r') as f:
-                state_data = json.load(f)
-            
-            self.pressure_level = state_data.get("pressure_level", 0.0)
-            self.story_arc = StoryArc(state_data.get("story_arc", "setup"))
-            self.pressure_history = state_data.get("pressure_history", [])
-            self.user_input_buffer = state_data.get("user_input_buffer", [])
-            self.last_analysis_time = state_data.get("last_analysis_time", 0.0)
-            
-            antagonist_data = state_data.get("current_antagonist")
-            if antagonist_data:
-                self.current_antagonist = Antagonist.from_dict(antagonist_data)
-            else:
-                self.current_antagonist = None
-            
-            self._log_debug(f"State loaded from {filepath}")
-            return True
-            
-        except Exception as e:
-            self._log_debug(f"State load failed: {e}")
-            return False
-    
     def force_pressure_level(self, new_pressure: float):
         """Force specific pressure level (debug/testing use)"""
-        self.pressure_level = max(0.0, min(1.0, new_pressure))
+        self.pressure_level = max(self.base_pressure_floor, min(1.0, new_pressure))
         self._update_story_arc()
         self._log_debug(f"Pressure forced to {self.pressure_level}")
     
     def force_antagonist_introduction(self):
         """Force antagonist introduction (debug/testing use)"""
         if self.current_antagonist is None:
-            self.current_antagonist = self._generate_antagonist()
+            self.current_antagonist = self._create_basic_antagonist()
             self._log_debug("Antagonist introduction forced")
     
     def get_debug_info(self) -> Dict[str, Any]:
@@ -419,11 +798,64 @@ class StoryMomentumEngine:
             "pressure_history_count": len(self.pressure_history),
             "input_buffer_count": len(self.user_input_buffer),
             "last_analysis_time": self.last_analysis_time,
+            "last_analysis_count": self.last_analysis_count,
+            "escalation_count": self.escalation_count,
+            "base_pressure_floor": self.base_pressure_floor,
             "pressure_decay_rate": self.pressure_decay_rate,
             "antagonist_threshold": self.pressure_threshold_antagonist,
             "climax_threshold": self.pressure_threshold_climax,
             "analysis_cooldown": self.analysis_cooldown
         }
+    
+    # State persistence methods for EMM integration
+    def save_state_to_dict(self) -> Dict[str, Any]:
+        """Save SME state to dictionary for EMM storage"""
+        return {
+            "narrative_pressure": self.pressure_level,
+            "pressure_source": self._get_pressure_source(),
+            "manifestation_type": self._get_manifestation_type(),
+            "escalation_count": self.escalation_count,
+            "base_pressure_floor": self.base_pressure_floor,
+            "last_analysis_count": self.last_analysis_count,
+            "antagonist": self.current_antagonist.to_dict() if self.current_antagonist else None,
+            "story_arc": self.story_arc.value,
+            "pressure_history": self.pressure_history[-10:],  # Save last 10 pressure points
+            "timestamp": time.time()
+        }
+    
+    def load_state_from_dict(self, state_data: Dict[str, Any]) -> bool:
+        """Load SME state from dictionary (from EMM)"""
+        try:
+            self.pressure_level = max(0.0, min(1.0, state_data.get("narrative_pressure", 0.0)))
+            self.escalation_count = max(0, state_data.get("escalation_count", 0))
+            self.base_pressure_floor = max(0.0, min(0.3, state_data.get("base_pressure_floor", 0.0)))
+            self.last_analysis_count = max(0, state_data.get("last_analysis_count", 0))
+            
+            # Load story arc
+            arc_value = state_data.get("story_arc", "setup")
+            try:
+                self.story_arc = StoryArc(arc_value)
+            except ValueError:
+                self.story_arc = StoryArc.SETUP
+            
+            # Load antagonist
+            antagonist_data = state_data.get("antagonist")
+            if antagonist_data:
+                self.current_antagonist = Antagonist.from_dict(antagonist_data)
+            else:
+                self.current_antagonist = None
+            
+            # Load pressure history
+            pressure_history = state_data.get("pressure_history", [])
+            if isinstance(pressure_history, list):
+                self.pressure_history = pressure_history
+            
+            self._log_debug("SME state loaded from EMM")
+            return True
+            
+        except Exception as e:
+            self._log_debug(f"Failed to load SME state: {e}")
+            return False
 
 # Standalone utility functions for testing and analysis
 def test_pressure_scenario(scenario: str) -> Dict[str, Any]:
@@ -450,7 +882,8 @@ def test_pressure_scenario(scenario: str) -> Dict[str, Any]:
         "final_pressure": sme.pressure_level,
         "pressure_change": sme.pressure_level - initial_pressure,
         "current_arc": sme.story_arc.value,
-        "antagonist_present": sme.current_antagonist is not None
+        "antagonist_present": sme.current_antagonist is not None,
+        "pressure_floor": sme.base_pressure_floor
     }
 
 def analyze_text_momentum(text: str) -> Dict[str, Any]:
@@ -494,3 +927,5 @@ if __name__ == "__main__":
         print("---")
     
     print(f"Final Stats: {sme.get_pressure_stats()}")
+
+
