@@ -73,9 +73,9 @@ MAX_LOG_AGE_DAYS = 7
 
 # Prompt file configuration - look in parent directory
 PROMPT_FILES = {
-    'critrules': Path("../critrules.prompt"),
-    'companion': Path("../companion.prompt"), 
-    'lowrules': Path("../lowrules.prompt")
+    'critrules': Path("critrules.prompt"),
+    'companion': Path("companion.prompt"),
+    'lowrules': Path("lowrules.prompt")
 }
 
 # Token allocation for prompt system

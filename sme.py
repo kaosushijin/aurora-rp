@@ -55,7 +55,7 @@ class NarrativeTimeTracker:
         self.total_narrative_seconds = 0.0
         self.exchange_count = 0
         self.sequence_history = []  # (sequence_number, duration, cumulative_time)
-        self.lock = Lock()
+        self.lock = threading.Lock()
     
     def detect_duration_from_text(self, text: str) -> float:
         """Basic pattern-based duration detection without LLM analysis"""
@@ -144,7 +144,7 @@ class StoryMomentumEngine:
         self.narrative_tracker = NarrativeTimeTracker()
         
         # Thread safety
-        self.lock = Lock()
+        self.lock = threading.Lock()
     
     def process_user_input(self, input_text: str, sequence_number: int = 0) -> Dict[str, Any]:
         """Process user input and update state using basic pattern detection"""
