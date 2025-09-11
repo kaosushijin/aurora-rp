@@ -258,22 +258,22 @@ class DevNameOrchestrator:
         try:
             semantic_processor = self.module_registry.get_module("semantic_processor")
             mcp_client = self.module_registry.get_module("mcp_client")
-            
-            # Create memory manager
+
+            # Create memory manager with correct parameters (matches current emm.py constructor)
             memory_manager = EnhancedMemoryManager(
-                debug_logger=self.debug_logger,
-                max_memory_tokens=self.max_memory_tokens
+                max_memory_tokens=self.max_memory_tokens,
+                debug_logger=self.debug_logger
             )
-            
+
             # Integrate semantic processor for analysis
             memory_manager.semantic_processor = semantic_processor
             memory_manager.mcp_client = mcp_client
-            
+
             # Auto-load existing memory
             memory_manager._auto_load()
-            
+
             return memory_manager
-            
+
         except Exception as e:
             self._log_debug(f"Failed to initialize memory manager: {e}")
             return None
@@ -1041,34 +1041,204 @@ def create_command_processor(orchestrator: DevNameOrchestrator) -> CommandProces
     return CommandProcessor(orchestrator)
 
 async def run_orchestrated_application(config: Dict[str, Any], debug_logger=None) -> int:
-    """Run the complete orchestrated application"""
+    """Run the complete orchestrated application with proper async/sync separation"""
+
+    # PHASE 1: Initialize orchestrator and extract components
     try:
+        if debug_logger:
+            debug_logger.debug("Phase 1: Initializing orchestrator components", "ORCHESTRATOR")
+
         # Create and initialize orchestrator
         orchestrator = await create_orchestrator(config, debug_logger)
-        
-        # Get UI controller and run interface
+
+        # Extract modules for synchronous use
         ui_controller = orchestrator.get_module("ui_controller")
+        memory_manager = orchestrator.get_module("memory_manager")
+        mcp_client = orchestrator.get_module("mcp_client")
+        story_engine = orchestrator.get_module("story_engine")
+
         if not ui_controller:
             raise RuntimeError("UI controller not initialized")
-        
-        # Create command processor for UI
-        command_processor = create_command_processor(orchestrator)
-        ui_controller.command_processor = command_processor
-        
-        # Run the interface
-        try:
-            return ui_controller.run()
-        finally:
-            # Ensure graceful shutdown
-            if not orchestrator.state.shutdown_requested:
-                orchestrator.request_shutdown()
-            await orchestrator.shutdown_system()
-            
+
+        if debug_logger:
+            debug_logger.debug("Phase 1 complete: Components extracted", "ORCHESTRATOR")
+
     except Exception as e:
         if debug_logger:
-            debug_logger.error(f"Application error: {e}")
-        print(f"Application error: {e}")
+            debug_logger.error(f"Phase 1 failed: {e}", "ORCHESTRATOR")
+        print(f"Initialization error: {e}")
         return 1
+
+    # PHASE 2: Clean shutdown of async components before UI
+    try:
+        if debug_logger:
+            debug_logger.debug("Phase 2: Shutting down async components", "ORCHESTRATOR")
+
+        # Request shutdown and wait for clean async shutdown
+        orchestrator.request_shutdown()
+        await orchestrator.shutdown_system()
+        orchestrator = None  # Clear reference
+
+        if debug_logger:
+            debug_logger.debug("Phase 2 complete: Async components shut down", "ORCHESTRATOR")
+
+    except Exception as e:
+        if debug_logger:
+            debug_logger.error(f"Phase 2 failed: {e}", "ORCHESTRATOR")
+        # Continue anyway, the UI might still work
+
+    # PHASE 3: Run UI synchronously with extracted components
+    try:
+        if debug_logger:
+            debug_logger.debug("Phase 3: Running synchronous UI", "ORCHESTRATOR")
+
+        # Create simple synchronous processors using extracted components
+        def sync_message_processor(message: str):
+            """Simple synchronous message processor"""
+            try:
+                if not memory_manager or not mcp_client:
+                    return {"success": False, "error": "Components not available"}
+
+                # Store user message
+                from emm import MessageType
+                memory_manager.add_message(message, MessageType.USER)
+
+                # Get conversation history
+                conversation_history = memory_manager.get_conversation_for_mcp()
+
+                # Get story context if available
+                story_context = None
+                if story_engine:
+                    try:
+                        story_context_dict = story_engine.get_story_context()
+                        if isinstance(story_context_dict, dict):
+                            pressure = story_context_dict.get('pressure_level', 0)
+                            arc = story_context_dict.get('story_arc', 'setup')
+                            story_context = f"Story Pressure: {pressure:.2f}, Arc: {arc}"
+                        else:
+                            story_context = str(story_context_dict)
+                    except:
+                        story_context = None
+
+                # FIXED: Use completely synchronous HTTP request instead of async
+                try:
+                    import requests  # Use requests instead of httpx for synchronous operation
+
+                    # Build messages like the original
+                    messages = [{"role": "system", "content": mcp_client.system_prompt}]
+
+                    # Add story context if available
+                    if story_context:
+                        messages.append({"role": "system", "content": f"Story Context: {story_context}"})
+
+                    # Add conversation history (last 10 messages)
+                    if conversation_history:
+                        for msg in conversation_history[-10:]:
+                            messages.append(msg)
+
+                    # Add current user input
+                    messages.append({"role": "user", "content": message})
+
+                    # Prepare request payload
+                    payload = {
+                        "model": mcp_client.model,
+                        "messages": messages,
+                        "stream": False
+                    }
+
+                    # Make synchronous HTTP request
+                    response = requests.post(
+                        mcp_client.server_url,
+                        json=payload,
+                        timeout=30.0
+                    )
+                    response.raise_for_status()
+
+                    # Parse response - use the same format as original MCPClient
+                    response_data = response.json()
+
+                    # Original MCPClient expects: response_data["message"]["content"]
+                    if (isinstance(response_data, dict) and
+                        "message" in response_data and
+                        isinstance(response_data["message"], dict) and
+                        "content" in response_data["message"]):
+
+                        ai_response = response_data["message"]["content"]
+
+                        if ai_response and ai_response.strip():
+                            memory_manager.add_message(ai_response, MessageType.ASSISTANT)
+                            return {"success": True, "ai_response": ai_response}
+                        else:
+                            return {"success": False, "error": "Empty content in MCP response"}
+                    else:
+                        return {"success": False, "error": f"Invalid MCP response format. Expected message.content, got: {list(response_data.keys())}"}
+
+                except ImportError:
+                    return {"success": False, "error": "requests library not available - install with: pip install requests"}
+                except requests.exceptions.RequestException as e:
+                    return {"success": False, "error": f"MCP request failed: {str(e)}"}
+                except Exception as e:
+                    return {"success": False, "error": f"MCP processing error: {str(e)}"}
+
+            except Exception as e:
+                if debug_logger:
+                    debug_logger.error(f"Message processing error: {e}", "ORCHESTRATOR")
+                return {"success": False, "error": str(e)}
+
+        def sync_command_processor(command: str):
+            """Simple synchronous command processor"""
+            try:
+                if command.startswith('/quit') or command.startswith('/exit'):
+                    return {"success": True, "system_message": "Shutting down...", "shutdown": True}
+                elif command.startswith('/help'):
+                    return {"success": True, "system_message": "Available commands: /help, /stats, /clear, /quit"}
+                elif command.startswith('/stats'):
+                    if memory_manager and hasattr(memory_manager, 'get_messages'):
+                        messages = memory_manager.get_messages()
+                        return {"success": True, "system_message": f"Memory: {len(messages)} messages"}
+                    return {"success": True, "system_message": "Stats not available"}
+                elif command.startswith('/clear'):
+                    if memory_manager and hasattr(memory_manager, 'clear_conversation'):
+                        memory_manager.clear_conversation()
+                        return {"success": True, "system_message": "Memory cleared"}
+                    return {"success": False, "error": "Clear not available"}
+                else:
+                    return {"success": False, "error": f"Unknown command: {command}"}
+
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        # Set processors on UI controller
+        ui_controller.set_message_processor(sync_message_processor)
+        ui_controller.set_command_processor(sync_command_processor)
+
+        if debug_logger:
+            debug_logger.debug("Starting UI run() - entering curses", "ORCHESTRATOR")
+
+        # Run the UI - this is now completely synchronous
+        ui_exit_code = ui_controller.run()
+
+        if debug_logger:
+            debug_logger.debug(f"UI exited with code: {ui_exit_code}", "ORCHESTRATOR")
+
+        return ui_exit_code
+
+    except Exception as e:
+        if debug_logger:
+            debug_logger.error(f"Phase 3 failed: {e}", "ORCHESTRATOR")
+        print(f"UI error: {e}")
+        return 1
+
+    finally:
+        # PHASE 4: Final cleanup
+        if debug_logger:
+            debug_logger.debug("Phase 4: Final cleanup", "ORCHESTRATOR")
+
+        # Clean up any remaining references
+        ui_controller = None
+        memory_manager = None
+        mcp_client = None
+        story_engine = None
 
 # Utility functions for testing and diagnostics
 

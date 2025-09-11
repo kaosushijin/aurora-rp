@@ -1,0 +1,23 @@
+
+--- Debug session started: 2025-09-10T19:47:36.231505 ---
+[19:47:36.231] SYSTEM: DevName RPG Client starting
+[19:47:36.231] SYSTEM: Arguments: {'debug': True, 'config': 'devname_config.json'}
+[19:47:36.231] SYSTEM: Using hardcoded configuration values
+[19:47:36.231] SYSTEM: Configuration loaded with hardcoded values
+[19:47:37.231] SYSTEM: Application starting
+[19:47:37.232] PROMPT: Loaded critrules.prompt: 2916 chars
+[19:47:37.232] PROMPT: Prompt file not found: companion.prompt
+[19:47:37.232] PROMPT: Loaded lowrules.prompt: 3414 chars
+[19:47:37.232] PROMPT: Loaded prompts: 1,582 tokens total
+[19:47:37.232] PROMPT:   critrules: 729 tokens (2,916 chars)
+[19:47:37.232] PROMPT:   companion: MISSING
+[19:47:37.232] PROMPT:   lowrules: 853 tokens (3,414 chars)
+[19:47:37.232] SYSTEM: Prompts loaded: 1582 tokens
+[19:47:37.232] MAIN: No existing memory file found at memory.json
+[19:47:37.232] MAIN: No existing SME state found in EMM
+[19:47:37.232] INTERFACE: Base system prompt set from critrules
+[19:47:37.232] SYSTEM: Starting interface
+[19:47:37.233] INTERFACE: Interface initialized with complete LLM integration: 236x66
+[19:47:42.285] INTERFACE: Processing state: True
+[19:47:42.285] INTERFACE: Processing state: False
+[19:47:42.285] SYSTEM: Application finished with exit code: 0
