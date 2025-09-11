@@ -1,151 +1,172 @@
-GENAI.TXT - AI ANALYSIS REFERENCE FOR DEVNAME RPG CLIENT
+# GENAI.TXT - AI ANALYSIS REFERENCE FOR DEVNAME RPG CLIENT
 ================================================================
 
-PROJECT SCOPE:
+## PROJECT SCOPE
 Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Context Protocol). Features modular architecture with complete LLM semantic analysis, dynamic coordinate system, and background processing for responsive user experience.
 
-CORE MODULE ARCHITECTURE:
-main.py - Application coordination, prompt management, lifecycle control
-├── PromptManager: LLM-powered prompt condensation within token budgets
-├── DevNameRPGClient: Main application coordinator with signal handling
-└── ApplicationConfig: Hardcoded configuration values (no file creation)
+## PROGRAM FLOW ANALYSIS (Commit: e7e9c6438c5ad3ab95f1780e1aeb57f90e96d649)
 
-nci.py - Primary interface controller with complete LLM integration
-├── CursesInterface: Main coordination class linking all modules
-├── Dynamic coordinate integration for all display operations
-├── Complete LLM analysis coordination (semantic + momentum)
-└── Background processing coordination to prevent interface blocking
+### Application Entry Point (main.py)
+1. **Environment Setup**: Module verification, dependency checks, terminal capability validation
+2. **Prompt Management**: Load and validate prompt files (critrules.prompt required, companion.prompt and lowrules.prompt optional)
+3. **LLM-Powered Condensation**: Automatically compress prompts exceeding 5,000 token budget using intelligent LLM processing
+4. **Application Initialization**: Create DevNameRPGClient with hardcoded configuration values
+5. **Interface Launch**: Transfer control to CursesInterface for main program execution
 
-Supporting Interface Modules:
-nci_terminal.py - BoxCoordinates system, LayoutGeometry calculations
-nci_input.py - MultiLineInput with cursor navigation and word wrapping
-nci_scroll.py - ScrollManager with error-protected position tracking
-nci_display.py - DisplayMessage formatting with type-specific rendering
-nci_colors.py - ColorManager with theme switching (classic/dark/bright)
+### Core Execution Flow
+```
+main() → initialize_application() → DevNameRPGClient.run() → CursesInterface.run() → _run_main_loop()
+```
 
-Core Backend Modules:
-mcp.py - MCPClient for HTTP communication with context integration
-emm.py - EnhancedMemoryManager with LLM semantic analysis and background auto-save
-sme.py - StoryMomentumEngine with comprehensive LLM narrative analysis
+## CURRENT MODULE ARCHITECTURE
 
-CRITICAL INTERCONNECTS:
-main.py → nci.py: Passes optimized prompts via config dict
-nci.py → nci_terminal.py: Uses LayoutGeometry for all window positioning
-nci.py → emm.py: Background auto-save prevents interface blocking
-nci.py → sme.py: Triggers 15-message comprehensive LLM analysis cycles
-nci.py → mcp.py: Sends integrated system messages with story context
-emm.py ↔ sme.py: Bidirectional state persistence through momentum_state storage
+### Primary Modules
 
-DATA FLOW:
-1. Prompts loaded/optimized in main.py with LLM condensation if needed
-2. Dynamic coordinates calculated for responsive terminal layout
-3. User input processed through MultiLineInput with intelligent submission
-4. Messages stored in EMM with background semantic categorization
-5. SME pattern analysis provides immediate feedback
-6. Every 15 messages: comprehensive LLM momentum analysis in background
-7. MCP requests built with prompts + story context + conversation history
-8. Responses displayed with immediate refresh using dynamic coordinates
-9. Background threads handle auto-save and semantic condensation
+**main.py** - Application coordination, prompt management, lifecycle control
+- `PromptManager`: LLM-powered prompt condensation within token budgets
+- `DevNameRPGClient`: Main application coordinator with signal handling
+- `ApplicationConfig`: Hardcoded configuration values (no file creation)
+- **Key Features**: 
+  - 5,000 token budget management with automatic condensation
+  - Modular prompt system (critrules/companion/lowrules)
+  - Environment validation and cleanup
 
-ENHANCED MEMORY MANAGER (emm.py):
-- Background auto-save system using daemon threads prevents UI blocking
-- 6-category LLM semantic analysis: story_critical, character_focused, relationship_dynamics, emotional_significance, world_building, standard
-- Multi-pass condensation with progressive aggressiveness (3 passes max)
-- Category-aware preservation ratios (0.4-0.9 based on semantic importance)
-- 5-strategy defensive JSON parsing for robust LLM response handling
-- Atomic file operations with backup/recovery for data integrity
-- Thread-safe operations with proper locking mechanisms
+**nci.py** - Primary interface controller with complete LLM integration
+- `CursesInterface`: Main coordination class linking all modules
+- Dynamic coordinate integration for all display operations
+- Complete LLM analysis coordination (semantic + momentum)
+- Background processing coordination to prevent interface blocking
+- **Key Features**:
+  - Dynamic window positioning with responsive layout
+  - 15-message comprehensive LLM analysis cycles
+  - Background auto-save threading
 
-STORY MOMENTUM ENGINE (sme.py):
-- Immediate pattern-based feedback + comprehensive LLM analysis every 15 messages
-- 5-strategy defensive JSON parsing for momentum and antagonist responses
-- Dynamic antagonist generation with quality validation and commitment escalation
-- Pressure floor ratcheting system prevents infinite narrative stalling
-- Resource loss tracking affects antagonist behavior and responses
-- Background LLM analysis prevents main thread blocking
-- Complete state persistence through EMM momentum_state storage
+### Supporting Interface Modules
 
-PROMPT SYSTEM INTEGRATION:
-- Token budget: 5,000 total for all prompts combined
-- LLM-powered condensation when budget exceeded
-- critrules.prompt: REQUIRED - Core GM rules and boundaries
-- companion.prompt: OPTIONAL - Character definitions  
-- lowrules.prompt: OPTIONAL - Narrative generation rules
-- Dynamic system message construction with story context injection
-- Status display shows active prompt components and token usage
+**nci_terminal.py** - BoxCoordinates system, LayoutGeometry calculations
+- Dynamic coordinate system prevents layout bugs
+- Responsive terminal geometry handling
+- Window positioning with border awareness
 
-DYNAMIC COORDINATE SYSTEM:
-- BoxCoordinates dataclass: outer/inner boundaries with calculated dimensions
-- LayoutGeometry: complete terminal layout with proportional scaling
-- Automatic adaptation to any terminal size (minimum 80x24)
-- Eliminates hardcoded coordinates, prevents curses positioning errors
-- Consistent proportional layouts: 90% output, 10% input by default
-- Content rewrapping only when necessary for performance
+**nci_input.py** - MultiLineInput with cursor navigation and word wrapping
+- Intelligent submission detection (double-enter or sentence-ending punctuation)
+- Line merging and cursor management
+- Word wrapping with terminal width adaptation
 
-BACKGROUND PROCESSING ARCHITECTURE:
-- Non-blocking auto-save prevents interface freezing during file operations
-- Semantic analysis threads: "EMM-AutoSave", "EMM-Condensation"  
-- Momentum analysis threads: "SME-Comprehensive-Analysis"
-- Thread-safe memory operations with proper locking
-- Daemon threads prevent application hanging on shutdown
+**nci_scroll.py** - ScrollManager with error-protected position tracking
+- Bounds checking prevents scroll position errors
+- Page navigation (PgUp/PgDn) support
+- Dynamic height adjustment during resize
 
-DEFENSIVE ERROR HANDLING:
-- 5-strategy JSON parsing prevents LLM response failures:
-  1. Direct JSON parsing
-  2. Substring extraction  
-  3. Regex field extraction
-  4. Keyword-based inference
-  5. Fallback defaults
-- Robust scroll position error handling (fixed KeyError crashes)
-- Graceful degradation with missing prompt files
-- Connection error handling with specific error types
-- Memory corruption recovery with backup file fallback
+**nci_display.py** - DisplayMessage formatting with type-specific rendering
+- Message type differentiation (user/assistant/system)
+- Content wrapping with paragraph preservation
+- Color-coded display based on message source
 
-CONFIGURATION & TOKEN MANAGEMENT:
-- Total context window: 32,000 tokens
-- System prompts: 5,000 tokens (auto-optimized)
-- Memory storage: 16,000 tokens (semantic categorization)  
-- User input validation with helpful feedback
-- MCP: http://127.0.0.1:3456/chat with qwen2.5:14b-instruct-q4_k_m
-- Hardcoded config prevents file creation, simplifies deployment
+**nci_colors.py** - ColorManager with theme switching (classic/dark/bright)
+- Three built-in color schemes
+- Dynamic theme switching via `/theme` command
+- Terminal compatibility handling
 
-KEY FEATURES:
-- Multi-line input with intelligent submission detection
-- Page-based scrolling with position indicators (PgUp/PgDn/Home/End)
-- Real-time status with comprehensive system information
-- Command system: /help, /stats, /analyze, /clearmemory, /theme, etc.
-- Complete state preservation across sessions
-- Theme switching with immediate visual refresh
+### Core Backend Modules
+
+**mcp.py** - MCPClient for HTTP communication with context integration
+- HTTP-based Model Context Protocol communication
+- Context window management (32,000 tokens)
+- 5-strategy JSON parsing for LLM response reliability
+- Integrated system message building with story context
+
+**emm.py** - EnhancedMemoryManager with LLM semantic analysis and background auto-save
+- Background semantic categorization prevents interface blocking
+- Multi-pass content condensation when memory limits exceeded
+- Atomic file operations for data persistence
+- Message type classification and storage
+
+**sme.py** - StoryMomentumEngine with comprehensive LLM narrative analysis
+- 15-message cycle triggers for comprehensive analysis
+- Antagonist generation with quality validation
+- Pressure floor ratcheting prevents infinite stalling
 - Background LLM processing maintains interface responsiveness
 
-DEBUGGING INFRASTRUCTURE:
-- Centralized DebugLogger shared across modules with category-specific logging
-- Real-time interface state inspection with /stats command
-- Module-specific debug categories for focused troubleshooting  
-- Background thread monitoring and process tracking
-- Comprehensive error attribution through module boundaries
+## CRITICAL INTERCONNECTS
 
-ARCHITECTURAL BENEFITS:
-- Clean separation enables independent module development
-- Background processing prevents UI blocking during LLM operations
-- Dynamic coordinates eliminate platform-specific display issues
-- Modular failure isolation prevents cascading problems
-- Thread-safe operations ensure data integrity
-- Defensive parsing handles unreliable LLM responses gracefully
+### Data Flow Relationships
+- `main.py → nci.py`: Passes optimized prompts via config dict
+- `nci.py → nci_terminal.py`: Uses LayoutGeometry for all window positioning
+- `nci.py → emm.py`: Background auto-save prevents interface blocking
+- `nci.py → sme.py`: Triggers 15-message comprehensive LLM analysis cycles
+- `nci.py → mcp.py`: Sends integrated system messages with story context
+- `emm.py ↔ sme.py`: Bidirectional state persistence through momentum_state storage
 
-CRITICAL PRESERVATION RULES:
+### Module Dependencies
+```
+main.py
+├── nci.py (primary interface)
+│   ├── nci_terminal.py (coordinates)
+│   ├── nci_input.py (user input)
+│   ├── nci_scroll.py (navigation)
+│   ├── nci_display.py (formatting)
+│   ├── nci_colors.py (themes)
+│   ├── mcp.py (LLM communication)
+│   ├── emm.py (memory management)
+│   └── sme.py (story analysis)
+```
+
+## COMPLETE DATA FLOW PIPELINE
+
+1. **Startup**: Prompts loaded/optimized in main.py with LLM condensation if needed
+2. **Layout**: Dynamic coordinates calculated for responsive terminal layout
+3. **Input**: User input processed through MultiLineInput with intelligent submission
+4. **Storage**: Messages stored in EMM with background semantic categorization
+5. **Analysis**: SME pattern analysis provides immediate feedback
+6. **Momentum**: Every 15 messages triggers comprehensive LLM momentum analysis in background
+7. **Communication**: MCP requests built with prompts + story context + conversation history
+8. **Display**: Responses displayed with immediate refresh using dynamic coordinates
+9. **Persistence**: Background auto-save maintains state without blocking interface
+
+## TECHNICAL SPECIFICATIONS
+
+### Dependencies
+- **Python 3.8+** with curses support
+- **httpx** (REQUIRED for MCP communication and LLM calls)
+- **asyncio** for background LLM operations
+- **threading** for non-blocking auto-save and semantic analysis
+- **json** for state persistence and configuration
+
+### Configuration
+- **Context Window**: 32,000 tokens
+- **System Prompt Budget**: 5,000 tokens with automatic condensation
+- **Max User Input**: 2,000 tokens
+- **Minimum Terminal**: 80x24 characters
+- **Log Retention**: 7 days auto-cleanup
+
+### File Structure
+```
+Required Files:
+- main.py, nci.py, mcp.py, emm.py, sme.py
+- nci_terminal.py, nci_input.py, nci_scroll.py, nci_display.py, nci_colors.py
+- critrules.prompt (REQUIRED)
+
+Optional Files:
+- companion.prompt (character definitions)
+- lowrules.prompt (narrative guidelines)
+```
+
+## CRITICAL PRESERVATION REQUIREMENTS
+
+### Architecture Integrity
 1. Dynamic coordinate system must be preserved across interface components
 2. Background auto-save threading must maintain non-blocking operation
 3. 5-strategy JSON parsing must be preserved for LLM response reliability
-4. Semantic categorization must preserve content quality during condensation  
+4. Semantic categorization must preserve content quality during condensation
 5. 15-message momentum analysis cycle timing must be maintained
 6. Thread safety in memory operations must be preserved
 7. Prompt integration workflow must maintain token budget constraints
 8. Error handling improvements in scroll manager must be preserved
 
-DEVELOPMENT GUIDELINES:
+### Development Guidelines
 - Update coordinate calculations only through TerminalManager/LayoutGeometry
-- Maintain thread safety in all EMM/SME operations  
+- Maintain thread safety in all EMM/SME operations
 - Preserve immediate display pattern for user feedback
 - Test background processing after memory management changes
 - Verify LLM integration after communication modifications
@@ -153,15 +174,32 @@ DEVELOPMENT GUIDELINES:
 - Preserve modular boundaries for independent development
 - Update genai.txt when making architectural changes
 
-DEPENDENCIES:
-- Python 3.8+ with curses support
-- httpx (REQUIRED for MCP communication and LLM calls)
-- asyncio for background LLM operations
-- threading for non-blocking auto-save and semantic analysis
-- json for state persistence and configuration
+### Known Planned Improvements
+1. **Interface Enhancements**: Line break preservation, gap spacing standardization, ASCII borders
+2. **Time System Refactoring**: Separate narrative time from real time for better story progression
+3. **Module Consolidation**: Potential merge of nci_*.py files into unified uilib.py
+4. **Enhanced Error Handling**: Improved resilience in coordinate calculations and content processing
 
-USAGE:
-Run `python main.py` to start with hardcoded configuration.
-Use `python main.py --debug` for comprehensive logging.
-Ensure critrules.prompt exists (required) - companion.prompt and lowrules.prompt optional.
-Terminal minimum size: 80x24 characters.
+## USAGE INSTRUCTIONS
+
+### Basic Operation
+- Run `python main.py` to start with hardcoded configuration
+- Use `python main.py --debug` for comprehensive logging
+- Ensure critrules.prompt exists (required) - companion.prompt and lowrules.prompt optional
+- Terminal minimum size: 80x24 characters
+
+### Commands
+- **Multi-line Input**: Type naturally, double-enter to submit
+- **Navigation**: PgUp/PgDn for scrolling, Home/End for quick navigation
+- **Commands**: `/help`, `/stats`, `/analyze`, `/theme <n>`, `/clearmemory`
+
+### Debug Features
+- Comprehensive logging of semantic categorization decisions
+- Momentum analysis results tracking
+- Antagonist generation process monitoring
+- Background thread operations visibility
+- Token budget management logging
+
+---
+Last Updated: Analysis of commit e7e9c6438c5ad3ab95f1780e1aeb57f90e96d649
+Project State: Modular architecture with complete LLM integration and responsive interface
