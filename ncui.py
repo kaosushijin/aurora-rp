@@ -21,7 +21,7 @@ if str(current_dir) not in sys.path:
 # Import consolidated UI library - direct import from current directory
 try:
     from uilib import (
-        ColorManager, ColorTheme, TerminalManager, LayoutGeometry,
+        ColorManager, ColorTheme, TerminalManager, LayoutGeometry, calculate_box_layout,
         DisplayMessage, InputValidator, ScrollManager, MultiLineInput,
         MIN_SCREEN_WIDTH, MIN_SCREEN_HEIGHT, MAX_USER_INPUT_TOKENS
     )
@@ -78,33 +78,73 @@ class NCursesUIController:
 # Chunk 2/6 - ncui.py - Initialization and Layout Methods (Method Signature Fixes)
         
     def initialize(self, stdscr) -> bool:
-        """Initialize curses interface and UI components"""
+        """Initialize the UI with proper terminal size detection"""
         try:
             self.stdscr = stdscr
-            
-            # NOW create TerminalManager with stdscr available
+
+            # CRITICAL FIX: Initialize terminal size BEFORE creating TerminalManager
+            # Get terminal dimensions immediately after curses setup
+            try:
+                height, width = stdscr.getmaxyx()
+                self._log_debug(f"Terminal size detected: {width}x{height}")
+            except curses.error as e:
+                self._log_error(f"Failed to get terminal size: {e}")
+                return False
+
+            # Validate minimum terminal size before proceeding
+            if width < MIN_SCREEN_WIDTH or height < MIN_SCREEN_HEIGHT:
+                self._log_error(f"Terminal too small: {width}x{height} (minimum: {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT})")
+                try:
+                    stdscr.clear()
+                    msg = f"Terminal too small! Need at least {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT}, got {width}x{height}"
+                    if height > 0 and width > len(msg):
+                        stdscr.addstr(0, 0, msg)
+                    stdscr.refresh()
+                except curses.error:
+                    pass
+                return False
+
+            # Initialize terminal manager with known dimensions
             self.terminal_manager = TerminalManager(stdscr)
-            
+            # CRITICAL: Manually set the dimensions since getmaxyx() worked above
+            self.terminal_manager.width = width
+            self.terminal_manager.height = height
+            self.terminal_manager.too_small = False
+
+            # Calculate initial layout with known good dimensions
+            try:
+                self.current_layout = calculate_box_layout(width, height)
+                self.terminal_manager.current_layout = self.current_layout
+                self._log_debug(f"Layout calculated successfully for {width}x{height}")
+            except ValueError as e:
+                self._log_error(f"Layout calculation failed: {e}")
+                return False
+
             # Initialize color management
-            self.color_manager.init_colors()
-            
-            # Configure curses settings
-            curses.curs_set(1)  # Show cursor
-            stdscr.keypad(True)  # Enable special keys
-            stdscr.timeout(100)  # Non-blocking input with 100ms timeout
-            
-            # Create initial layout and components
-            self._update_layout()
+            self.color_manager = ColorManager()
+            if self.color_manager.init_colors():
+                self._log_debug("Color support initialized")
+            else:
+                self._log_debug("Running without color support")
+
+            # Create windows with validated layout
+            if not self._create_windows():
+                self._log_error("Window creation failed")
+                return False
+
+            # Initialize UI components
             self._initialize_components()
-            
-            # Initial display
+
+            # Show initial display
             self._initial_display()
-            
+
             self._log_debug("UI initialization complete")
             return True
-            
+
         except Exception as e:
             self._log_error(f"UI initialization failed: {e}")
+            import traceback
+            self._log_error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def _update_layout(self):
@@ -129,7 +169,7 @@ class NCursesUIController:
     def _create_windows(self):
         """Create or recreate curses windows based on current layout"""
         if not self.current_layout or not self.stdscr:
-            return
+            return False  # Add explicit return for failure case
 
         try:
             layout = self.current_layout
@@ -167,9 +207,11 @@ class NCursesUIController:
             self._draw_borders()
 
             self._log_debug("Windows created successfully")
+            return True  # ADD THIS LINE - return True on success
 
         except Exception as e:
             self._log_error(f"Window creation failed: {e}")
+            return False  # Add explicit return for exception case
     
     def _initialize_components(self):
         """Initialize UI components after windows are created"""

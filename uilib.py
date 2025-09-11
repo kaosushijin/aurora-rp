@@ -13,6 +13,7 @@ import os
 import threading
 import time
 import sys
+import textwrap
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass
@@ -74,83 +75,116 @@ class LayoutGeometry:
 
 def calculate_box_layout(width: int, height: int) -> LayoutGeometry:
     """
-    Calculate dynamic box layout:
-    
-    1. Reserve 1 line for status at bottom
-    2. Reserve 2 lines for borders (between output/input, above status)
-    3. Split remaining lines 90/10 between output/input
-    4. Calculate inner coordinates for each box
+    Calculate dynamic box layout with proper border handling:
+
+    1. Validate minimum terminal size
+    2. Reserve 1 line for status at bottom
+    3. Split remaining space 90/10 between output/input with border between
+    4. Calculate outer boundaries (including borders) and inner text areas (excluding borders)
+    5. Ensure all dimensions are positive for curses compatibility
     """
-    
-    # Reserve space
+
+    # Validate minimum terminal size
+    if width < MIN_SCREEN_WIDTH or height < MIN_SCREEN_HEIGHT:
+        raise ValueError(f"Terminal too small: {width}x{height} (minimum: {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT})")
+
+    # Reserve status line at bottom
     status_height = 1
-    border_lines = 2
-    available_height = height - status_height - border_lines
-    
-    # Split available space
-    output_height = int(available_height * 0.9)
-    input_height = available_height - output_height
-    
-    # Any remainder goes to input
-    if available_height != output_height + input_height:
-        input_height += available_height - output_height - input_height
-    
-    # Calculate output box coordinates
+    content_height = height - status_height
+
+    # Minimum viable content height check
+    if content_height < 6:  # Need at least 3 lines output + 3 lines input
+        raise ValueError(f"Insufficient terminal height: {height} (need at least {6 + status_height})")
+
+    # Calculate split with border between output and input
+    # Reserve 1 line for border between output and input
+    usable_content_height = content_height - 1  # -1 for border line
+
+    # Apply 90/10 split to usable space
+    output_content_height = max(3, int(usable_content_height * 0.9))
+    input_content_height = max(3, usable_content_height - output_content_height)
+
+    # Adjust if total doesn't match (due to integer rounding)
+    total_allocated = output_content_height + input_content_height
+    if total_allocated < usable_content_height:
+        input_content_height += usable_content_height - total_allocated
+
+    # Calculate output box coordinates (top section)
+    # Output box includes its own border
+    output_outer_height = output_content_height + 2  # +2 for top and bottom borders
     output_box = BoxCoordinates(
+        # Outer boundaries (including borders)
         top=0,
         left=0,
-        bottom=output_height,
-        right=width-1,
-        inner_top=0,
-        inner_left=0,
-        inner_bottom=output_height-1,
-        inner_right=width-1,
+        bottom=output_outer_height - 1,
+        right=width - 1,
+        # Inner boundaries (text area excluding borders)
+        inner_top=1,
+        inner_left=1,
+        inner_bottom=output_outer_height - 2,
+        inner_right=width - 2,
+        # Dimensions
         width=width,
-        height=output_height+1,
-        inner_width=width,
-        inner_height=output_height
+        height=output_outer_height,
+        inner_width=max(1, width - 2),  # Ensure positive width
+        inner_height=max(1, output_content_height)  # Ensure positive height
     )
-    
-    # Calculate input box coordinates
-    input_top = output_height + 1
+
+    # Calculate input box coordinates (middle section)
+    # Input box starts after output box
+    input_top = output_outer_height
+    input_outer_height = input_content_height + 2  # +2 for top and bottom borders
     input_box = BoxCoordinates(
+        # Outer boundaries (including borders)
         top=input_top,
         left=0,
-        bottom=input_top + input_height,
-        right=width-1,
-        inner_top=input_top,
-        inner_left=0,
-        inner_bottom=input_top + input_height - 1,
-        inner_right=width-1,
+        bottom=input_top + input_outer_height - 1,
+        right=width - 1,
+        # Inner boundaries (text area excluding borders)
+        inner_top=input_top + 1,
+        inner_left=1,
+        inner_bottom=input_top + input_outer_height - 2,
+        inner_right=width - 2,
+        # Dimensions
         width=width,
-        height=input_height+1,
-        inner_width=width,
-        inner_height=input_height
+        height=input_outer_height,
+        inner_width=max(1, width - 2),  # Ensure positive width
+        inner_height=max(1, input_content_height)  # Ensure positive height
     )
-    
-    # Calculate status line coordinates
-    status_top = height - 1
+
+    # Calculate status line coordinates (bottom section)
+    status_top = height - status_height
     status_line = BoxCoordinates(
+        # Outer boundaries (status line has no borders)
         top=status_top,
         left=0,
         bottom=status_top,
-        right=width-1,
+        right=width - 1,
+        # Inner boundaries (same as outer for status line)
         inner_top=status_top,
         inner_left=0,
         inner_bottom=status_top,
-        inner_right=width-1,
+        inner_right=width - 1,
+        # Dimensions
         width=width,
-        height=1,
+        height=status_height,
         inner_width=width,
-        inner_height=1
+        inner_height=status_height
     )
-    
+
+    # Final validation - ensure all dimensions are positive
+    for box_name, box in [("output", output_box), ("input", input_box), ("status", status_line)]:
+        if box.height <= 0 or box.width <= 0 or box.inner_height <= 0 or box.inner_width <= 0:
+            raise ValueError(f"Invalid {box_name} box dimensions: outer={box.width}x{box.height}, inner={box.inner_width}x{box.inner_height}")
+
     return LayoutGeometry(
         terminal_height=height,
         terminal_width=width,
         output_box=output_box,
         input_box=input_box,
-        status_line=status_line
+        status_line=status_line,
+        split_ratio=0.9,
+        border_style="ascii"
     )
 
 class TerminalManager:
@@ -530,6 +564,10 @@ class ScrollManager:
         """Jump to specific scroll position"""
         self.scroll_offset = max(0, min(offset, self.max_scroll))
         self.in_scrollback = (self.scroll_offset < self.max_scroll)
+
+    def scroll_to_bottom(self):
+        """Scroll to bottom (most recent messages) - alias for auto_scroll_to_bottom"""
+        self.auto_scroll_to_bottom()
 
 # Chunk 4/4 - uilib.py - Multi-line Input System
 
