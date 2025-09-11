@@ -394,7 +394,7 @@ class DevNameRPGClient:
             
             # Run main program loop through orchestrator
             print("Starting main program loop...")
-            exit_code = self.orchestrator.run_main_loop()
+            exit_code = self.orchestrator.run()
             
             if self.debug_logger:
                 self.debug_logger.system(f"Main loop ended with exit code: {exit_code}")

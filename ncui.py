@@ -1,10 +1,10 @@
-# Chunk 1/5 - ncui.py - Header, Imports, and Constructor (ScrollManager Fix)
+# Chunk 1/6 - ncui.py - Header, Imports, and Constructor (Debug Logger Fix)
 
 #!/usr/bin/env python3
 """
 DevName RPG Client - NCurses UI Controller (ncui.py)
 Simplified UI management without orchestration logic - business logic moved to orch.py
-FIXED: ScrollManager initialization with placeholder height, updated after layout calculation
+FIXED: All debug logger calls use method pattern with null safety checks
 """
 
 import curses
@@ -73,7 +73,9 @@ class NCursesUIController:
         # Configuration
         self.debug_mode = bool(debug_logger)
 
-# Chunk 2/5 - ncui.py - Initialization and Layout Methods (ScrollManager Update Fix)
+        self._log_debug("UI controller created")
+
+# Chunk 2/6 - ncui.py - Initialization and Layout Methods (Debug Logger Fix)
         
     def initialize(self, stdscr) -> bool:
         """Initialize curses interface and UI components"""
@@ -102,607 +104,855 @@ class NCursesUIController:
             return True
             
         except Exception as e:
-            self._log_debug(f"UI initialization failed: {e}")
+            self._log_error(f"UI initialization failed: {e}")
             return False
     
     def _update_layout(self):
         """Update layout based on current terminal size"""
         try:
-            # Get current terminal dimensions
-            screen_height, screen_width = self.stdscr.getmaxyx()
+            # Get current terminal geometry
+            self.current_layout = self.terminal_manager.calculate_layout()
             
-            # Validate minimum dimensions
-            if screen_width < MIN_SCREEN_WIDTH or screen_height < MIN_SCREEN_HEIGHT:
-                raise RuntimeError(f"Terminal too small: {screen_width}x{screen_height} (minimum: {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT})")
+            # FIXED: Update ScrollManager height after layout calculation
+            if self.current_layout and hasattr(self.current_layout, 'output_height'):
+                self.scroll_manager.update_height(self.current_layout.output_height)
             
-            # Create new layout
-            self.current_layout = self.terminal_manager.create_layout(screen_width, screen_height)
-            
-            self._log_debug(f"Component dimensions updated: scroll_height={self.current_layout.output_box.inner_height}")
-            
-        except Exception as e:
-            self._log_debug(f"Layout creation error: {e}")
-            raise
-    
-    def _initialize_components(self):
-        """Initialize UI components with current layout - FIXED: ScrollManager height update"""
-        try:
-            if not self.current_layout:
-                raise RuntimeError("Layout not created")
-            
-            # Create windows
+            # Create/recreate windows with new layout
             self._create_windows()
             
-            # FIXED: Update scroll manager with actual output dimensions
-            output_height = self.current_layout.output_box.inner_height
-            self.scroll_manager.update_window_height(output_height)
-            
-            # Configure multi-line input
-            input_width = self.current_layout.input_box.inner_width
-            self.multi_input.update_max_width(input_width)
-            
-            self._log_debug(f"Windows created - Output: {self.current_layout.output_box.inner_height}x{self.current_layout.output_box.inner_width} Input: {self.current_layout.input_box.inner_height}x{self.current_layout.input_box.inner_width} Status: {self.current_layout.status_box.inner_height}x{self.current_layout.status_box.inner_width}")
+            self._log_debug("Layout updated successfully")
             
         except Exception as e:
-            self._log_debug(f"Component initialization error: {e}")
-            raise
+            self._log_error(f"Layout update failed: {e}")
     
     def _create_windows(self):
-        """Create curses windows based on current layout"""
+        """Create or recreate curses windows based on current layout"""
+        if not self.current_layout or not self.stdscr:
+            return
+        
         try:
             layout = self.current_layout
             
-            # Create windows
+            # Create output window (main display area)
             self.output_window = curses.newwin(
-                layout.output_box.height, layout.output_box.width,
-                layout.output_box.y, layout.output_box.x
+                layout.output_height,
+                layout.output_width,
+                layout.output_y,
+                layout.output_x
             )
             
+            # Create input window
             self.input_window = curses.newwin(
-                layout.input_box.height, layout.input_box.width,
-                layout.input_box.y, layout.input_box.x
+                layout.input_height,
+                layout.input_width,
+                layout.input_y,
+                layout.input_x
             )
             
+            # Create status window
             self.status_window = curses.newwin(
-                layout.status_box.height, layout.status_box.width,
-                layout.status_box.y, layout.status_box.x
+                layout.status_height,
+                layout.status_width,
+                layout.status_y,
+                layout.status_x
             )
             
-            self._log_debug("Curses windows created successfully")
-            
-        except Exception as e:
-            self._log_debug(f"Window creation error: {e}")
-            raise
-
-# Chunk 3/5 - ncui.py - Display and Rendering Methods
-
-    def _initial_display(self):
-        """Show initial welcome screen"""
-        try:
-            # Clear all windows
-            self.output_window.clear()
-            self.input_window.clear()
-            self.status_window.clear()
+            # Enable scrolling for output window
+            self.output_window.scrollok(True)
+            self.output_window.idlok(True)
             
             # Draw borders
             self._draw_borders()
             
-            # Show welcome message
-            welcome_msg = DisplayMessage(
-                content="DevName RPG Client - Hub & Spoke Architecture\nType '/help' for commands or start typing to begin...",
-                msg_type='system'
-            )
-            self.display_buffer.append(welcome_msg)
-            
-            # Initial render
-            self._redraw_all()
+            self._log_debug("Windows created successfully")
             
         except Exception as e:
-            self._log_debug(f"Initial display error: {e}")
+            self._log_error(f"Window creation failed: {e}")
+    
+    def _initialize_components(self):
+        """Initialize UI components after windows are created"""
+        try:
+            # Reset multi-line input for new layout
+            if self.current_layout:
+                max_width = self.current_layout.input_width - 4  # Account for borders
+                self.multi_input.reset_for_width(max_width)
+            
+            # Update scroll manager with proper content height
+            if self.current_layout:
+                self.scroll_manager.update_height(self.current_layout.output_height - 2)  # Account for borders
+            
+            self._log_debug("UI components initialized")
+            
+        except Exception as e:
+            self._log_error(f"Component initialization failed: {e}")
     
     def _draw_borders(self):
         """Draw window borders"""
         try:
-            # Draw borders for all windows
-            self.output_window.border()
-            self.input_window.border()
-            self.status_window.border()
+            if self.output_window:
+                self.output_window.box()
+                self.output_window.addstr(0, 2, " Story ")
             
-            # Add window titles
-            layout = self.current_layout
+            if self.input_window:
+                self.input_window.box()
+                self.input_window.addstr(0, 2, " Input ")
             
-            # Output window title
-            title = " Output "
-            title_x = max(1, (layout.output_box.width - len(title)) // 2)
-            self.output_window.addstr(0, title_x, title)
-            
-            # Input window title
-            title = " Input "
-            title_x = max(1, (layout.input_box.width - len(title)) // 2)
-            self.input_window.addstr(0, title_x, title)
-            
-            # Status window title
-            title = " Status "
-            title_x = max(1, (layout.status_box.width - len(title)) // 2)
-            self.status_window.addstr(0, title_x, title)
-            
-        except Exception as e:
-            self._log_debug(f"Border drawing error: {e}")
+            if self.status_window:
+                self.status_window.box()
+                self.status_window.addstr(0, 2, " Status ")
+                
+        except curses.error:
+            pass  # Ignore curses drawing errors
     
-    def _redraw_all(self):
-        """Redraw all windows"""
+    def _initial_display(self):
+        """Show initial display content"""
         try:
-            self._redraw_output_area()
-            self._redraw_input_area()
-            self._redraw_status_area()
+            # Display welcome message
+            welcome_msg = DisplayMessage(
+                content="Welcome to DevName RPG Client",
+                message_type="system",
+                timestamp=time.time()
+            )
+            self.display_buffer.append(welcome_msg)
             
-            # Refresh all windows
-            self.output_window.refresh()
-            self.input_window.refresh()
-            self.status_window.refresh()
+            # Show initial status
+            self.status_message = "Ready - Type your message and press Enter twice to send"
+            
+            # Refresh all displays
+            self._refresh_all_windows()
+            
+            self._log_debug("Initial display complete")
             
         except Exception as e:
-            self._log_debug(f"Full redraw error: {e}")
+            self._log_error(f"Initial display failed: {e}")
     
-    def _redraw_output_area(self):
-        """Redraw output area with current messages and scroll state"""
+    def _refresh_all_windows(self):
+        """Refresh all windows to show current content"""
+        try:
+            # Refresh output window with current buffer
+            self._refresh_output_window()
+            
+            # Refresh input window with current input
+            self._refresh_input_window()
+            
+            # Refresh status window
+            self._refresh_status_window()
+            
+            # Update screen
+            curses.doupdate()
+            
+        except Exception as e:
+            self._log_error(f"Window refresh failed: {e}")
+
+# Chunk 3/6 - ncui.py - Main Run Loop and Input Processing (Debug Logger Fix)
+
+    def run(self) -> int:
+        """
+        Main UI run loop - handles user input and display updates
+        Pure UI management without business logic
+        """
+        try:
+            if not self.stdscr:
+                self._log_error("Cannot run without initialized screen")
+                return 1
+            
+            self.running = True
+            self._log_debug("Starting UI main loop")
+            
+            # Main event loop
+            while self.running:
+                try:
+                    # Process user input
+                    if self._handle_input():
+                        # Input was processed, refresh display
+                        self._refresh_all_windows()
+                    
+                    # Handle any pending display updates
+                    self._process_display_updates()
+                    
+                    # Brief sleep to prevent CPU spinning
+                    time.sleep(0.01)
+                    
+                except KeyboardInterrupt:
+                    self._log_debug("Keyboard interrupt received")
+                    break
+                except Exception as e:
+                    self._log_error(f"Error in main loop: {e}")
+                    # Don't break on individual errors, just log and continue
+            
+            self._log_debug("UI main loop ended")
+            return 0
+            
+        except Exception as e:
+            self._log_error(f"Fatal error in UI run loop: {e}")
+            return 1
+        finally:
+            self.running = False
+            self._cleanup()
+    
+    def _handle_input(self) -> bool:
+        """
+        Handle keyboard input and return True if display needs refresh
+        """
+        try:
+            # Get character with timeout
+            ch = self.stdscr.getch()
+            
+            if ch == -1:  # No input available
+                return False
+            
+            # Handle special keys
+            if ch == curses.KEY_RESIZE:
+                self._handle_resize()
+                return True
+            elif ch == 27:  # Escape key
+                return self._handle_escape()
+            elif ch in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_PAGER_UP, curses.KEY_PAGER_DOWN):
+                return self._handle_scroll_keys(ch)
+            elif ch == 10 or ch == 13:  # Enter key
+                return self._handle_enter()
+            elif ch == curses.KEY_BACKSPACE or ch == 127 or ch == 8:
+                return self._handle_backspace()
+            elif ch == 9:  # Tab key
+                return self._handle_tab()
+            elif 32 <= ch <= 126:  # Printable characters
+                return self._handle_character(chr(ch))
+            else:
+                # Unknown key, log for debugging
+                self._log_debug(f"Unknown key code: {ch}")
+                return False
+                
+        except Exception as e:
+            self._log_error(f"Input handling error: {e}")
+            return False
+    
+    def _handle_character(self, char: str) -> bool:
+        """Handle printable character input"""
+        try:
+            # Add character to multi-line input
+            self.multi_input.insert_character(char)
+            return True
+            
+        except Exception as e:
+            self._log_error(f"Character handling error: {e}")
+            return False
+    
+    def _handle_enter(self) -> bool:
+        """Handle Enter key - check for submission or new line"""
+        try:
+            # Check if input should be submitted (double-enter)
+            should_submit, content = self.multi_input.handle_enter()
+            
+            if should_submit and content.strip():
+                # Submit input through orchestrator callback
+                self._submit_user_input(content.strip())
+                return True
+            else:
+                # Just added a new line, refresh input display
+                return True
+                
+        except Exception as e:
+            self._log_error(f"Enter key handling error: {e}")
+            return False
+    
+    def _handle_backspace(self) -> bool:
+        """Handle backspace key"""
+        try:
+            self.multi_input.handle_backspace()
+            return True
+            
+        except Exception as e:
+            self._log_error(f"Backspace handling error: {e}")
+            return False
+    
+    def _handle_tab(self) -> bool:
+        """Handle tab key - could be used for autocomplete in future"""
+        try:
+            # For now, just insert spaces
+            self.multi_input.insert_character("    ")
+            return True
+            
+        except Exception as e:
+            self._log_error(f"Tab handling error: {e}")
+            return False
+    
+    def _handle_escape(self) -> bool:
+        """Handle escape key - show options or exit"""
+        try:
+            # For now, treat as exit request
+            self._log_debug("Escape key pressed - requesting shutdown")
+            
+            # Call orchestrator to handle shutdown
+            if self.callback_handler:
+                self.callback_handler("shutdown", {})
+            
+            self.running = False
+            return True
+            
+        except Exception as e:
+            self._log_error(f"Escape key handling error: {e}")
+            return False
+    
+    def _handle_scroll_keys(self, key: int) -> bool:
+        """Handle scrolling keys"""
+        try:
+            if key == curses.KEY_UP:
+                self.scroll_manager.scroll_up(1)
+            elif key == curses.KEY_DOWN:
+                self.scroll_manager.scroll_down(1)
+            elif key == curses.KEY_PAGER_UP:
+                self.scroll_manager.scroll_up(10)
+            elif key == curses.KEY_PAGER_DOWN:
+                self.scroll_manager.scroll_down(10)
+            
+            return True
+            
+        except Exception as e:
+            self._log_error(f"Scroll key handling error: {e}")
+            return False
+    
+    def _handle_resize(self):
+        """Handle terminal resize"""
+        try:
+            self._log_debug("Terminal resize detected")
+            
+            # Update layout for new terminal size
+            self._update_layout()
+            
+            # Redraw everything
+            self.stdscr.clear()
+            self._refresh_all_windows()
+            
+            self._log_debug("Resize handling complete")
+            
+        except Exception as e:
+            self._log_error(f"Resize handling error: {e}")
+    
+    def _submit_user_input(self, content: str):
+        """Submit user input through orchestrator callback"""
+        try:
+            self._log_debug("Submitting user input")
+            
+            # Clear the input area
+            self.multi_input.clear()
+            
+            # Set processing state
+            self.processing = True
+            self.status_message = "Processing..."
+            
+            # Call orchestrator to process input
+            if self.callback_handler:
+                result = self.callback_handler("user_input", {"input": content})
+                
+                if result and result.get("success", False):
+                    # Add response to display
+                    response = result.get("response", "")
+                    if response:
+                        self._add_message(content, "user")
+                        self._add_message(response, "assistant")
+                    
+                    self.status_message = "Ready"
+                else:
+                    error_msg = result.get("error", "Unknown error") if result else "No response from orchestrator"
+                    self._add_message(f"Error: {error_msg}", "error")
+                    self.status_message = "Error occurred"
+            else:
+                self._log_error("No orchestrator callback available")
+                self.status_message = "Error: No orchestrator"
+            
+        except Exception as e:
+            self._log_error(f"Input submission error: {e}")
+            self.status_message = "Error occurred"
+        finally:
+            self.processing = False
+
+# Chunk 4/6 - ncui.py - Display and Message Management (Debug Logger Fix)
+
+    def _add_message(self, content: str, message_type: str):
+        """Add message to display buffer"""
+        try:
+            message = DisplayMessage(
+                content=content,
+                message_type=message_type,
+                timestamp=time.time()
+            )
+            
+            self.display_buffer.append(message)
+            
+            # Update scroll manager with new content
+            self.scroll_manager.update_content_lines(len(self.display_buffer))
+            
+            # Auto-scroll to bottom for new messages
+            self.scroll_manager.scroll_to_bottom()
+            
+            self._log_debug(f"Added {message_type} message")
+            
+        except Exception as e:
+            self._log_error(f"Message addition error: {e}")
+    
+    def _process_display_updates(self):
+        """Process any pending display updates from orchestrator"""
+        try:
+            # Check for messages from orchestrator
+            if self.callback_handler:
+                result = self.callback_handler("get_messages", {"limit": 10})
+                
+                if result and result.get("success", False):
+                    messages = result.get("messages", [])
+                    
+                    # Add any new messages to display
+                    for msg in messages:
+                        if msg not in self.display_buffer:
+                            self._add_message(
+                                msg.get("content", ""),
+                                msg.get("type", "unknown")
+                            )
+            
+        except Exception as e:
+            self._log_error(f"Display update error: {e}")
+    
+    def _refresh_output_window(self):
+        """Refresh the output window with current message buffer"""
         try:
             if not self.output_window or not self.current_layout:
                 return
             
-            # Clear content area (preserve border)
-            layout = self.current_layout.output_box
-            for y in range(1, layout.inner_height + 1):
-                self.output_window.addstr(y, 1, " " * layout.inner_width)
+            # Clear the window
+            self.output_window.clear()
+            self._draw_borders()
             
-            # Get visible message range
-            start_idx, end_idx = self.scroll_manager.get_visible_range()
+            # Calculate display area (account for borders)
+            display_height = self.current_layout.output_height - 2
+            display_width = self.current_layout.output_width - 2
             
-            # Render visible messages
-            current_line = 1  # Start after border
-            output_width = layout.inner_width
+            # Get visible messages based on scroll position
+            start_line = self.scroll_manager.scroll_position
+            visible_messages = self.display_buffer[start_line:start_line + display_height]
             
-            # Collect all wrapped lines first
-            all_lines = []
-            for msg in self.display_buffer:
-                wrapped_lines = msg.wrap_content(output_width)
-                for line in wrapped_lines:
-                    all_lines.append((line, msg.msg_type))
-            
-            # Display the visible portion
-            visible_lines = all_lines[start_idx:end_idx + 1] if all_lines else []
-            
-            for line_text, msg_type in visible_lines:
-                if current_line > layout.inner_height:
+            # Display messages
+            y_pos = 1  # Start after top border
+            for message in visible_messages:
+                if y_pos >= display_height + 1:  # Stop before bottom border
                     break
                 
-                color_attr = self._get_color_for_message_type(msg_type)
+                # Format message with timestamp and type
+                timestamp_str = time.strftime("%H:%M:%S", time.localtime(message.timestamp))
                 
+                # Choose color based on message type
+                color_pair = self.color_manager.get_color_pair(message.message_type)
+                
+                # Wrap long messages
+                wrapped_lines = self._wrap_text(message.content, display_width - 12)  # Account for timestamp
+                
+                for i, line in enumerate(wrapped_lines):
+                    if y_pos >= display_height + 1:
+                        break
+                    
+                    try:
+                        if i == 0:
+                            # First line includes timestamp
+                            display_line = f"[{timestamp_str}] {line}"
+                        else:
+                            # Continuation lines are indented
+                            display_line = f"           {line}"
+                        
+                        # Truncate if too long
+                        if len(display_line) > display_width:
+                            display_line = display_line[:display_width-3] + "..."
+                        
+                        self.output_window.addstr(y_pos, 1, display_line, color_pair)
+                        y_pos += 1
+                        
+                    except curses.error:
+                        # Ignore drawing errors (e.g., writing outside window)
+                        break
+            
+            # Show scroll indicator if needed
+            if len(self.display_buffer) > display_height:
+                scroll_info = f"({self.scroll_manager.scroll_position + 1}/{len(self.display_buffer)})"
                 try:
-                    self.output_window.addstr(current_line, 1, line_text[:output_width], color_attr)
-                except curses.error:
-                    pass  # Ignore curses drawing errors at screen edge
-                
-                current_line += 1
-            
-            # Update scroll manager with total lines
-            self.scroll_manager.update_max_scroll(len(all_lines))
-            
-            # Add scroll indicator if needed
-            self._add_scroll_indicator()
-            
-        except Exception as e:
-            self._log_debug(f"Output redraw error: {e}")
-    
-    def _add_scroll_indicator(self):
-        """Add scroll position indicator"""
-        try:
-            if not self.scroll_manager.in_scrollback:
-                return
-            
-            layout = self.current_layout.output_box
-            scroll_info = self.scroll_manager.get_scroll_info()
-            
-            if scroll_info.get('scroll_needed', False):
-                indicator = f"[{scroll_info['percentage']}%]"
-                indicator_x = layout.width - len(indicator) - 1
-                
-                try:
-                    self.output_window.addstr(0, indicator_x, indicator, curses.A_REVERSE)
+                    self.output_window.addstr(0, display_width - len(scroll_info) - 1, scroll_info)
                 except curses.error:
                     pass
-                    
+            
+            self.output_window.noutrefresh()
+            
         except Exception as e:
-            self._log_debug(f"Scroll indicator error: {e}")
+            self._log_error(f"Output window refresh error: {e}")
     
-    def _redraw_input_area(self):
-        """Redraw input area with current input and cursor"""
+    def _refresh_input_window(self):
+        """Refresh the input window with current input content"""
         try:
             if not self.input_window or not self.current_layout:
                 return
             
-            layout = self.current_layout.input_box
+            # Clear the window
+            self.input_window.clear()
+            self._draw_borders()
             
-            # Clear content area (preserve border)
-            for y in range(1, layout.inner_height + 1):
-                self.input_window.addstr(y, 1, " " * layout.inner_width)
+            # Get input display area
+            display_height = self.current_layout.input_height - 2
+            display_width = self.current_layout.input_width - 2
             
             # Get current input lines
             input_lines = self.multi_input.get_display_lines()
+            cursor_pos = self.multi_input.get_cursor_position()
             
             # Display input lines
+            y_pos = 1
             for i, line in enumerate(input_lines):
-                if i + 1 > layout.inner_height:
+                if y_pos >= display_height + 1:
                     break
                 
-                display_line = line[:layout.inner_width]
                 try:
-                    self.input_window.addstr(i + 1, 1, display_line)
-                except curses.error:
-                    pass
-            
-            # Position cursor if not processing
-            if not self.processing:
-                cursor_y, cursor_x = self.multi_input.get_cursor_position()
-                # Adjust for border and clamp to window bounds
-                cursor_y = min(cursor_y + 1, layout.inner_height)
-                cursor_x = min(cursor_x + 1, layout.inner_width)
-                
-                try:
-                    self.input_window.move(cursor_y, cursor_x)
-                except curses.error:
-                    pass
+                    # Truncate line if too long
+                    display_line = line[:display_width] if len(line) > display_width else line
+                    self.input_window.addstr(y_pos, 1, display_line)
+                    y_pos += 1
                     
+                except curses.error:
+                    break
+            
+            # Position cursor
+            try:
+                cursor_y = cursor_pos[0] + 1  # Account for border
+                cursor_x = cursor_pos[1] + 1  # Account for border
+                
+                if 1 <= cursor_y <= display_height and 1 <= cursor_x <= display_width:
+                    self.input_window.move(cursor_y, cursor_x)
+                
+            except curses.error:
+                pass
+            
+            self.input_window.noutrefresh()
+            
         except Exception as e:
-            self._log_debug(f"Input redraw error: {e}")
+            self._log_error(f"Input window refresh error: {e}")
     
-    def _redraw_status_area(self):
-        """Redraw status area"""
+    def _refresh_status_window(self):
+        """Refresh the status window with current status"""
         try:
             if not self.status_window or not self.current_layout:
                 return
             
-            layout = self.current_layout.status_box
-            
-            # Clear content area (preserve border)
-            self.status_window.addstr(1, 1, " " * layout.inner_width)
+            # Clear the window
+            self.status_window.clear()
+            self._draw_borders()
             
             # Display status message
-            status_text = self.status_message[:layout.inner_width]
+            status_width = self.current_layout.status_width - 2
+            
+            # Truncate status if too long
+            display_status = self.status_message
+            if len(display_status) > status_width:
+                display_status = display_status[:status_width-3] + "..."
+            
             try:
-                self.status_window.addstr(1, 1, status_text)
+                # Add processing indicator
+                if self.processing:
+                    display_status = f"🔄 {display_status}"
+                
+                self.status_window.addstr(1, 1, display_status)
+                
             except curses.error:
                 pass
-                
-        except Exception as e:
-            self._log_debug(f"Status redraw error: {e}")
-
-# Chunk 4/5 - ncui.py - Input Handling and Message Management
-
-    def run(self):
-        """Main UI loop"""
-        try:
-            self.running = True
             
-            while self.running:
-                try:
-                    # Get input with timeout
-                    key = self.stdscr.getch()
-                    
-                    if key == -1:  # Timeout, no input
-                        continue
-                    
-                    # Handle input
-                    self._handle_input(key)
-                    
-                    # Refresh display
-                    self._redraw_all()
-                    
-                except KeyboardInterrupt:
-                    break
-                except Exception as e:
-                    self._log_debug(f"Main loop error: {e}")
-                    
+            self.status_window.noutrefresh()
+            
         except Exception as e:
-            self._log_debug(f"UI run error: {e}")
-        finally:
-            self.running = False
+            self._log_error(f"Status window refresh error: {e}")
     
-    def _handle_input(self, key: int):
-        """Handle keyboard input"""
-        try:
-            # Navigation keys (scrolling)
-            if key == curses.KEY_UP:
-                if self.scroll_manager.handle_line_scroll(-1):
-                    self._redraw_output_area()
-                return
-            elif key == curses.KEY_DOWN:
-                if self.scroll_manager.handle_line_scroll(1):
-                    self._redraw_output_area()
-                return
-            elif key == curses.KEY_PPAGE:  # Page Up
-                if self.scroll_manager.handle_page_scroll(-1):
-                    self._redraw_output_area()
-                return
-            elif key == curses.KEY_NPAGE:  # Page Down
-                if self.scroll_manager.handle_page_scroll(1):
-                    self._redraw_output_area()
-                return
-            elif key == curses.KEY_HOME:
-                if self.scroll_manager.handle_home():
-                    self._redraw_output_area()
-                return
-            elif key == curses.KEY_END:
-                if self.scroll_manager.handle_end():
-                    self._redraw_output_area()
-                return
-            
-            # Text input handling
-            if key == ord('\n') or key == curses.KEY_ENTER:
-                self._handle_enter()
-            elif key == curses.KEY_BACKSPACE or key == 127:
-                self.multi_input.handle_backspace()
-                self._redraw_input_area()
-            elif key == curses.KEY_DC:  # Delete key
-                self.multi_input.handle_delete()
-                self._redraw_input_area()
-            elif key == curses.KEY_LEFT:
-                self.multi_input.handle_cursor_left()
-                self._redraw_input_area()
-            elif key == curses.KEY_RIGHT:
-                self.multi_input.handle_cursor_right()
-                self._redraw_input_area()
-            elif 32 <= key <= 126:  # Printable characters
-                self.multi_input.handle_char_input(chr(key))
-                self._redraw_input_area()
-                
-                # Auto-scroll to bottom on new input
-                if self.scroll_manager.in_scrollback:
-                    self.scroll_manager.auto_scroll_to_bottom()
-                    self._redraw_output_area()
-                    
-        except Exception as e:
-            self._log_debug(f"Input handling error: {e}")
-    
-    def _handle_enter(self):
-        """Handle enter key - submit input or add newline"""
-        try:
-            current_text = self.multi_input.get_current_text()
-            
-            # Check for double enter (submit)
-            if self.multi_input.should_submit():
-                self._submit_input(current_text)
-            else:
-                # Single enter - add newline
-                self.multi_input.handle_char_input('\n')
-                self._redraw_input_area()
-                
-        except Exception as e:
-            self._log_debug(f"Enter handling error: {e}")
-    
-    def _submit_input(self, text: str):
-        """Submit user input to orchestrator"""
-        try:
-            # Validate input
-            is_valid, error_msg = self.input_validator.validate(text.strip())
-            
-            if not is_valid:
-                self.add_message({
-                    'content': f"Input error: {error_msg}",
-                    'type': 'error'
-                })
-                return
-            
-            # Clear input
-            self.multi_input.clear()
-            self._redraw_input_area()
-            
-            # Add user message to display
-            self.add_message({
-                'content': text.strip(),
-                'type': 'user'
-            })
-            
-            # Set processing state
-            self.set_processing_state(True)
-            
-            # Send to orchestrator via callback
-            self.callback_handler('user_input', {'text': text.strip()})
-            
-        except Exception as e:
-            self._log_debug(f"Input submission error: {e}")
-            self.set_processing_state(False)
-    
-    def add_message(self, message: Dict[str, Any]):
-        """Add message to display buffer"""
-        try:
-            # Create display message
-            display_msg = DisplayMessage(
-                content=message.get('content', ''),
-                msg_type=message.get('type', 'system')
-            )
-            
-            # Add to buffer
-            self.display_buffer.append(display_msg)
-            
-            # Update scroll manager
-            self._update_scroll_for_new_content()
-            
-            # Redraw output area
-            self._redraw_output_area()
-            
-        except Exception as e:
-            self._log_debug(f"Add message error: {e}")
-    
-    def _update_scroll_for_new_content(self):
-        """Update scroll manager when new content is added"""
-        if not self.current_layout:
-            return
+    def _wrap_text(self, text: str, width: int) -> List[str]:
+        """Wrap text to fit within specified width"""
+        if not text or width <= 0:
+            return [""]
         
-        try:
-            # Calculate total display lines
-            total_lines = 0
-            output_width = self.current_layout.output_box.inner_width
+        words = text.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            test_line = f"{current_line} {word}".strip()
             
-            for msg in self.display_buffer:
-                wrapped_lines = msg.wrap_content(output_width)
-                total_lines += len(wrapped_lines)
-            
-            # Update scroll manager
-            self.scroll_manager.update_max_scroll(total_lines)
-            
-        except Exception as e:
-            self._log_debug(f"Scroll update error: {e}")
-    
-    def update_status(self, message: str):
-        """Update status message"""
-        try:
-            self.status_message = message
-            self._redraw_status_area()
-        except Exception as e:
-            self._log_debug(f"Status update error: {e}")
-    
-    def set_processing_state(self, processing: bool):
-        """Set processing state"""
-        try:
-            self.processing = processing
-            if processing:
-                self.update_status("Processing...")
-                curses.curs_set(0)  # Hide cursor during processing
+            if len(test_line) <= width:
+                current_line = test_line
             else:
-                self.update_status("Ready")
-                curses.curs_set(1)  # Show cursor when ready
+                if current_line:
+                    lines.append(current_line)
                 
-            self._redraw_input_area()
-            
-        except Exception as e:
-            self._log_debug(f"Processing state error: {e}")
-    
-    def _get_color_for_message_type(self, msg_type: str) -> int:
-        """Get color attribute for message type"""
-        try:
-            if not self.color_manager.colors_available:
-                return 0
-            
-            color_code = self.color_manager.get_color(msg_type)
-            return curses.color_pair(color_code) if color_code else 0
-            
-        except Exception:
-            return 0
+                # Handle very long words
+                if len(word) > width:
+                    # Split long word
+                    while len(word) > width:
+                        lines.append(word[:width])
+                        word = word[width:]
+                
+                current_line = word
+        
+        if current_line:
+            lines.append(current_line)
+        
+        return lines if lines else [""]
 
-# Chunk 5/5 - ncui.py - Utility Methods and Shutdown
+# Chunk 5/6 - ncui.py - Command Handling and Utility Methods (Debug Logger Fix)
 
-    def handle_resize(self):
-        """Handle terminal resize"""
+    def _handle_command(self, command: str) -> bool:
+        """Handle special commands starting with /"""
         try:
-            # Update layout for new terminal size
-            self._update_layout()
+            command = command.lower().strip()
             
-            # Reinitialize components with new layout
-            self._initialize_components()
-            
-            # Redraw everything
-            self.stdscr.clear()
-            self._draw_borders()
-            self._redraw_all()
-            
-            self._log_debug("Terminal resize handled")
-            
-        except Exception as e:
-            self._log_debug(f"Resize handling error: {e}")
-    
-    def switch_theme(self, theme_number: int):
-        """Switch color theme"""
-        try:
-            if self.color_manager.switch_theme(theme_number):
-                self._redraw_all()
-                self.update_status(f"Switched to theme {theme_number}")
+            if command == "/help":
+                self._show_help()
+                return True
+            elif command == "/clear":
+                self._clear_display()
+                return True
+            elif command == "/stats":
+                self._show_stats()
+                return True
+            elif command == "/quit" or command == "/exit":
+                self._handle_quit()
+                return True
+            elif command.startswith("/theme"):
+                parts = command.split()
+                if len(parts) > 1:
+                    self._change_theme(parts[1])
+                else:
+                    self._list_themes()
+                return True
+            elif command == "/analyze":
+                self._trigger_analysis()
                 return True
             else:
-                self.update_status(f"Invalid theme: {theme_number}")
-                return False
+                self._add_message(f"Unknown command: {command}. Type /help for available commands.", "error")
+                return True
                 
         except Exception as e:
-            self._log_debug(f"Theme switch error: {e}")
+            self._log_error(f"Command handling error: {e}")
             return False
     
-    def clear_display(self):
+    def _show_help(self):
+        """Display help information"""
+        try:
+            help_text = [
+                "Available Commands:",
+                "/help - Show this help message",
+                "/clear - Clear the display",
+                "/stats - Show system statistics",
+                "/theme [name] - Change color theme or list themes",
+                "/analyze - Trigger immediate analysis",
+                "/quit or /exit - Exit the application",
+                "",
+                "Input Controls:",
+                "Enter - New line (double-enter to submit)",
+                "Backspace - Delete character",
+                "Up/Down arrows - Scroll through messages",
+                "Page Up/Down - Scroll faster",
+                "Escape - Exit application"
+            ]
+            
+            for line in help_text:
+                self._add_message(line, "system")
+                
+            self._log_debug("Help displayed")
+            
+        except Exception as e:
+            self._log_error(f"Help display error: {e}")
+    
+    def _clear_display(self):
         """Clear the display buffer"""
         try:
             self.display_buffer.clear()
-            self.scroll_manager.auto_scroll_to_bottom()
-            self._redraw_output_area()
-            self.update_status("Display cleared")
+            self.scroll_manager.update_content_lines(0)
+            self._add_message("Display cleared.", "system")
+            
+            self._log_debug("Display cleared by user")
             
         except Exception as e:
-            self._log_debug(f"Display clear error: {e}")
+            self._log_error(f"Display clear error: {e}")
     
-    def get_stats(self) -> Dict[str, Any]:
-        """Get UI statistics"""
+    def _show_stats(self):
+        """Request and display system statistics"""
         try:
-            stats = {
-                'display_buffer_size': len(self.display_buffer),
-                'scroll_info': self.scroll_manager.get_scroll_info(),
-                'terminal_size': f"{self.stdscr.getmaxyx()[1]}x{self.stdscr.getmaxyx()[0]}",
-                'color_theme': self.color_manager.current_theme_name(),
-                'processing': self.processing
-            }
-            return stats
+            if self.callback_handler:
+                result = self.callback_handler("get_stats", {})
+                
+                if result and result.get("success", False):
+                    stats = result.get("stats", {})
+                    
+                    self._add_message("System Statistics:", "system")
+                    self._add_message(f"Messages: {stats.get('message_count', 0)}", "system")
+                    self._add_message(f"Phase: {stats.get('phase', 'unknown')}", "system")
+                    self._add_message(f"Analysis in progress: {stats.get('analysis_in_progress', False)}", "system")
+                    
+                    # Show memory stats if available
+                    memory_stats = stats.get("memory", {})
+                    if memory_stats:
+                        self._add_message(f"Memory usage: {memory_stats.get('usage', 'unknown')}", "system")
+                    
+                else:
+                    self._add_message("Failed to retrieve statistics.", "error")
+            else:
+                self._add_message("No orchestrator connection available.", "error")
+                
+            self._log_debug("Statistics displayed")
             
         except Exception as e:
-            self._log_debug(f"Stats generation error: {e}")
-            return {'error': str(e)}
+            self._log_error(f"Statistics display error: {e}")
     
-    def shutdown(self):
-        """Shutdown UI gracefully"""
+    def _change_theme(self, theme_name: str):
+        """Change the color theme"""
         try:
+            # Get available themes
+            available_themes = self.color_manager.get_available_themes()
+            
+            if theme_name in available_themes:
+                self.color_manager.set_theme(theme_name)
+                self._add_message(f"Theme changed to: {theme_name}", "system")
+                
+                # Refresh display with new colors
+                self._refresh_all_windows()
+                
+                self._log_debug(f"Theme changed to: {theme_name}")
+            else:
+                self._add_message(f"Unknown theme: {theme_name}", "error")
+                self._list_themes()
+                
+        except Exception as e:
+            self._log_error(f"Theme change error: {e}")
+    
+    def _list_themes(self):
+        """List available color themes"""
+        try:
+            themes = self.color_manager.get_available_themes()
+            current_theme = self.color_manager.current_theme.name
+            
+            self._add_message("Available themes:", "system")
+            for theme in themes:
+                marker = " (current)" if theme == current_theme else ""
+                self._add_message(f"  {theme}{marker}", "system")
+                
+        except Exception as e:
+            self._log_error(f"Theme listing error: {e}")
+    
+    def _trigger_analysis(self):
+        """Trigger immediate analysis"""
+        try:
+            if self.callback_handler:
+                result = self.callback_handler("analyze_now", {})
+                
+                if result and result.get("success", False):
+                    self._add_message("Analysis triggered successfully.", "system")
+                else:
+                    error_msg = result.get("error", "Unknown error") if result else "No response"
+                    self._add_message(f"Analysis failed: {error_msg}", "error")
+            else:
+                self._add_message("No orchestrator connection available.", "error")
+                
+            self._log_debug("Analysis trigger requested")
+            
+        except Exception as e:
+            self._log_error(f"Analysis trigger error: {e}")
+    
+    def _handle_quit(self):
+        """Handle quit command"""
+        try:
+            self._log_debug("Quit command received")
+            
+            # Call orchestrator shutdown
+            if self.callback_handler:
+                self.callback_handler("shutdown", {})
+            
             self.running = False
             
-            # Reset cursor
+        except Exception as e:
+            self._log_error(f"Quit handling error: {e}")
+    
+    def _cleanup(self):
+        """Clean up resources before shutdown"""
+        try:
+            self._log_debug("Starting UI cleanup")
+            
+            # Clear any pending refresh operations
             if self.stdscr:
+                try:
+                    self.stdscr.clear()
+                    self.stdscr.refresh()
+                except curses.error:
+                    pass
+            
+            # Reset cursor
+            try:
                 curses.curs_set(1)
-                
-            self._log_debug("UI shutdown complete")
+            except curses.error:
+                pass
+            
+            self._log_debug("UI cleanup complete")
             
         except Exception as e:
-            self._log_debug(f"Shutdown error: {e}")
+            self._log_error(f"Cleanup error: {e}")
     
+    def shutdown(self):
+        """External shutdown method"""
+        try:
+            self._log_debug("External shutdown requested")
+            self.running = False
+            
+        except Exception as e:
+            self._log_error(f"Shutdown error: {e}")
+    
+    def display_message(self, content: str, message_type: str = "system"):
+        """External method to display a message"""
+        try:
+            self._add_message(content, message_type)
+            self._refresh_all_windows()
+            
+        except Exception as e:
+            self._log_error(f"External message display error: {e}")
+    
+    def set_status(self, status: str):
+        """External method to set status message"""
+        try:
+            self.status_message = status
+            self._refresh_status_window()
+            
+        except Exception as e:
+            self._log_error(f"Status setting error: {e}")
+    
+    def is_running(self) -> bool:
+        """Check if UI is currently running"""
+        return self.running
+
+# Chunk 6/6 - ncui.py - Debug Logging Helper Methods and Module Exports (Debug Logger Fix)
+
     def _log_debug(self, message: str):
-        """Log debug message if debug logger available"""
+        """
+        Standardized debug logging with null safety
+        Uses method pattern: self.debug_logger.debug(message, "NCUI")
+        """
         if self.debug_logger:
-            self.debug_logger(f"[NCUI] {message}")
+            self.debug_logger.debug(message, "NCUI")
+    
+    def _log_error(self, message: str):
+        """
+        Standardized error logging with null safety
+        Uses method pattern: self.debug_logger.error(message, "NCUI")
+        """
+        if self.debug_logger:
+            self.debug_logger.error(message, "NCUI")
+    
+    def _log_system(self, message: str):
+        """
+        Standardized system logging with null safety
+        Uses method pattern: self.debug_logger.system(message)
+        """
+        if self.debug_logger:
+            self.debug_logger.system(message)
 
 # =============================================================================
-# STANDALONE TESTING
+# MODULE EXPORTS
 # =============================================================================
 
-def test_ui():
-    """Test function for standalone UI testing"""
-    def mock_callback(action: str, data: Dict[str, Any]):
-        print(f"Callback: {action} with data: {data}")
-    
-    def mock_logger(message: str):
-        print(f"Debug: {message}")
-    
-    try:
-        controller = NCursesUIController(mock_callback, mock_logger)
-        
-        def ui_wrapper(stdscr):
-            if controller.initialize(stdscr):
-                controller.add_message({
-                    'content': 'Test UI initialized successfully',
-                    'type': 'system'
-                })
-                controller.run()
-            else:
-                print("UI initialization failed")
-        
-        curses.wrapper(ui_wrapper)
-        
-    except Exception as e:
-        print(f"UI test error: {e}")
-    finally:
-        print("UI test complete")
-
-if __name__ == "__main__":
-    test_ui()
+__all__ = [
+    'NCursesUIController'
+]
