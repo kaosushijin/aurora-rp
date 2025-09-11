@@ -16,11 +16,10 @@ from typing import Dict, List, Any, Optional, Tuple, Callable
 
 # UI library imports (will be updated when uilib.py is created in Phase 4)
 try:
-    from nci_colors import ColorManager, ColorTheme
-    from nci_terminal import TerminalManager, LayoutGeometry
-    from nci_display import DisplayMessage, InputValidator
-    from nci_scroll import ScrollManager
-    from nci_input import MultiLineInput
+    from uilib import (
+        ColorManager, ColorTheme, TerminalManager, LayoutGeometry,
+        DisplayMessage, InputValidator, ScrollManager, MultiLineInput
+    )
 except ImportError:
     # Fallback for transition period
     print("Warning: UI utilities not found, using minimal fallbacks")

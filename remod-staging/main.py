@@ -48,35 +48,43 @@ def load_prompts() -> Dict[str, str]:
     Maintains existing prompt loading logic for compatibility
     """
     prompts = {}
-    
+
     if not os.path.exists(PROMPT_DIRECTORY):
         print(f"Warning: Prompts directory '{PROMPT_DIRECTORY}' not found")
         return prompts
-    
-    for prompt_file in REQUIRED_PROMPTS:
-        prompt_path = os.path.join(PROMPT_DIRECTORY, prompt_file)
-        
+
+    # Updated to look for .prompt files instead of .txt
+    prompt_files = {
+        'critrules': 'critrules.prompt',
+        'lowrules': 'lowrules.prompt',
+        'companion': 'companion.prompt'
+    }
+
+    for prompt_name, filename in prompt_files.items():
+        prompt_path = os.path.join(PROMPT_DIRECTORY, filename)
+
         if os.path.exists(prompt_path):
             try:
                 with open(prompt_path, 'r', encoding='utf-8') as f:
                     content = f.read().strip()
-                    
+
                 if content:
-                    # Use filename without extension as key
-                    prompt_name = os.path.splitext(prompt_file)[0]
                     prompts[prompt_name] = content
                     print(f"Loaded prompt: {prompt_name} ({len(content)} chars)")
                 else:
-                    print(f"Warning: Empty prompt file: {prompt_file}")
-                    
+                    print(f"Warning: Empty prompt file: {filename}")
+
             except Exception as e:
-                print(f"Error loading prompt {prompt_file}: {e}")
+                print(f"Error loading prompt {filename}: {e}")
         else:
-            print(f"Warning: Prompt file not found: {prompt_file}")
-    
+            if prompt_name == 'critrules':
+                print(f"Critical: '{filename}' prompt is required for proper operation")
+            else:
+                print(f"Optional prompt file not found: {filename}")
+
     if not prompts:
         print("Warning: No prompts loaded. Application will use minimal defaults.")
-    
+
     return prompts
 
 def validate_prompts(prompts: Dict[str, str]) -> bool:
@@ -124,27 +132,66 @@ def setup_debug_logging() -> Optional[DebugLogger]:
         return None
 
 def validate_system_requirements() -> bool:
-    """Validate system requirements for application"""
+    """
+    Validate basic system requirements WITHOUT using curses
+
+    Curses validation moved to UI controller initialization phase
+    This function only checks Python version, modules, and basic environment
+    """
     try:
-        import curses
-        import json
-        import time
-        import threading
-        import asyncio
-        
-        # Test curses capability
-        if not curses.has_colors():
-            print("Warning: Terminal does not support colors")
-        
-        # Test async capability
-        loop = asyncio.new_event_loop()
-        loop.close()
-        
+        # Check Python version
+        if sys.version_info < (3, 8):
+            print(f"Error: Python 3.8+ required, found {sys.version_info.major}.{sys.version_info.minor}")
+            return False
+
+        # Check required standard library modules
+        required_modules = ['asyncio', 'threading', 'json', 'time', 'os']
+        for module_name in required_modules:
+            try:
+                __import__(module_name)
+            except ImportError:
+                print(f"Error: Required module '{module_name}' not available")
+                return False
+
+        # Check curses module availability (but don't initialize it)
+        try:
+            import curses
+        except ImportError:
+            print("Error: curses module not available (required for terminal UI)")
+            return False
+
+        # Check for required project modules
+        project_modules = ['orch', 'ui', 'uilib', 'sem', 'mcp', 'emm', 'sme']
+        missing_modules = []
+
+        for module_name in project_modules:
+            try:
+                __import__(module_name)
+            except ImportError:
+                missing_modules.append(module_name)
+
+        if missing_modules:
+            print(f"Error: Missing project modules: {', '.join(missing_modules)}")
+            return False
+
+        # Check basic environment
+        try:
+            # Check if we can write to current directory for logs/state
+            test_file = "test_write_permission.tmp"
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+        except Exception as e:
+            print(f"Warning: Write permission issue in current directory: {e}")
+            # Don't fail for this - just warn
+
+        # Check terminal environment variables (basic check)
+        if not os.environ.get('TERM'):
+            print("Warning: TERM environment variable not set - terminal may not function properly")
+            # Don't fail for this - just warn
+
         return True
-        
-    except ImportError as e:
-        print(f"Critical: Missing required dependency: {e}")
-        return False
+
     except Exception as e:
         print(f"System validation error: {e}")
         return False
