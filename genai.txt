@@ -4,17 +4,37 @@
 ## PROJECT SCOPE
 Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Context Protocol). Features clean hub-and-spoke architecture with centralized orchestration, consolidated UI library, and exclusive LLM communication patterns for optimal maintainability and performance.
 
-## PROGRAM FLOW ANALYSIS (Remodularized Hub-and-Spoke Architecture)
+## REMODULARIZED FILE STRUCTURE (ROOT DIRECTORY)
+
+```
+aurora-rp/
+├── main.py              # Application entry point with orchestrator coordination
+├── orch.py              # Central orchestrator hub (EXCLUSIVE mcp.py access)
+├── mcp.py               # MCP communication with Node.js ollama server
+├── ncui.py              # Pure UI controller (replaces nci.py)
+├── uilib.py             # Consolidated UI library (consolidates nci_*.py)
+├── emm.py               # Enhanced memory manager (simplified)
+├── sme.py               # Story momentum engine (simplified)
+├── sem.py               # Semantic analysis engine (centralized)
+├── critrules.prompt     # Core game rules (REQUIRED)
+├── lowrules.prompt      # Additional rules (optional)
+├── companion.prompt     # Companion AI prompt (optional)
+├── genai.txt            # This architecture reference
+└── legacyref/           # Legacy codebase preserved for reference
+```
+
+## PROGRAM FLOW ANALYSIS (REMODULARIZED HUB-AND-SPOKE ARCHITECTURE)
 
 ### Application Entry Point (main.py)
-1. **Environment Setup**: Module verification for remodularized files, dependency validation, terminal capability checks
-2. **Prompt Management**: Load and validate prompt files with LLM-powered condensation within 5,000 token budget
-3. **Orchestrator Initialization**: Create central Orchestrator hub with loaded prompts and configuration
-4. **Hub Coordination**: Transfer control to Orchestrator for centralized module management and main program logic
+1. **Environment Setup**: Module verification for remodularized files in root directory
+2. **Dependency Validation**: Check for curses (required) and httpx (optional)
+3. **Prompt Management**: Load and validate prompt files from root directory
+4. **Orchestrator Initialization**: Create central Orchestrator hub with loaded prompts
+5. **Hub Coordination**: Transfer control to Orchestrator for centralized module management
 
 ### Core Execution Flow
 ```
-main() → initialize_application() → DevNameRPGClient.run() → Orchestrator.run_main_loop()
+main() → DevNameRPGClient.run() → Orchestrator.run_main_loop()
 ```
 
 ## REMODULARIZED MODULE ARCHITECTURE
@@ -71,7 +91,7 @@ main() → initialize_application() → DevNameRPGClient.run() → Orchestrator.
   - Background auto-save operations
   - Clean orchestrator interfaces
 
-**sme.py** - Story Momentum Engine (SIMPLIFIED)  
+**sme.py** - Story Momentum Engine (SIMPLIFIED)
 - `StoryMomentumEngine`: Basic pattern detection and state tracking
 - **Removed**: LLM analysis logic (moved to sem.py)
 - **Removed**: Direct MCP communication (coordinated through orch.py)
@@ -82,13 +102,17 @@ main() → initialize_application() → DevNameRPGClient.run() → Orchestrator.
   - Clean orchestrator interfaces
 
 **mcp.py** - MCP Communication Module (EXCLUSIVE ACCESS)
-- `MCPClient`: HTTP-based Model Context Protocol communication
+- `MCPClient`: HTTP-based Model Context Protocol communication with Node.js ollama server
 - **CRITICAL**: Only accessed by orch.py orchestrator
+- **Configuration**:
+  - Server: `http://127.0.0.1:3456/chat`
+  - Model: `qwen2.5:14b-instruct-q4_k_m`
+  - Timeout: 300 seconds
 - **Key Features**:
-  - 5-strategy JSON parsing for response reliability
-  - Context integration with story state
   - Robust retry mechanism with error handling
+  - Context integration with story state
   - Exclusive hub access pattern
+  - Service module interface compliance
 
 ## CRITICAL ARCHITECTURAL PRINCIPLES
 
@@ -130,11 +154,25 @@ mcp.py      | No | No              | No      | YES | No
 ```python
 # Dependency order initialization
 1. TerminalManager (no dependencies)
-2. EnhancedMemoryManager (no dependencies) 
+2. EnhancedMemoryManager (no dependencies)
 3. StoryMomentumEngine (no dependencies)
 4. SemanticAnalysisEngine (no dependencies)
 5. MCPClient (no dependencies)
 6. NCursesUIController (requires uilib)
+```
+
+### Interface Standards
+```python
+# Orchestrator callback pattern
+def orchestrator_callback(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]
+
+# Service module interface
+def initialize(self, orchestrator_callback: Callable) -> bool
+def shutdown(self) -> None
+
+# Data format standards maintained across all modules
+message_format = {"content": str, "type": str, "timestamp": str}
+context_format = {"conversation": List, "story_state": Dict, "prompts": Dict}
 ```
 
 ### LLM Request Coordination
@@ -190,24 +228,30 @@ def trigger_periodic_analysis(self) -> None:
 - `main.py → orch.py`: Configuration and loaded prompts
 - `orch.py → ncui.py`: Display coordination and input collection
 - `orch.py → emm.py`: Storage operations and state queries
-- `orch.py → sme.py`: Basic momentum state and pattern detection
+- `orch.py → sme.py`: Momentum state and pattern detection
 - `orch.py → sem.py`: Semantic analysis coordination
 - `orch.py → mcp.py`: EXCLUSIVE LLM communication
 - `ncui.py → uilib.py`: UI component utilization
 
-### Interface Standards
-```python
-# Orchestrator callback pattern
-def orchestrator_callback(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]
+## USAGE INSTRUCTIONS
 
-# Service module interface
-def initialize(self, orchestrator_callback: Callable) -> bool
-def shutdown(self) -> None
+### Basic Operation
+- Run `python main.py` from root directory
+- All modules must be present in root directory
+- Ensure critrules.prompt exists in root directory
+- Use `python main.py --debug` for comprehensive orchestrator logging
 
-# Data format standards maintained across all modules
-message_format = {"content": str, "type": str, "timestamp": str}
-context_format = {"conversation": List, "story_state": Dict, "prompts": Dict}
-```
+### Commands
+- **Multi-line Input**: Type naturally, double-enter to submit
+- **Navigation**: PgUp/PgDn for scrolling, Home/End for quick navigation
+- **Commands**: `/help`, `/stats`, `/analyze`, `/theme <n>`, `/clearmemory`
+
+### Debug Features
+- Orchestrator coordination logging
+- Service module interaction tracking
+- Hub-and-spoke communication monitoring
+- Semantic analysis decision logging
+- Background thread coordination visibility
 
 ## CURRENT IMPLEMENTATION STATUS
 
@@ -218,6 +262,7 @@ context_format = {"conversation": List, "story_state": Dict, "prompts": Dict}
 - ✅ Simplified spoke modules with clean interfaces
 - ✅ Exclusive MCP access through orchestrator
 - ✅ All original functionality preserved
+- ✅ Flattened root directory structure
 
 ### **Architectural Compliance**
 - ✅ No spoke-to-spoke communication
@@ -231,26 +276,6 @@ context_format = {"conversation": List, "story_state": Dict, "prompts": Dict}
 - Preserved background auto-save threading
 - Sustained UI responsiveness
 - Identical feature set with improved structure
-
-## USAGE INSTRUCTIONS
-
-### Basic Operation
-- Run `python main.py` from remodularized directory
-- All modules must be present in same directory
-- Ensure critrules.prompt exists in parent directory
-- Use `python main.py --debug` for comprehensive orchestrator logging
-
-### Commands
-- **Multi-line Input**: Type naturally, double-enter to submit
-- **Navigation**: PgUp/PgDn for scrolling, Home/End for quick navigation  
-- **Commands**: `/help`, `/stats`, `/analyze`, `/theme <n>`, `/clearmemory`
-
-### Debug Features
-- Orchestrator coordination logging
-- Service module interaction tracking
-- Hub-and-spoke communication monitoring
-- Semantic analysis decision logging
-- Background thread coordination visibility
 
 ---
 Last Updated: Remodularized Hub-and-Spoke Architecture Analysis
