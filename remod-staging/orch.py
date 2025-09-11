@@ -309,33 +309,124 @@ class DevNameOrchestrator:
             self._log_debug(f"Failed to initialize story engine: {e}")
             return None
     
-    async def _initialize_ui_controller(self) -> Optional[UIController]:
-        """Initialize UI controller with all backend modules"""
+    async def _initialize_ui_controller(self) -> Optional['UIController']:
+        """Initialize UI controller with proper orchestrator integration"""
         try:
-            # Get all initialized modules
-            semantic_processor = self.module_registry.get_module("semantic_processor")
-            mcp_client = self.module_registry.get_module("mcp_client")
-            memory_manager = self.module_registry.get_module("memory_manager")
-            story_engine = self.module_registry.get_module("story_engine")
-            
-            # Create UI controller with orchestrator coordination
+            from ui import UIController
+
+            # Create UI controller with configuration
             ui_controller = UIController(
                 debug_logger=self.debug_logger,
                 config=self.config
             )
-            
-            # Provide module references to UI
-            ui_controller.semantic_processor = semantic_processor
-            ui_controller.mcp_client = mcp_client
-            ui_controller.memory_manager = memory_manager
-            ui_controller.sme = story_engine
-            ui_controller.loaded_prompts = self.loaded_prompts
-            
-            # Configure components through orchestrator
-            await self._configure_ui_components(ui_controller)
-            
+
+            # Set up message processor callback
+            def message_processor(user_input: str) -> Dict[str, Any]:
+                """Process user messages through backend modules"""
+                try:
+                    # Get required modules
+                    memory_manager = self.module_registry.get_module("memory_manager")
+                    story_engine = self.module_registry.get_module("story_engine")
+                    mcp_client = self.module_registry.get_module("mcp_client")
+
+                    if not all([memory_manager, story_engine, mcp_client]):
+                        return {"success": False, "error": "Backend modules not available"}
+
+                    # Store message in memory (like original nci.py)
+                    from emm import MessageType
+                    memory_manager.add_message(user_input, MessageType.USER)
+
+                    # Process through story engine (like original nci.py)
+                    momentum_result = story_engine.process_user_input(user_input)
+
+                    # Build context for MCP request
+                    conversation_history = memory_manager.get_conversation_for_mcp()
+                    story_context_dict = story_engine.get_story_context()
+
+                    # Format story context as string for MCP (fix the bug here)
+                    if isinstance(story_context_dict, dict):
+                        pressure = story_context_dict.get('pressure_level', 0)
+                        arc = story_context_dict.get('story_arc', 'setup')
+                        story_context = f"Story Pressure: {pressure:.2f}, Arc: {arc}"
+                    else:
+                        # Fallback if get_story_context returns a string
+                        story_context = str(story_context_dict)
+
+                    # Send to MCP server (like original nci.py)
+                    try:
+                        ai_response = mcp_client.send_message(
+                            user_input,
+                            conversation_history=conversation_history,
+                            story_context=story_context
+                        )
+
+                        # Store AI response in memory
+                        memory_manager.add_message(ai_response, MessageType.ASSISTANT)
+
+                        # Update story momentum with AI response
+                        if hasattr(story_engine, 'process_ai_response'):
+                            story_engine.process_ai_response(ai_response)
+
+                        return {
+                            "success": True,
+                            "ai_response": ai_response,
+                            "momentum_result": momentum_result
+                        }
+
+                    except Exception as e:
+                        return {"success": False, "error": f"MCP error: {e}"}
+
+                except Exception as e:
+                    self._log_debug(f"Message processing error: {e}")
+                    return {"success": False, "error": str(e)}
+
+            # Set up command processor callback
+            def command_processor(command: str) -> Dict[str, Any]:
+                """Process user commands through appropriate handlers"""
+                try:
+                    # Handle built-in commands
+                    if command == "/help":
+                        return {"success": True, "system_message": "Available commands: /help, /stats, /analyze, /clearmemory, /theme, /quit"}
+                    elif command == "/stats":
+                        # Get stats from modules
+                        memory_manager = self.module_registry.get_module("memory_manager")
+                        story_engine = self.module_registry.get_module("story_engine")
+
+                        stats = []
+                        if memory_manager:
+                            messages = memory_manager.get_messages() if hasattr(memory_manager, 'get_messages') else []
+                            stats.append(f"Memory: {len(messages)} messages")
+                        if story_engine:
+                            current_state = story_engine.get_current_state()
+                            if isinstance(current_state, dict):
+                                stats.append(f"Story pressure: {current_state.get('narrative_pressure', 0):.2f}")
+                                stats.append(f"Story arc: {current_state.get('story_arc', 'setup')}")
+
+                        return {"success": True, "system_message": "\n".join(stats)}
+                    elif command == "/quit":
+                        self.request_shutdown()
+                        return {"success": True, "system_message": "Shutting down..."}
+                    else:
+                        return {"success": False, "error": f"Unknown command: {command}"}
+
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            # Set processors on UI controller
+            ui_controller.set_message_processor(message_processor)
+            ui_controller.set_command_processor(command_processor)
+
+            # Set status updater callback
+            def status_updater(status: str):
+                """Update status from orchestrator"""
+                # This can be used for orchestrator-level status updates
+                pass
+
+            ui_controller.set_status_updater(status_updater)
+
+            self._log_debug("UI controller initialized with orchestrator integration")
             return ui_controller
-            
+
         except Exception as e:
             self._log_debug(f"Failed to initialize UI controller: {e}")
             return None
