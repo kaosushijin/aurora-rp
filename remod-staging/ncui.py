@@ -1,3 +1,5 @@
+# CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
+
 # Chunk 1/3 - ncui.py - Pure UI Management Interface
 #!/usr/bin/env python3
 """

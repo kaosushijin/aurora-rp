@@ -1,3 +1,5 @@
+# CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
+
 #!/usr/bin/env python3
 """
 DevName RPG Client - Main Application Entry Point (main.py)
