@@ -5,7 +5,14 @@
 ## PROJECT OVERVIEW
 Terminal-based RPG storytelling client using Large Language Models via MCP (Model Context Protocol). 
 Architecture: Hub-and-spoke pattern with centralized orchestration through `orch.py`.
-Status: Remodularization complete, debug logger interface standardization required.
+Status: Remodularization complete, debug logger interface standardized.
+
+## CURRENT PROJECT STATE (Commit: 9c00ae9fbd84d38192e19f4f58baa2eceb483095)
+- **Architecture**: Hub-and-spoke pattern fully implemented
+- **Debug Logger**: Interface standardized across all modules 
+- **File Structure**: All modules in root directory
+- **Dependencies**: Python 3.8+, curses, httpx (optional)
+- **Status**: Ready for testing after debug logger fixes
 
 ## COMPLETE MODULE REGISTRY AND INTERCONNECTS
 
@@ -30,7 +37,7 @@ aurora-rp/
 ### MODULE INTERCONNECTION MATRIX
 
 #### main.py
-**Purpose**: Application entry, prompt loading, debug logging
+**Purpose**: Application entry, prompt management, debug logging
 **Imports**: `orch.Orchestrator`, `mcp.MCPClient`
 **Exports**: `DebugLogger`, `PromptManager`, `DevNameRPGClient`
 **Data Sent**: 
@@ -39,141 +46,229 @@ aurora-rp/
 - From orch.py: Integer exit code
 **Critical Functions**:
 - `load_and_optimize_prompts()`: Condenses prompts to 5000 token budget
-- `validate_prompt_files()`: Ensures critrules.prompt exists
+- `validate_prompt_files()`: Ensures critrules.prompt exists in root directory
+- `DebugLogger.debug(message, category)`: Standardized logging interface
 **Dependencies**: Python 3.8+, asyncio, pathlib
+**File Paths**: All prompts loaded from same directory as Python files
 
 #### orch.py (CENTRAL HUB)
 **Purpose**: Central orchestration of all service modules
 **Imports**: `ncui`, `emm`, `sme`, `sem`, `mcp`
-**Exports**: `Orchestrator`, `OrchestrationState`
+**Exports**: `Orchestrator`, `OrchestrationState`, `OrchestrationPhase`
 **Data Sent**:
-- To ncui.py: Display messages, UI commands
+- To ncui.py: Display messages, UI commands via callback
 - To emm.py: Messages for storage, memory operations
 - To sme.py: Story state updates, analysis triggers
-- To sem.py: Analysis requests
+- To sem.py: Analysis requests via orchestrator callback
 - To mcp.py: LLM request payloads (EXCLUSIVE ACCESS)
 **Data Received**:
-- From ncui.py: User input strings, UI events
-- From emm.py: Message history, memory state
-- From sme.py: Momentum analysis results
+- From ncui.py: User input strings, UI events, shutdown requests
+- From emm.py: Message history, memory state, conversation context
+- From sme.py: Momentum analysis results, antagonist state
 - From sem.py: Semantic categorization results
-- From mcp.py: LLM responses
+- From mcp.py: LLM responses, error states
 **Critical Functions**:
 - `initialize_modules()`: Sets up all service modules with callbacks
-- `process_user_input()`: Routes input through processing pipeline
-- `trigger_periodic_analysis()`: Manages 15-message analysis cycles
-- `make_llm_request()`: ONLY function that calls mcp.py
+- `_handle_ui_callback()`: Main coordination point (former line ~385 issue)
+- `_process_user_input()`: Routes input through processing pipeline
+- `_make_llm_request()`: ONLY function that calls mcp.py
+- `_trigger_periodic_analysis()`: Manages 15-message analysis cycles
 **Threading**: Background analysis thread for non-blocking operations
+**Debug Logging**: Uses helper methods `_log_debug()`, `_log_error()`, `_log_system()`
 
 #### mcp.py
-**Purpose**: HTTP communication with Node.js ollama MCP server
-**Imports**: httpx (optional), asyncio
+**Purpose**: HTTP communication with LLM server
+**Imports**: httpx (optional), asyncio, json
 **Exports**: `MCPClient`, `MCPState`
 **Data Sent**:
-- To ollama server: HTTP POST requests with prompts
+- To LLM server: HTTP POST requests with prompts
 **Data Received**:
-- From orch.py: System prompts, user messages, context
-- From ollama server: JSON responses with generated text
+- From orch.py: System prompts, user messages, context data
+- From LLM server: JSON responses with generated text
 **Critical Functions**:
 - `send_message()`: Async HTTP request with retry logic
 - `parse_response()`: 5-strategy JSON parsing for reliability
 - `build_context()`: Assembles prompts with token management
 **Configuration**:
-- Server URL: http://127.0.0.1:3456/chat
-- Model: qwen2.5:14b-instruct-q4_k_m
-- Timeout: 300 seconds
+- Default Server URL: http://localhost:3000/v1/chat/completions
+- Default Model: gpt-4o
+- Timeout: 30 seconds (configurable)
 - Context window: 32,000 tokens
+**Access Control**: ONLY imported and called by orch.py
 
 #### ncui.py
 **Purpose**: Terminal UI controller using ncurses
 **Imports**: `uilib` components, curses
 **Exports**: `NCursesUIController`
 **Data Sent**:
-- To orch.py: User input, UI commands
+- To orch.py: User input, UI commands, shutdown requests
 **Data Received**:
-- From orch.py: Messages to display, UI updates
-- From uilib.py: UI component instances
+- From orch.py: Messages to display, UI updates, system responses
+- From uilib.py: UI component instances and layout calculations
 **Critical Functions**:
-- `initialize_ui()`: Sets up curses windows
-- `process_input()`: Handles keyboard input
-- `display_message()`: Renders messages to screen
-- `handle_resize()`: Manages terminal resize events
+- `initialize()`: Sets up curses windows and layout
+- `run()`: Main UI event loop with input processing
+- `_handle_input()`: Keyboard input dispatcher
+- `_submit_user_input()`: Submits input through orchestrator callback
+- `_refresh_all_windows()`: Updates display with current content
+**UI Features**:
+- Multi-line input with double-enter submission
+- Scrollable message history
+- Dynamic terminal resizing
+- Command system (/help, /clear, /stats, /quit, etc.)
+**Debug Logging**: Uses helper methods `_log_debug()`, `_log_error()`, `_log_system()`
 
 #### uilib.py
 **Purpose**: Consolidated UI component library
 **Imports**: curses, standard library only
-**Exports**: `TerminalManager`, `ColorManager`, `ScrollManager`, `MultiLineInput`, `DisplayMessage`
+**Exports**: 
+- `TerminalManager`: Dynamic coordinate calculation and window management
+- `ColorManager`: Theme management (classic/dark/bright themes)
+- `ScrollManager`: Scroll position with bounds checking
+- `MultiLineInput`: Multi-line input with word wrap and cursor management
+- `DisplayMessage`: Message formatting and text wrapping
+- `InputValidator`: Input validation and token estimation
+- `LayoutGeometry`: Window coordinate calculations
 **Data Sent**:
 - To ncui.py: Component instances and methods
 **Data Received**:
 - Configuration parameters from ncui.py
 **Critical Components**:
-- `TerminalManager`: Dynamic coordinate calculation
-- `ColorManager`: Theme management (classic/dark/bright)
-- `ScrollManager`: Scroll position with bounds checking
-- `MultiLineInput`: Multi-line input with word wrap
-- `DisplayMessage`: Message formatting and wrapping
+- Dynamic coordinate system prevents hardcoded positions
+- Theme management with color pair support
+- Responsive layout calculations
+- Input handling with line wrapping
 
 #### emm.py
 **Purpose**: Message storage and memory management
-**Imports**: Standard library only
+**Imports**: Standard library only (json, threading, pathlib)
 **Exports**: `EnhancedMemoryManager`, `Message`, `MessageType`
 **Data Sent**:
-- To orch.py: Message history, memory state
+- To orch.py: Message history, memory state, conversation context
 **Data Received**:
-- From orch.py: New messages, memory operations
+- From orch.py: New messages, memory operations, condensation requests
 **Critical Functions**:
-- `add_message()`: Store with metadata and token estimation
+- `add_user_message()`, `add_assistant_message()`: Store with metadata
 - `get_conversation_context()`: Retrieve for LLM context
-- `save_conversation()`: Persist to JSON file
-- `condense_memory()`: Reduce when approaching limits
-**Threading**: Background auto-save every 30 seconds
-**File Operations**: memory.json for persistence
+- `save_conversation()`: Persist to memory.json file
+- `condense_memory()`: Reduce when approaching token limits
+- `get_stats()`: Memory usage statistics
+**Threading**: Background auto-save every 30 seconds with thread safety
+**File Operations**: memory.json for persistence in root directory
 
 #### sme.py
 **Purpose**: Story momentum and narrative tracking
 **Imports**: Standard library only
 **Exports**: `StoryMomentumEngine`, `Antagonist`, `StoryArc`
 **Data Sent**:
-- To orch.py: Momentum analysis results
+- To orch.py: Momentum analysis results, antagonist state, narrative metrics
 **Data Received**:
-- From orch.py: Story events, analysis triggers
+- From orch.py: Story events, analysis triggers, conversation context
 **Critical Functions**:
 - `analyze_momentum()`: Evaluate narrative progression
-- `generate_antagonist()`: Create story antagonists
+- `generate_antagonist()`: Create story antagonists (via orch.py LLM calls)
 - `track_narrative_time()`: Monitor story timeline
-- `calculate_pressure()`: Determine story tension
-**Analysis Cycle**: Every 15 messages
+- `calculate_pressure()`: Determine story tension levels
+- `get_current_state()`: Export state for LLM context
+**Analysis Cycle**: Every 15 messages triggered by orchestrator
+**State Management**: Antagonist commitment levels, pressure calculations
 
 #### sem.py
 **Purpose**: Semantic analysis and categorization
 **Imports**: Standard library only
 **Exports**: `SemanticAnalysisEngine`, `SemanticAnalysisRequest`, `SemanticAnalysisResult`
 **Data Sent**:
-- To orch.py: Analysis results, categorizations
+- To orch.py: Analysis results, categorization data, confidence scores
 **Data Received**:
-- From orch.py: Content for analysis
+- From orch.py: Analysis requests, conversation context, categorization tasks
 **Critical Functions**:
-- `categorize_content()`: Assign semantic categories
-- `analyze_importance()`: Determine preservation priority
-- `condense_content()`: Intelligently reduce text
+- `categorize_content()`: Assign semantic categories to messages
+- `analyze_importance()`: Determine preservation priority for memory condensation
+- `validate_input()`: Input validation and quality checks
+- `analyze_conversation()`: Comprehensive conversation analysis
 **Categories**: story_critical, character_focused, relationship_dynamics, emotional_significance, world_building, standard
+**LLM Integration**: All LLM analysis requests routed through orchestrator
+
+## DATA FLOW SEQUENCES
+
+### User Input Processing (Complete Pipeline)
+1. ncui.py captures keyboard input and validates formatting
+2. ncui.py calls `orchestrator_callback("user_input", {"input": content})`
+3. orch.py validates input through sem.py analysis
+4. orch.py stores user message in emm.py with timestamp
+5. orch.py sends to mcp.py for LLM processing with full context
+6. mcp.py returns LLM response to orch.py
+7. orch.py stores LLM response in emm.py
+8. orch.py returns result to ncui.py for display
+9. ncui.py updates display buffer and refreshes windows
+
+### Periodic Analysis (15-message cycle)
+1. orch.py monitors message count in background thread
+2. At 15 messages, triggers comprehensive analysis
+3. Thread collects conversation context from emm.py
+4. Thread requests momentum analysis from sme.py
+5. Thread requests semantic categorization from sem.py
+6. sme.py returns momentum state and pressure calculations
+7. sem.py returns content categorization and importance scores
+8. orch.py updates emm.py with analysis results
+9. orch.py may trigger antagonist generation via mcp.py
+
+### Memory Condensation Process
+1. emm.py detects approaching token limit (20,000 tokens)
+2. emm.py requests categorization via orch.py callback
+3. orch.py routes request to sem.py for content analysis
+4. sem.py analyzes and categorizes all messages by importance
+5. sem.py returns categorization with preservation ratios
+6. emm.py condenses based on categories (preserves story_critical 90%)
+7. emm.py saves condensed state to memory.json
+8. emm.py updates token counts and memory statistics
+
+## CONFIGURATION PARAMETERS
+
+### Token Budgets and Limits
+- Context Window: 32,000 tokens
+- System Prompt Budget: 5,000 tokens maximum
+- User Input Limit: 2,000 tokens per message
+- Memory Condensation Threshold: 20,000 tokens
+- Conservative Token Estimation: 1 token per 4 characters
+
+### Timing and Threading
+- Auto-save Interval: Every 30 seconds
+- Momentum Analysis: Every 15 messages
+- Connection Timeout: 30 seconds (configurable)
+- Retry Delay: 2 seconds between attempts
+- Background Thread Sleep: 5 seconds between checks
+
+### File Paths and Storage
+- Memory File: memory.json (root directory)
+- Debug Log: debug.log (root directory)
+- Prompt Files: *.prompt (root directory)
+- Legacy Reference: legacyref/ (read-only)
+
+### Network Configuration
+- Default MCP Server: http://localhost:3000/v1/chat/completions
+- Default Model: gpt-4o
+- Fallback Available: httpx library optional
+- JSON Parsing: 5-strategy fallback system
 
 ## CRITICAL INTERFACE CONTRACTS
 
-### Debug Logger Interface (NEEDS STANDARDIZATION)
-**Current Issue**: Mixed calling patterns causing startup failure
-
-**Required Pattern** (Method-based):
+### Debug Logger Interface (STANDARDIZED)
+**Status**: COMPLETED - All modules use method-based pattern
+**Required Pattern**:
 ```python
-self.debug_logger.debug(message, category)
-self.debug_logger.error(message, category)
-self.debug_logger.system(message)
+# Correct standardized usage
+if self.debug_logger:
+    self.debug_logger.debug(message, category)
+    self.debug_logger.error(message, category)
+    self.debug_logger.system(message)
 ```
 
-**Files Requiring Fix**:
-- orch.py: Line ~385 - Change `self.debug_logger(f"[ORCHESTRATOR] {message}")` to `self.debug_logger.debug(message, "ORCHESTRATOR")`
-- ncui.py: All debug calls - Change callable pattern to method pattern
+**Implementation**:
+- All modules have helper methods: `_log_debug()`, `_log_error()`, `_log_system()`
+- Null safety: Always check `if self.debug_logger:` before calling
+- Category standardization: "ORCHESTRATOR", "NCUI", "MAIN", etc.
+- No manual prefixes: Category parameter handles organization
 
 ### Service Module Initialization Pattern
 All service modules must implement:
@@ -186,9 +281,9 @@ def set_orchestrator_callback(self, callback):
     self.orchestrator_callback = callback
 ```
 
-### LLM Request Pattern (EXCLUSIVE)
-**ONLY orch.py may call mcp.py functions**
-All other modules must use:
+### LLM Request Pattern (EXCLUSIVE ACCESS)
+**ONLY orch.py may import and call mcp.py functions**
+All other modules must use orchestrator callback:
 ```python
 result = self.orchestrator_callback('llm_request', {
     'prompt': prompt_text,
@@ -196,132 +291,127 @@ result = self.orchestrator_callback('llm_request', {
 })
 ```
 
-## DATA FLOW SEQUENCES
+### UI Callback Interface
+ncui.py communicates with orch.py via callback:
+```python
+# UI to Orchestrator
+result = self.callback_handler(action, data)
 
-### User Input Processing
-1. ncui.py captures keyboard input
-2. ncui.py sends to orch.py via callback
-3. orch.py validates through sem.py
-4. orch.py stores in emm.py
-5. orch.py sends to mcp.py for LLM processing
-6. mcp.py returns response to orch.py
-7. orch.py stores response in emm.py
-8. orch.py sends to ncui.py for display
+# Supported actions:
+# "user_input", "get_messages", "clear_memory", 
+# "get_stats", "analyze_now", "shutdown"
+```
 
-### Periodic Analysis (15-message cycle)
-1. orch.py monitors message count
-2. At 15 messages, triggers background thread
-3. Thread collects context from emm.py
-4. Thread requests analysis from sme.py
-5. sme.py returns momentum state
-6. orch.py updates emm.py with state
-7. orch.py may trigger antagonist generation
+## CURRENT OPERATIONAL STATUS
 
-### Memory Condensation
-1. emm.py detects token limit approach
-2. emm.py requests categorization from sem.py via orch.py
-3. sem.py analyzes and categorizes messages
-4. emm.py condenses based on categories
-5. emm.py saves condensed state to disk
+### Successfully Implemented
+- ✅ Hub-and-spoke architecture complete
+- ✅ Debug logger interface standardized
+- ✅ All modules in root directory
+- ✅ Import path issues resolved
+- ✅ Prompt file loading from root directory
+- ✅ Threading safety with proper locks
+- ✅ Memory auto-save functionality
+- ✅ UI event handling and display refresh
 
-## CONFIGURATION PARAMETERS
+### Recently Fixed Issues
+- ✅ Debug logger callable pattern → method pattern
+- ✅ Mixed debug logging interfaces standardized
+- ✅ orch.py line ~385 callback handler fixed
+- ✅ ncui.py debug calls converted to helper methods
+- ✅ Prompt file path references corrected
+- ✅ Module import dependencies resolved
 
-### Token Budgets
-- Context Window: 32,000 tokens
-- System Prompt: 5,000 tokens max
-- User Input: 2,000 tokens max
-- Memory Threshold: 20,000 tokens
-
-### Timing Parameters
-- Auto-save: Every 30 seconds
-- Momentum Analysis: Every 15 messages
-- Connection Timeout: 300 seconds
-- Retry Delay: 2 seconds
-
-### File Paths
-- Memory: memory.json
-- Debug Log: debug.log
-- Prompts: *.prompt (same directory)
-
-## KNOWN ISSUES AND FIXES
-
-### Issue 1: Debug Logger Interface Mismatch
-**Status**: CRITICAL - Blocks startup
-**Fix Required**: Standardize all modules to use method-based pattern
-**Files**: orch.py (line ~385), ncui.py (all debug calls)
-**Time to Fix**: 5 minutes
-
-### Issue 2: Prompt Path References
-**Status**: RESOLVED in current version
-**Note**: All prompt files must be in root directory
-
-### Issue 3: Import Path Issues
-**Status**: RESOLVED in current version
-**Note**: All modules import from same directory
+### Testing Status
+- **Startup Sequence**: Ready for testing
+- **Module Initialization**: Should complete without errors
+- **UI Display**: Ready for curses interface testing
+- **Input Processing**: Pipeline implemented and ready
+- **LLM Communication**: Exclusive access pattern implemented
 
 ## REGRESSION PREVENTION RULES
 
 ### Before Modifying Any Function
-1. Check this document for module interconnects
-2. Identify all modules that call the function
-3. Identify all modules the function calls
-4. Consider data structure changes
-5. Verify threading implications
-6. Test with debug mode enabled
+1. **Check this document** for module interconnects and dependencies
+2. **Identify all modules** that call the function
+3. **Identify all modules** the function calls
+4. **Consider data structure changes** and their ripple effects
+5. **Verify threading implications** and race conditions
+6. **Test with debug mode enabled** to verify logging works
 
 ### Hub-and-Spoke Enforcement
-- NEVER allow direct module-to-module calls except through orch.py
-- NEVER allow any module except orch.py to import mcp.py
-- NEVER bypass the orchestrator callback pattern
-- ALWAYS route cross-module communication through orchestrator
+- **NEVER** allow direct module-to-module calls except through orch.py
+- **NEVER** allow any module except orch.py to import mcp.py
+- **NEVER** bypass the orchestrator callback pattern
+- **ALWAYS** route cross-module communication through orchestrator
 
-### Threading Safety
-- emm.py uses threading.Lock for all operations
+### Threading Safety Requirements
+- emm.py uses threading.Lock for all file operations
 - Background threads must not modify UI directly
-- Analysis threads communicate results via callbacks
-- Auto-save runs independently with atomic writes
+- Analysis threads communicate results via orchestrator callbacks
+- Auto-save runs independently with atomic file writes
+- UI resizing must not lose message history or state
 
 ### Error Handling Patterns
-- All modules must handle None debug_logger
+- All modules must handle None debug_logger gracefully
 - Network failures must not crash the application
 - File I/O errors must be logged but not fatal
-- UI resize must not lose message history
+- Missing prompt files handled with warnings, not crashes
+- Terminal resize must maintain application state
 
 ## TESTING CHECKLIST
 
-### Startup Sequence
-- [ ] All modules import successfully
-- [ ] Debug logger initializes without errors
-- [ ] Prompts load from correct directory
-- [ ] Orchestrator initializes all modules
-- [ ] UI displays without crashes
+### Startup Sequence Validation
+- [ ] All modules import successfully without errors
+- [ ] Debug logger initializes and creates log file
+- [ ] Prompt files load from root directory (critrules.prompt required)
+- [ ] Orchestrator initializes all service modules
+- [ ] UI displays without curses crashes
 
-### Core Functionality
-- [ ] User input processes correctly
-- [ ] LLM responses display properly
-- [ ] Messages save to memory.json
-- [ ] 15-message analysis triggers
-- [ ] Theme switching works
+### Core Functionality Testing
+- [ ] User input processes correctly through full pipeline
+- [ ] LLM responses display properly in UI
+- [ ] Messages save to memory.json automatically
+- [ ] 15-message analysis triggers background processing
+- [ ] Theme switching works with color management
+- [ ] Terminal resize maintains state and redisplays correctly
 
-### Error Scenarios
-- [ ] Missing prompt files handled gracefully
-- [ ] Network timeout doesn't crash
-- [ ] Terminal resize maintains state
-- [ ] Ctrl+C shuts down cleanly
+### Error Scenario Handling
+- [ ] Missing prompt files handled gracefully with warnings
+- [ ] Network timeout doesn't crash (falls back gracefully)
+- [ ] Terminal resize during input doesn't lose cursor state
+- [ ] Ctrl+C shuts down cleanly with proper cleanup
+- [ ] Debug logger handles file write failures gracefully
+
+### Command System Testing
+- [ ] `/help` shows command documentation
+- [ ] `/clear` clears display buffer
+- [ ] `/stats` shows system statistics via orchestrator
+- [ ] `/quit` and `/exit` trigger clean shutdown
+- [ ] `/theme` command changes colors and refreshes display
 
 ## VERSION HISTORY
 
-### Current Version (Commit: 5170347a6ddd490afb877493032367bf6602828c)
-- Architecture: Hub-and-spoke pattern complete
-- Status: Debug logger interface fix required
-- Modules: 8 primary Python files
-- Dependencies: Python 3.8+, curses, httpx (optional)
+### Current Version (Commit: 9c00ae9fbd84d38192e19f4f58baa2eceb483095)
+- **Architecture**: Hub-and-spoke pattern complete
+- **Status**: Debug logger interface standardized
+- **Modules**: 8 primary Python files in root directory
+- **Dependencies**: Python 3.8+, curses, httpx (optional)
+- **Key Features**: Centralized orchestration, standardized logging, responsive UI
 
 ### Previous Working Version (legacyref/)
-- Architecture: Direct module interconnections
-- Status: Fully functional but less maintainable
-- Preserved for reference and rollback
+- **Architecture**: Direct module interconnections
+- **Status**: Fully functional but less maintainable
+- **Purpose**: Preserved for reference and emergency rollback
+- **Usage**: Read-only reference, do not modify
+
+### Major Changes from Legacy
+- **Centralized Control**: All coordination through orch.py
+- **Exclusive LLM Access**: Only orch.py calls mcp.py
+- **Standardized Logging**: Consistent debug interface across modules
+- **Flat File Structure**: All modules in root directory
+- **Enhanced UI**: Consolidated uilib.py with better components
 
 ---
-**END OF GENAI.TXT** - Last Updated: Analysis of repository state
-**Remember**: This document is the authoritative source for understanding module interactions and preventing regressions. Always consult before making changes that could affect multiple modules.
+**END OF GENAI.TXT** - Last Updated: Analysis of commit 9c00ae9fbd84d38192e19f4f58baa2eceb483095
+**Remember**: This document is the authoritative source for understanding module interactions and preventing regressions. Always consult before making changes that could affect multiple modules. The debug logger interface has been standardized and the project is ready for comprehensive testing.
