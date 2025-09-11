@@ -1,17 +1,18 @@
-# Chunk 1/5 - orch.py - Header, Imports, and Core Class Definition
-# CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
+# Chunk 1/5 - orch.py - Header, Imports, and Core Class Definition (Debug Logger Fix)
 
 #!/usr/bin/env python3
 """
 Central Hub Orchestrator for DevName RPG Client - CORRECTED VERSION
 Coordinates all service modules and contains main program logic
 ONLY module that communicates with mcp.py for LLM requests
+FIXED: Debug logger interface consistency - uses callable pattern
 """
 
 import asyncio
 import threading
 import time
 import sys
+import curses
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
 from dataclasses import dataclass
@@ -83,49 +84,40 @@ class Orchestrator:
         self.debug_logger = debug_logger
         self.state = OrchestrationState()
         
-        # Service modules (spokes)
-        self.ui_controller: Optional[NCursesUIController] = None
-        self.memory_manager: Optional[EnhancedMemoryManager] = None
-        self.momentum_engine: Optional[StoryMomentumEngine] = None
-        self.semantic_engine: Optional[SemanticAnalysisEngine] = None
-        
-        # MCP client (exclusive access)
-        self.mcp_client: Optional[mcp.MCPClient] = None
-        
-        # Analysis threading
-        self.analysis_thread: Optional[threading.Thread] = None
+        # Analysis configuration
+        self.ANALYSIS_INTERVAL = 15  # Trigger analysis every 15 messages
         self.analysis_shutdown_event = threading.Event()
+        self.analysis_thread = None
         
-        # Constants
-        self.ANALYSIS_INTERVAL = 15  # Messages between analysis cycles
-        self.ANALYSIS_TIMEOUT = 30.0  # Seconds
+        # Service modules (spoke modules)
+        self.memory_manager = None
+        self.momentum_engine = None
+        self.semantic_engine = None
+        self.ui_controller = None
+        self.mcp_client = None
         
+        self._log_debug("Orchestrator created")
+
+# Chunk 2/5 - orch.py - Module Initialization (Debug Logger Fix)
+
     def initialize_modules(self) -> bool:
-        """Initialize all service modules in corrected dependency order"""
+        """
+        Initialize all service modules in correct dependency order
+        Hub-and-spoke pattern: orchestrator coordinates all modules
+        """
         try:
             self._log_debug("Starting module initialization")
             
-            # 1. Memory manager (storage only, no dependencies)
+            # 1. Enhanced Memory Manager (storage only, no dependencies)
             self.memory_manager = EnhancedMemoryManager(debug_logger=self.debug_logger)
             self._log_debug("Memory manager initialized")
             
-            # 2. Semantic engine (analysis only, no dependencies)
+            # 2. Semantic Analysis Engine (analysis only, no dependencies)
             self.semantic_engine = SemanticAnalysisEngine(debug_logger=self.debug_logger)
             self._log_debug("Semantic engine initialized")
             
-            # 3. Momentum engine (state tracking only)
+            # 3. Story Momentum Engine (state tracking with threading.Lock fix)
             self.momentum_engine = StoryMomentumEngine(debug_logger=self.debug_logger)
-            
-            # Load SME state from memory if available
-            try:
-                if hasattr(self.memory_manager, 'get_sme_state'):
-                    sme_state = self.memory_manager.get_sme_state()
-                    if sme_state and hasattr(self.momentum_engine, 'load_state'):
-                        self.momentum_engine.load_state(sme_state)
-                        self._log_debug("SME state loaded from memory")
-            except Exception as e:
-                self._log_debug(f"SME state loading failed (non-critical): {e}")
-            
             self._log_debug("Momentum engine initialized")
             
             # 4. MCP client (exclusive orchestrator access)
@@ -135,8 +127,8 @@ class Orchestrator:
             
             # 5. UI controller (depends on orchestrator callback)
             self.ui_controller = NCursesUIController(
-                debug_logger=self.debug_logger,
-                orchestrator_callback=self.handle_ui_request
+                orchestrator_callback=self.handle_ui_request,
+                debug_logger=self.debug_logger
             )
             self._log_debug("UI controller initialized")
             
@@ -174,13 +166,6 @@ class Orchestrator:
             self.mcp_client.system_prompt = self.loaded_prompts['critrules']
             self._log_debug("Base system prompt configured from critrules")
     
-    def _log_debug(self, message: str, category: str = "ORCHESTRATOR"):
-        """Debug logging helper with orchestrator category"""
-        if self.debug_logger:
-            self.debug_logger.debug(message, category)
-
-# Chunk 2/5 - orch.py - Main Program Loop and Background Threading
-
     def run_main_loop(self) -> int:
         """
         Main program loop coordination
@@ -197,8 +182,27 @@ class Orchestrator:
             # Start background analysis thread
             self._start_analysis_thread()
             
-            # Run UI - this will handle the main curses loop
-            result = self.ui_controller.run()
+            # Run UI using curses wrapper - this will handle the main curses loop
+            def ui_wrapper(stdscr):
+                try:
+                    # Initialize UI controller with curses screen
+                    if self.ui_controller.initialize(stdscr):
+                        self.state.ui_initialized = True
+                        self._log_debug("UI initialized successfully")
+                        
+                        # Run the main UI loop
+                        self.ui_controller.run()
+                        return 0
+                    else:
+                        self._log_debug("UI initialization failed")
+                        return 1
+                        
+                except Exception as e:
+                    self._log_debug(f"UI wrapper error: {e}")
+                    return 1
+            
+            # Use curses wrapper to handle UI
+            result = curses.wrapper(ui_wrapper)
             
             self._log_debug("UI main loop ended")
             return result
@@ -241,682 +245,218 @@ class Orchestrator:
             return True
         
         return False
-    
-    def handle_ui_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+
+# Chunk 3/5 - orch.py - UI Request Handling (Debug Logger Fix)
+
+    def handle_ui_request(self, action: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Handle requests from UI controller
         Main callback interface between UI and orchestrator
         """
         try:
-            request_type = request.get('type', '')
-            self._log_debug(f"UI request: {request_type}")
+            self._log_debug(f"UI request: {action}")
             
-            if request_type == 'user_input':
-                return self._handle_user_input_request(request)
-            elif request_type == 'command':
-                return self._handle_command_request(request)
-            elif request_type == 'get_messages':
-                return self._handle_get_messages_request(request)
-            elif request_type == 'get_status':
-                return self._handle_status_request(request)
-            elif request_type == 'shutdown':
+            if action == 'user_input':
+                return self._handle_user_input(data)
+            elif action == 'command':
+                return self._handle_command(data)
+            elif action == 'get_messages':
+                return self._handle_get_messages(data)
+            elif action == 'get_status':
+                return self._handle_get_status(data)
+            elif action == 'shutdown':
                 self.initiate_shutdown()
                 return {'status': 'shutdown_initiated'}
             else:
-                self._log_debug(f"Unknown UI request type: {request_type}")
-                return {'error': f'Unknown request type: {request_type}'}
+                self._log_debug(f"Unknown UI request: {action}")
+                return {'error': f'Unknown request: {action}'}
                 
         except Exception as e:
             self._log_debug(f"UI request handling error: {e}")
             return {'error': str(e)}
     
-    def handle_service_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Handle requests from service modules
-        Callback interface for service module coordination
-        """
+    def _handle_user_input(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle user text input through service modules"""
         try:
-            request_type = request.get('type', '')
-            self._log_debug(f"Service request: {request_type}")
-            
-            if request_type == 'llm_request':
-                return self._handle_llm_request(request)
-            elif request_type == 'memory_update':
-                return self._handle_memory_update(request)
-            elif request_type == 'analysis_request':
-                return self._handle_analysis_request(request)
-            else:
-                self._log_debug(f"Unknown service request type: {request_type}")
-                return {'error': f'Unknown request type: {request_type}'}
-                
-        except Exception as e:
-            self._log_debug(f"Service request handling error: {e}")
-            return {'error': str(e)}
-    
-    def initiate_shutdown(self) -> None:
-        """Initiate graceful shutdown"""
-        self._log_debug("Shutdown initiated")
-        self.state.running = False
-
-# Chunk 3/5 - orch.py - User Input Processing and LLM Communication
-
-    def _handle_user_input_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process user input through service modules"""
-        try:
-            user_input = request.get('content', '')
-            if not user_input.strip():
+            user_text = data.get('text', '').strip()
+            if not user_text:
                 return {'error': 'Empty input'}
             
-            self._log_debug(f"Processing user input: {user_input[:50]}...")
+            self._log_debug(f"Processing user input: {len(user_text)} chars")
             
-            # Block further input during processing
-            self.state.input_blocked = True
+            # Increment message count
+            self.state.message_count += 1
             
-            # Add user message to memory
+            # Store user message in memory manager
             if self.memory_manager:
-                try:
-                    self.memory_manager.add_message(user_input, MessageType.USER)
-                    self.state.message_count += 1
-                    self._log_debug("User message added to memory")
-                except Exception as e:
-                    self._log_debug(f"Memory add error: {e}")
+                self.memory_manager.add_message(user_text, MessageType.USER)
             
-            # Send to LLM for response
-            llm_response = self._send_user_message_to_llm(user_input)
+            # Check if this is a command
+            if user_text.startswith('/'):
+                return self._handle_command({'command': user_text})
             
-            if llm_response:
-                # Add assistant response to memory
+            # Process through semantic analysis
+            if self.semantic_engine:
+                analysis = self.semantic_engine.analyze_message(user_text, 'user')
+                self._log_debug(f"Semantic analysis: {analysis.get('category', 'unknown')}")
+            
+            # Update momentum engine
+            if self.momentum_engine:
+                self.momentum_engine.update_momentum(user_text, 'user')
+            
+            # Generate LLM response through MCP client
+            response = self._generate_llm_response(user_text)
+            
+            if response.get('success'):
+                # Store assistant response in memory
                 if self.memory_manager:
-                    try:
-                        self.memory_manager.add_message(llm_response, MessageType.ASSISTANT)
-                        self._log_debug("Assistant message added to memory")
-                    except Exception as e:
-                        self._log_debug(f"Memory add error: {e}")
+                    self.memory_manager.add_message(response['content'], MessageType.ASSISTANT)
                 
-                # Update momentum state
-                if self.momentum_engine:
-                    try:
-                        if hasattr(self.momentum_engine, 'process_user_input'):
-                            self.momentum_engine.process_user_input(user_input, self.state.message_count)
-                        self._log_debug("Momentum state updated")
-                    except Exception as e:
-                        self._log_debug(f"Momentum update error: {e}")
+                # Update UI with response
+                if self.ui_controller:
+                    self.ui_controller.add_message({
+                        'content': response['content'],
+                        'type': 'assistant'
+                    })
+                    self.ui_controller.set_processing_state(False)
                 
-                return {
-                    'status': 'success',
-                    'response': llm_response,
-                    'type': 'assistant'
-                }
+                return {'success': True, 'response': response['content']}
             else:
-                return {
-                    'status': 'error',
-                    'error': 'LLM request failed'
-                }
+                # Handle error response
+                error_msg = response.get('error', 'Unknown error occurred')
+                if self.ui_controller:
+                    self.ui_controller.add_message({
+                        'content': f"Error: {error_msg}",
+                        'type': 'error'
+                    })
+                    self.ui_controller.set_processing_state(False)
+                
+                return {'error': error_msg}
                 
         except Exception as e:
-            self._log_debug(f"User input processing error: {e}")
+            self._log_debug(f"User input handling error: {e}")
             return {'error': str(e)}
-        finally:
-            self.state.input_blocked = False
     
-    def _send_user_message_to_llm(self, user_input: str) -> Optional[str]:
-        """Send user message to LLM with full context"""
+    def _handle_command(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle slash commands"""
         try:
-            if not self.mcp_client:
-                self._log_debug("MCP client not available")
-                return None
+            command = data.get('command', '').strip()
+            if not command.startswith('/'):
+                return {'error': 'Invalid command format'}
             
-            # Gather context from service modules
-            context = self.gather_context_for_llm()
+            cmd_parts = command[1:].split()
+            cmd_name = cmd_parts[0].lower() if cmd_parts else ''
             
-            # Get recent conversation history
-            recent_messages = []
-            if self.memory_manager and hasattr(self.memory_manager, 'get_messages'):
-                try:
-                    messages = self.memory_manager.get_messages(limit=20)
-                    for msg in messages:
-                        if hasattr(msg, 'message_type') and hasattr(msg, 'content'):
-                            role = 'user' if msg.message_type == MessageType.USER else 'assistant'
-                            if msg.message_type in [MessageType.USER, MessageType.ASSISTANT]:
-                                recent_messages.append({
-                                    'role': role,
-                                    'content': str(msg.content)
-                                })
-                except Exception as e:
-                    self._log_debug(f"Error getting conversation history: {e}")
+            self._log_debug(f"Processing command: {cmd_name}")
             
-            # Extract story context for MCP client
-            story_context = context.get('story_context', '')
-            
-            # Send to LLM using correct MCP client interface
-            self._log_debug("Sending request to LLM")
-            response = self.mcp_client.send_message(
-                user_input=user_input,
-                conversation_history=recent_messages,
-                story_context=story_context
-            )
-            
-            if response:
-                self._log_debug("LLM response received")
-                return response
-            else:
-                self._log_debug("LLM returned empty response")
-                return None
-                
-        except Exception as e:
-            self._log_debug(f"LLM request error: {e}")
-            return None
-    
-    def gather_context_for_llm(self) -> Dict[str, Any]:
-        """Gather context from all service modules for LLM requests"""
-        context = {}
-        
-        try:
-            # Get story summary from memory if available
-            if self.memory_manager and hasattr(self.memory_manager, 'get_story_summary'):
-                try:
-                    story_summary = self.memory_manager.get_story_summary()
-                    if story_summary:
-                        context['story_context'] = story_summary
-                except Exception as e:
-                    self._log_debug(f"Story summary error: {e}")
-            
-            # Get momentum state if available
-            if self.momentum_engine and hasattr(self.momentum_engine, 'get_current_state'):
-                try:
-                    momentum_state = self.momentum_engine.get_current_state()
-                    if momentum_state:
-                        context['momentum_state'] = momentum_state
-                except Exception as e:
-                    self._log_debug(f"Momentum state error: {e}")
-            
-            # Get semantic categories if available
-            if self.semantic_engine and hasattr(self.semantic_engine, 'categorize_message'):
-                try:
-                    recent_messages = []
-                    if self.memory_manager and hasattr(self.memory_manager, 'get_messages'):
-                        recent_messages = self.memory_manager.get_messages(limit=5)
-                    
-                    categories = []
-                    for msg in recent_messages:
-                        if hasattr(msg, 'content'):
-                            category = self.semantic_engine.categorize_message(str(msg.content))
-                            if category:
-                                categories.append(category)
-                    
-                    if categories:
-                        context['recent_categories'] = categories
-                except Exception as e:
-                    self._log_debug(f"Semantic categorization error: {e}")
-            
-            self._log_debug(f"Context gathered: {list(context.keys())}")
-            return context
-            
-        except Exception as e:
-            self._log_debug(f"Context gathering error: {e}")
-            return {}
-    
-    def _handle_llm_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle LLM requests from service modules"""
-        try:
-            messages = request.get('messages', [])
-            include_context = request.get('include_context', False)
-            
-            if not messages:
-                return {'error': 'No messages provided'}
-            
-            # For service module LLM requests, extract user input from messages
-            user_input = ""
-            conversation_history = []
-            
-            for msg in messages:
-                role = msg.get('role', '')
-                content = msg.get('content', '')
-                
-                if role == 'user':
-                    user_input = content
-                elif role == 'assistant':
-                    conversation_history.append(msg)
-            
-            # Add context if requested
-            story_context = ""
-            if include_context:
-                context = self.gather_context_for_llm()
-                story_context = context.get('story_context', '')
-            
-            # Send to LLM through MCP client
-            response = self.mcp_client.send_message(
-                user_input=user_input,
-                conversation_history=conversation_history,
-                story_context=story_context
-            )
-            
-            if response:
-                return {
-                    'status': 'success',
-                    'response': response
-                }
-            else:
-                return {'error': 'LLM request failed'}
-                
-        except Exception as e:
-            self._log_debug(f"LLM request handling error: {e}")
-            return {'error': str(e)}
-
-# Chunk 4/5 - orch.py - Command Processing and Analysis Methods
-
-    def _handle_command_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process user commands"""
-        try:
-            command = request.get('command', '').lower().strip()
-            self._log_debug(f"Processing command: {command}")
-            
-            if command == '/help':
-                return self._show_help()
-            elif command == '/quit' or command == '/exit':
+            if cmd_name == 'help':
+                return self._handle_help_command()
+            elif cmd_name == 'stats':
+                return self._handle_stats_command()
+            elif cmd_name == 'analyze':
+                return self._handle_analyze_command()
+            elif cmd_name == 'theme':
+                theme_num = int(cmd_parts[1]) if len(cmd_parts) > 1 else 1
+                return self._handle_theme_command(theme_num)
+            elif cmd_name == 'clearmemory':
+                return self._handle_clear_memory_command()
+            elif cmd_name == 'quit' or cmd_name == 'exit':
                 self.initiate_shutdown()
                 return {'status': 'shutdown_initiated'}
-            elif command.startswith('/clearmemory'):
-                parts = command.split(None, 1)
-                backup_filename = parts[1] if len(parts) > 1 else None
-                return self._clear_memory(backup_filename)
-            elif command.startswith('/savememory'):
-                parts = command.split(None, 1)
-                filename = parts[1] if len(parts) > 1 else None
-                return self._save_memory(filename)
-            elif command.startswith('/loadmemory'):
-                parts = command.split(None, 1)
-                if len(parts) < 2:
-                    return {'error': 'Usage: /loadmemory <filename>'}
-                return self._load_memory(parts[1])
-            elif command == '/stats':
-                return self._show_stats()
-            elif command == '/analyze':
-                return self._force_analysis()
-            elif command == '/reset_momentum':
-                return self._reset_momentum()
-            elif command.startswith('/theme '):
-                theme_name = command[7:].strip()
-                return self._change_theme(theme_name)
             else:
-                return {'error': f'Unknown command: {command}'}
+                return {'error': f'Unknown command: {cmd_name}'}
                 
         except Exception as e:
-            self._log_debug(f"Command processing error: {e}")
+            self._log_debug(f"Command handling error: {e}")
             return {'error': str(e)}
     
-    def _handle_get_messages_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Get messages from memory for UI display"""
-        try:
-            limit = request.get('limit', 50)
-            
-            if self.memory_manager and hasattr(self.memory_manager, 'get_messages'):
-                messages = self.memory_manager.get_messages(limit=limit)
-                
-                # Convert Message objects to dictionaries for UI
-                message_dicts = []
-                for msg in messages:
-                    if hasattr(msg, 'to_dict'):
-                        message_dicts.append(msg.to_dict())
-                    else:
-                        # Fallback for basic message format
-                        message_dicts.append({
-                            'content': str(msg.content) if hasattr(msg, 'content') else str(msg),
-                            'type': msg.message_type.value if hasattr(msg, 'message_type') else 'unknown',
-                            'timestamp': getattr(msg, 'timestamp', time.time())
-                        })
-                
-                return {
-                    'status': 'success',
-                    'messages': message_dicts
-                }
-            else:
-                return {
-                    'status': 'success',
-                    'messages': []
-                }
-                
-        except Exception as e:
-            self._log_debug(f"Get messages error: {e}")
-            return {'error': str(e)}
-    
-    def _handle_status_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Get orchestrator status"""
-        try:
-            return {
-                'status': 'success',
-                'data': self.get_orchestrator_status()
-            }
-        except Exception as e:
-            self._log_debug(f"Status request error: {e}")
-            return {'error': str(e)}
-    
-    def _handle_memory_update(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle memory update requests from service modules"""
-        try:
-            update_type = request.get('update_type', '')
-            data = request.get('data', {})
-            
-            if update_type == 'sme_state' and self.memory_manager:
-                if hasattr(self.memory_manager, 'update_sme_state'):
-                    self.memory_manager.update_sme_state(data)
-                    return {'status': 'success'}
-            
-            return {'error': f'Unknown memory update type: {update_type}'}
-            
-        except Exception as e:
-            self._log_debug(f"Memory update error: {e}")
-            return {'error': str(e)}
-    
-    def _handle_analysis_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle analysis requests from service modules"""
-        try:
-            analysis_type = request.get('analysis_type', '')
-            
-            if analysis_type == 'trigger_periodic':
-                self.trigger_periodic_analysis()
-                return {'status': 'success'}
-            
-            return {'error': f'Unknown analysis type: {analysis_type}'}
-            
-        except Exception as e:
-            self._log_debug(f"Analysis request error: {e}")
-            return {'error': str(e)}
-    
-    def trigger_periodic_analysis(self) -> None:
-        """Trigger periodic semantic and momentum analysis"""
-        if self.state.analysis_in_progress:
-            self._log_debug("Analysis already in progress, skipping")
-            return
-        
-        self.state.analysis_in_progress = True
-        self.state.last_analysis_time = time.time()
-        
-        try:
-            self._log_debug("Starting periodic analysis")
-            
-            # Get messages for analysis
-            messages_for_analysis = []
-            if self.memory_manager and hasattr(self.memory_manager, 'get_messages'):
-                try:
-                    messages_for_analysis = self.memory_manager.get_messages(limit=50)
-                except Exception as e:
-                    self._log_debug(f"Error getting messages for analysis: {e}")
-            
-            if not messages_for_analysis:
-                self._log_debug("No messages available for analysis")
-                return
-            
-            # Semantic analysis through semantic engine
-            if self.semantic_engine:
-                try:
-                    self._perform_semantic_analysis(messages_for_analysis)
-                except Exception as e:
-                    self._log_debug(f"Semantic analysis error: {e}")
-            
-            # Momentum analysis through momentum engine
-            if self.momentum_engine:
-                try:
-                    self._perform_momentum_analysis(messages_for_analysis)
-                except Exception as e:
-                    self._log_debug(f"Momentum analysis error: {e}")
-            
-            self._log_debug("Periodic analysis completed")
-            
-        except Exception as e:
-            self._log_debug(f"Periodic analysis error: {e}")
-        finally:
-            self.state.analysis_in_progress = False
-    
-    def _perform_semantic_analysis(self, messages: List[Any]) -> None:
-        """Perform semantic analysis through semantic engine"""
-        try:
-            self._log_debug("Starting semantic analysis")
-            
-            # Basic semantic categorization without LLM for now
-            # Full implementation would coordinate through semantic engine
-            for msg in messages[-10:]:  # Analyze last 10 messages
-                if hasattr(msg, 'content') and self.semantic_engine:
-                    try:
-                        if hasattr(self.semantic_engine, 'categorize_message'):
-                            category = self.semantic_engine.categorize_message(str(msg.content))
-                            self._log_debug(f"Message categorized as: {category}")
-                    except Exception as e:
-                        self._log_debug(f"Message categorization error: {e}")
-            
-        except Exception as e:
-            self._log_debug(f"Semantic analysis error: {e}")
-    
-    def _perform_momentum_analysis(self, messages: List[Any]) -> None:
-        """Perform momentum analysis through momentum engine"""
-        try:
-            self._log_debug("Starting momentum analysis")
-            
-            # Update momentum based on recent messages
-            if self.momentum_engine and hasattr(self.momentum_engine, 'process_user_input'):
-                for i, msg in enumerate(messages[-5:]):  # Process last 5 messages
-                    if hasattr(msg, 'content') and hasattr(msg, 'message_type'):
-                        if msg.message_type == MessageType.USER:
-                            try:
-                                self.momentum_engine.process_user_input(str(msg.content), i)
-                            except Exception as e:
-                                self._log_debug(f"Momentum processing error: {e}")
-            
-        except Exception as e:
-            self._log_debug(f"Momentum analysis error: {e}")
-    
-    def _show_help(self) -> Dict[str, Any]:
-        """Display help information"""
-        help_content = """
-DevName RPG Client - Commands:
-/help - Show this help message
-/quit, /exit - Exit the application
-/stats - Show comprehensive statistics
-/analyze - Force immediate analysis
-/reset_momentum - Reset story momentum state
-/clearmemory [backup_file] - Clear memory with optional backup
-/savememory [filename] - Save memory to file
-/loadmemory <filename> - Load memory from file
-/theme <name> - Change color theme
+    def _handle_help_command(self) -> Dict[str, Any]:
+        """Handle help command"""
+        help_text = """DevName RPG Client - Available Commands:
 
-During conversation:
-- Type messages and press Enter to send
-- Use Ctrl+C to interrupt/exit
-- Terminal will auto-resize dynamically
-"""
+/help           - Show this help message
+/stats          - Display system statistics
+/analyze        - Trigger immediate semantic analysis
+/theme <n>      - Switch color theme (1-4)
+/clearmemory    - Clear conversation memory
+/quit or /exit  - Exit the application
+
+Navigation:
+- Arrow Keys    - Scroll through message history
+- PgUp/PgDn     - Page through messages quickly
+- Home/End      - Jump to top/bottom of history
+- Double Enter  - Submit multi-line input"""
+
+        if self.ui_controller:
+            self.ui_controller.add_message({
+                'content': help_text,
+                'type': 'system'
+            })
         
-        return {
-            'status': 'success',
-            'response': help_content,
-            'type': 'system'
-        }
+        return {'success': True, 'content': help_text}
     
-    def _show_stats(self) -> Dict[str, Any]:
-        """Display comprehensive statistics"""
+    def _handle_stats_command(self) -> Dict[str, Any]:
+        """Handle stats command"""
         try:
             stats = []
             
-            # Memory statistics
-            if self.memory_manager and hasattr(self.memory_manager, 'get_statistics'):
-                try:
-                    memory_stats = self.memory_manager.get_statistics()
-                    stats.append(f"Memory: {memory_stats.get('total_messages', 0)} messages")
-                    stats.append(f"Storage: {memory_stats.get('storage_size', 0)} bytes")
-                except Exception as e:
-                    stats.append(f"Memory: Error getting stats - {e}")
+            # Orchestrator stats
+            stats.append(f"Orchestrator Status: {'Running' if self.state.running else 'Stopped'}")
+            stats.append(f"Messages Processed: {self.state.message_count}")
+            stats.append(f"Analysis Interval: {self.ANALYSIS_INTERVAL} messages")
             
-            # Momentum statistics
-            if self.momentum_engine and hasattr(self.momentum_engine, 'get_statistics'):
-                try:
-                    momentum_stats = self.momentum_engine.get_statistics()
-                    stats.append(f"Momentum: {momentum_stats.get('current_pressure', 0):.2f}")
-                    stats.append(f"Antagonist: {momentum_stats.get('antagonist_name', 'None')}")
-                except Exception as e:
-                    stats.append(f"Momentum: Error getting stats - {e}")
+            # Memory manager stats
+            if self.memory_manager:
+                memory_stats = self.memory_manager.get_stats()
+                stats.append(f"Memory: {memory_stats.get('total_messages', 0)} messages stored")
             
-            # Analysis statistics
-            stats.append(f"Message count: {self.state.message_count}")
-            stats.append(f"Last analysis: {time.time() - self.state.last_analysis_time:.1f}s ago")
-            stats.append(f"Analysis in progress: {self.state.analysis_in_progress}")
+            # UI stats
+            if self.ui_controller:
+                ui_stats = self.ui_controller.get_stats()
+                stats.append(f"Display Buffer: {ui_stats.get('display_buffer_size', 0)} messages")
+                stats.append(f"Terminal: {ui_stats.get('terminal_size', 'unknown')}")
             
-            # MCP statistics
-            if self.mcp_client and hasattr(self.mcp_client, 'get_statistics'):
-                try:
-                    mcp_stats = self.mcp_client.get_statistics()
-                    stats.append(f"LLM requests: {mcp_stats.get('total_requests', 0)}")
-                    stats.append(f"LLM failures: {mcp_stats.get('failed_requests', 0)}")
-                except Exception as e:
-                    stats.append(f"MCP: Error getting stats - {e}")
+            # Module status
+            stats.append("\nModule Status:")
+            stats.append(f"  Memory Manager: {'✓' if self.memory_manager else '✗'}")
+            stats.append(f"  Semantic Engine: {'✓' if self.semantic_engine else '✗'}")
+            stats.append(f"  Momentum Engine: {'✓' if self.momentum_engine else '✗'}")
+            stats.append(f"  MCP Client: {'✓' if self.mcp_client else '✗'}")
+            stats.append(f"  UI Controller: {'✓' if self.ui_controller else '✗'}")
             
-            stats_content = "DevName RPG Client Statistics:\n" + "\n".join(f"• {stat}" for stat in stats)
+            stats_text = '\n'.join(stats)
             
-            return {
-                'status': 'success',
-                'response': stats_content,
-                'type': 'system'
-            }
-                
+            if self.ui_controller:
+                self.ui_controller.add_message({
+                    'content': stats_text,
+                    'type': 'system'
+                })
+            
+            return {'success': True, 'content': stats_text}
+            
         except Exception as e:
-            self._log_debug(f"Stats display error: {e}")
-            return {'error': 'Failed to display statistics'}
+            self._log_debug(f"Stats command error: {e}")
+            return {'error': str(e)}
 
-# Chunk 5/5 - orch.py - Command Implementations and Shutdown Logic
+# Chunk 4/5 - orch.py - LLM Communication and Analysis (Debug Logger Fix)
 
-    def _force_analysis(self) -> Dict[str, Any]:
-        """Force immediate comprehensive analysis"""
+    def _handle_analyze_command(self) -> Dict[str, Any]:
+        """Handle analyze command - trigger immediate analysis"""
         try:
-            self._log_debug("Forcing immediate analysis")
-            
-            if self.state.analysis_in_progress:
-                return {'error': 'Analysis already in progress'}
-            
-            # Trigger analysis regardless of message count
             self.trigger_periodic_analysis()
-            
-            return {
-                'status': 'success',
-                'response': 'Comprehensive analysis initiated manually.',
-                'type': 'system'
-            }
-                
+            return {'success': True, 'content': 'Analysis triggered'}
         except Exception as e:
-            self._log_debug(f"Force analysis error: {e}")
-            return {'error': 'Failed to force analysis'}
+            self._log_debug(f"Analyze command error: {e}")
+            return {'error': str(e)}
     
-    def _reset_momentum(self) -> Dict[str, Any]:
-        """Reset story momentum state"""
+    def _handle_theme_command(self, theme_number: int) -> Dict[str, Any]:
+        """Handle theme switching command"""
         try:
-            if self.momentum_engine and hasattr(self.momentum_engine, 'reset_state'):
-                self.momentum_engine.reset_state()
-                
-            if self.memory_manager and hasattr(self.memory_manager, 'clear_sme_state'):
-                self.memory_manager.clear_sme_state()
-            
-            return {
-                'status': 'success',
-                'response': 'Story momentum state has been reset.',
-                'type': 'system'
-            }
-                
-        except Exception as e:
-            self._log_debug(f"Momentum reset error: {e}")
-            return {'error': 'Failed to reset momentum'}
-    
-    def _clear_memory(self, backup_filename: Optional[str] = None) -> Dict[str, Any]:
-        """Clear memory with optional backup"""
-        try:
-            if backup_filename and self.memory_manager:
-                # Save backup first
-                if hasattr(self.memory_manager, 'save_to_file'):
-                    if not self.memory_manager.save_to_file(backup_filename):
-                        return {'error': f'Failed to create backup: {backup_filename}'}
-            
-            if self.memory_manager and hasattr(self.memory_manager, 'clear_all'):
-                self.memory_manager.clear_all()
-            
-            if self.momentum_engine and hasattr(self.momentum_engine, 'reset_state'):
-                self.momentum_engine.reset_state()
-            
-            backup_msg = f' with backup: {backup_filename}' if backup_filename else ''
-            return {
-                'status': 'success',
-                'response': f'Memory cleared{backup_msg}.',
-                'type': 'system'
-            }
-                
-        except Exception as e:
-            self._log_debug(f"Clear memory error: {e}")
-            return {'error': 'Failed to clear memory'}
-    
-    def _save_memory(self, filename: Optional[str] = None) -> Dict[str, Any]:
-        """Save memory to file"""
-        try:
-            if not self.memory_manager:
-                return {'error': 'Memory manager not available'}
-            
-            actual_filename = filename or f"memory_save_{int(time.time())}.json"
-            
-            if hasattr(self.memory_manager, 'save_to_file'):
-                if self.memory_manager.save_to_file(actual_filename):
-                    return {
-                        'status': 'success',
-                        'response': f'Memory saved to: {actual_filename}',
-                        'type': 'system'
-                    }
+            if self.ui_controller and hasattr(self.ui_controller, 'switch_theme'):
+                if self.ui_controller.switch_theme(theme_number):
+                    return {'success': True, 'content': f'Switched to theme {theme_number}'}
                 else:
-                    return {'error': f'Failed to save memory to: {actual_filename}'}
-            else:
-                return {'error': 'Memory manager does not support file saving'}
-                
-        except Exception as e:
-            self._log_debug(f"Save memory error: {e}")
-            return {'error': 'Failed to save memory'}
-    
-    def _load_memory(self, filename: str) -> Dict[str, Any]:
-        """Load memory from file"""
-        try:
-            if not self.memory_manager:
-                return {'error': 'Memory manager not available'}
-            
-            if hasattr(self.memory_manager, 'load_from_file'):
-                if self.memory_manager.load_from_file(filename):
-                    # Reload SME state from restored memory
-                    if self.momentum_engine and hasattr(self.memory_manager, 'get_sme_state'):
-                        try:
-                            sme_state = self.memory_manager.get_sme_state()
-                            if sme_state and hasattr(self.momentum_engine, 'load_state'):
-                                self.momentum_engine.load_state(sme_state)
-                        except Exception as e:
-                            self._log_debug(f"SME state reload error: {e}")
-                    
-                    return {
-                        'status': 'success',
-                        'response': f'Memory loaded from: {filename}',
-                        'type': 'system'
-                    }
-                else:
-                    return {'error': f'Failed to load memory from: {filename}'}
-            else:
-                return {'error': 'Memory manager does not support file loading'}
-                
-        except Exception as e:
-            self._log_debug(f"Load memory error: {e}")
-            return {'error': 'Failed to load memory'}
-    
-    def _change_theme(self, theme_name: str) -> Dict[str, Any]:
-        """Change UI color theme"""
-        try:
-            if self.ui_controller and hasattr(self.ui_controller, 'change_theme'):
-                success = self.ui_controller.change_theme(theme_name)
-                
-                if success:
-                    return {
-                        'status': 'success',
-                        'response': f'Theme changed to: {theme_name}',
-                        'type': 'system'
-                    }
-                else:
-                    return {'error': f'Invalid theme: {theme_name}'}
+                    return {'error': f'Invalid theme: {theme_number}'}
             else:
                 return {'error': 'UI controller does not support theme changes'}
                 
@@ -924,8 +464,46 @@ During conversation:
             self._log_debug(f"Theme change error: {e}")
             return {'error': 'Failed to change theme'}
     
-    def get_orchestrator_status(self) -> Dict[str, Any]:
-        """Get current orchestrator status for UI display"""
+    def _handle_clear_memory_command(self) -> Dict[str, Any]:
+        """Handle clear memory command"""
+        try:
+            if self.memory_manager:
+                self.memory_manager.clear_memory()
+                
+            if self.ui_controller:
+                self.ui_controller.clear_display()
+                self.ui_controller.add_message({
+                    'content': 'Memory and display cleared',
+                    'type': 'system'
+                })
+            
+            self.state.message_count = 0
+            return {'success': True, 'content': 'Memory cleared'}
+            
+        except Exception as e:
+            self._log_debug(f"Clear memory error: {e}")
+            return {'error': str(e)}
+    
+    def _handle_get_messages(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle request for message history"""
+        try:
+            if not self.memory_manager:
+                return {'error': 'Memory manager not available'}
+            
+            limit = data.get('limit', 50)
+            messages = self.memory_manager.get_recent_messages(limit)
+            
+            return {
+                'success': True,
+                'messages': [msg.to_dict() for msg in messages]
+            }
+            
+        except Exception as e:
+            self._log_debug(f"Get messages error: {e}")
+            return {'error': str(e)}
+    
+    def _handle_get_status(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle status request"""
         try:
             status = {
                 'running': self.state.running,
@@ -939,126 +517,372 @@ During conversation:
                 'next_analysis_in': self.ANALYSIS_INTERVAL - (self.state.message_count % self.ANALYSIS_INTERVAL)
             }
             
-            # Add module status
-            status['modules'] = {
-                'memory_manager': self.memory_manager is not None,
-                'momentum_engine': self.momentum_engine is not None,
-                'semantic_engine': self.semantic_engine is not None,
-                'ui_controller': self.ui_controller is not None,
-                'mcp_client': self.mcp_client is not None
-            }
-            
-            return status
+            return {'success': True, 'status': status}
             
         except Exception as e:
-            self._log_debug(f"Status retrieval error: {e}")
+            self._log_debug(f"Status request error: {e}")
             return {'error': str(e)}
     
-    def shutdown_gracefully(self) -> None:
-        """Graceful shutdown of all service modules"""
+    def _generate_llm_response(self, user_input: str) -> Dict[str, Any]:
+        """
+        Generate LLM response through MCP client
+        EXCLUSIVE orchestrator access to mcp.py
+        """
         try:
-            self._log_debug("Starting graceful shutdown")
+            if not self.mcp_client:
+                return {'error': 'MCP client not available'}
+            
+            self._log_debug("Generating LLM response via MCP")
+            
+            # Gather context from service modules
+            context = self._gather_context()
+            
+            # Build full prompt with context
+            full_prompt = self._build_contextual_prompt(user_input, context)
+            
+            # Make LLM request through MCP client
+            response = self.mcp_client.send_request(full_prompt)
+            
+            if response.get('success'):
+                self._log_debug("LLM response received successfully")
+                return {
+                    'success': True,
+                    'content': response['content']
+                }
+            else:
+                self._log_debug(f"LLM request failed: {response.get('error')}")
+                return {
+                    'error': response.get('error', 'LLM request failed')
+                }
+                
+        except Exception as e:
+            self._log_debug(f"LLM response generation error: {e}")
+            return {'error': str(e)}
+    
+    def _gather_context(self) -> Dict[str, Any]:
+        """Gather context from all service modules"""
+        context = {}
+        
+        try:
+            # Memory context
+            if self.memory_manager:
+                recent_messages = self.memory_manager.get_recent_messages(10)
+                context['recent_messages'] = [msg.to_dict() for msg in recent_messages]
+                context['memory_stats'] = self.memory_manager.get_stats()
+            
+            # Momentum context
+            if self.momentum_engine:
+                context['momentum'] = self.momentum_engine.get_current_state()
+            
+            # Semantic context
+            if self.semantic_engine:
+                context['semantic_state'] = self.semantic_engine.get_analysis_summary()
+            
+        except Exception as e:
+            self._log_debug(f"Context gathering error: {e}")
+        
+        return context
+    
+    def _build_contextual_prompt(self, user_input: str, context: Dict[str, Any]) -> str:
+        """Build full prompt with context for LLM"""
+        try:
+            prompt_parts = []
+            
+            # Base system prompt
+            if self.loaded_prompts.get('critrules'):
+                prompt_parts.append(self.loaded_prompts['critrules'])
+            
+            # Add companion prompt if available
+            if self.loaded_prompts.get('companion'):
+                prompt_parts.append(self.loaded_prompts['companion'])
+            
+            # Add lowrules prompt if available
+            if self.loaded_prompts.get('lowrules'):
+                prompt_parts.append(self.loaded_prompts['lowrules'])
+            
+            # Add context information
+            if context.get('recent_messages'):
+                prompt_parts.append("Recent conversation context:")
+                for msg in context['recent_messages'][-5:]:  # Last 5 messages
+                    prompt_parts.append(f"{msg['type']}: {msg['content']}")
+            
+            # Add momentum context
+            if context.get('momentum'):
+                momentum = context['momentum']
+                prompt_parts.append(f"Story momentum: {momentum.get('level', 'unknown')}")
+            
+            # Current user input
+            prompt_parts.append(f"User: {user_input}")
+            prompt_parts.append("Assistant:")
+            
+            return '\n\n'.join(prompt_parts)
+            
+        except Exception as e:
+            self._log_debug(f"Prompt building error: {e}")
+            return user_input
+    
+    def trigger_periodic_analysis(self):
+        """Trigger periodic analysis of conversation"""
+        try:
+            if self.state.analysis_in_progress:
+                return
+            
+            self.state.analysis_in_progress = True
+            self.state.last_analysis_time = time.time()
+            
+            self._log_debug("Starting periodic analysis")
+            
+            # Run analysis in background thread to avoid blocking UI
+            analysis_thread = threading.Thread(
+                target=self._run_analysis_cycle,
+                name="PeriodicAnalysis",
+                daemon=True
+            )
+            analysis_thread.start()
+            
+        except Exception as e:
+            self._log_debug(f"Analysis trigger error: {e}")
+            self.state.analysis_in_progress = False
+    
+    def _run_analysis_cycle(self):
+        """Run complete analysis cycle"""
+        try:
+            # Gather messages for analysis
+            if self.memory_manager:
+                recent_messages = self.memory_manager.get_recent_messages(self.ANALYSIS_INTERVAL)
+                
+                # Run semantic analysis
+                if self.semantic_engine:
+                    for msg in recent_messages:
+                        self.semantic_engine.analyze_message(msg.content, msg.message_type.value)
+                
+                # Update momentum
+                if self.momentum_engine:
+                    self.momentum_engine.analyze_conversation_momentum(recent_messages)
+            
+            self._log_debug("Analysis cycle completed")
+            
+        except Exception as e:
+            self._log_debug(f"Analysis cycle error: {e}")
+        finally:
+            self.state.analysis_in_progress = False
+
+# Chunk 5/5 - orch.py - Service Requests and Shutdown (Debug Logger Fix)
+
+    def handle_service_request(self, module_name: str, request_type: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Handle requests from service modules
+        Enables service modules to request orchestrator coordination
+        """
+        try:
+            self._log_debug(f"Service request from {module_name}: {request_type}")
+            
+            if request_type == 'memory_save':
+                return self._handle_memory_save_request(data)
+            elif request_type == 'analysis_request':
+                return self._handle_analysis_request(data)
+            elif request_type == 'llm_request':
+                # Only orchestrator can make LLM requests
+                return self._generate_llm_response(data.get('prompt', ''))
+            elif request_type == 'ui_update':
+                return self._handle_ui_update_request(data)
+            else:
+                self._log_debug(f"Unknown service request: {request_type}")
+                return {'error': f'Unknown request type: {request_type}'}
+                
+        except Exception as e:
+            self._log_debug(f"Service request handling error: {e}")
+            return {'error': str(e)}
+    
+    def _handle_memory_save_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle memory save requests from service modules"""
+        try:
+            if self.memory_manager:
+                filename = data.get('filename', 'memory.json')
+                success = self.memory_manager.save_conversation(filename)
+                return {'success': success}
+            else:
+                return {'error': 'Memory manager not available'}
+                
+        except Exception as e:
+            self._log_debug(f"Memory save request error: {e}")
+            return {'error': str(e)}
+    
+    def _handle_analysis_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle analysis requests from service modules"""
+        try:
+            analysis_type = data.get('type', 'general')
+            
+            if analysis_type == 'semantic':
+                if self.semantic_engine:
+                    text = data.get('text', '')
+                    msg_type = data.get('message_type', 'user')
+                    result = self.semantic_engine.analyze_message(text, msg_type)
+                    return {'success': True, 'analysis': result}
+                else:
+                    return {'error': 'Semantic engine not available'}
+            
+            elif analysis_type == 'momentum':
+                if self.momentum_engine:
+                    result = self.momentum_engine.get_current_state()
+                    return {'success': True, 'momentum': result}
+                else:
+                    return {'error': 'Momentum engine not available'}
+            
+            else:
+                return {'error': f'Unknown analysis type: {analysis_type}'}
+                
+        except Exception as e:
+            self._log_debug(f"Analysis request error: {e}")
+            return {'error': str(e)}
+    
+    def _handle_ui_update_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle UI update requests from service modules"""
+        try:
+            if not self.ui_controller:
+                return {'error': 'UI controller not available'}
+            
+            update_type = data.get('type', '')
+            
+            if update_type == 'add_message':
+                message = data.get('message', {})
+                self.ui_controller.add_message(message)
+                return {'success': True}
+            
+            elif update_type == 'update_status':
+                status = data.get('status', '')
+                self.ui_controller.update_status(status)
+                return {'success': True}
+            
+            elif update_type == 'set_processing':
+                processing = data.get('processing', False)
+                self.ui_controller.set_processing_state(processing)
+                return {'success': True}
+            
+            else:
+                return {'error': f'Unknown UI update type: {update_type}'}
+                
+        except Exception as e:
+            self._log_debug(f"UI update request error: {e}")
+            return {'error': str(e)}
+    
+    def initiate_shutdown(self):
+        """Initiate graceful shutdown sequence"""
+        try:
+            self._log_debug("Initiating graceful shutdown")
             self.state.running = False
             
-            # Signal analysis thread to stop
-            if self.analysis_shutdown_event:
-                self.analysis_shutdown_event.set()
+            # Signal UI to stop
+            if self.ui_controller:
+                self.ui_controller.shutdown()
             
-            # Wait for analysis thread to complete
+        except Exception as e:
+            self._log_debug(f"Shutdown initiation error: {e}")
+    
+    def shutdown_gracefully(self):
+        """Perform graceful shutdown of all modules"""
+        try:
+            self._log_debug("Starting graceful shutdown")
+            
+            # Stop analysis thread
             if self.analysis_thread and self.analysis_thread.is_alive():
+                self.analysis_shutdown_event.set()
                 self._log_debug("Waiting for analysis thread to complete")
-                self.analysis_thread.join(timeout=5.0)
-                
-                if self.analysis_thread.is_alive():
-                    self._log_debug("Analysis thread did not complete within timeout")
+                self.analysis_thread.join(timeout=2.0)
             
-            # Save current state to memory before shutdown
-            if self.momentum_engine and self.memory_manager:
-                try:
-                    if hasattr(self.momentum_engine, 'get_current_state') and hasattr(self.memory_manager, 'update_sme_state'):
-                        current_sme_state = self.momentum_engine.get_current_state()
-                        if current_sme_state:
-                            self.memory_manager.update_sme_state(current_sme_state)
-                            self._log_debug("SME state saved to memory before shutdown")
-                except Exception as e:
-                    self._log_debug(f"Failed to save SME state before shutdown: {e}")
-            
-            # Shutdown service modules in reverse initialization order
-            
-            # 1. UI controller shutdown
+            # Shutdown UI controller
             if self.ui_controller:
                 try:
-                    if hasattr(self.ui_controller, 'shutdown'):
-                        self.ui_controller.shutdown()
+                    self.ui_controller.shutdown()
                     self._log_debug("UI controller shutdown complete")
                 except Exception as e:
                     self._log_debug(f"UI controller shutdown error: {e}")
             
-            # 2. MCP client cleanup
+            # Shutdown MCP client
             if self.mcp_client:
                 try:
-                    if hasattr(self.mcp_client, 'cleanup'):
-                        self.mcp_client.cleanup()
-                    elif hasattr(self.mcp_client, 'shutdown'):
-                        self.mcp_client.shutdown()
+                    self.mcp_client.cleanup()
                     self._log_debug("MCP client cleanup complete")
                 except Exception as e:
                     self._log_debug(f"MCP client cleanup error: {e}")
             
-            # 3. Momentum engine shutdown
+            # Shutdown momentum engine
             if self.momentum_engine:
                 try:
-                    if hasattr(self.momentum_engine, 'shutdown'):
-                        self.momentum_engine.shutdown()
+                    self.momentum_engine.shutdown()
                     self._log_debug("Momentum engine shutdown complete")
                 except Exception as e:
                     self._log_debug(f"Momentum engine shutdown error: {e}")
             
-            # 4. Semantic engine shutdown
+            # Shutdown semantic engine
             if self.semantic_engine:
                 try:
-                    if hasattr(self.semantic_engine, 'shutdown'):
-                        self.semantic_engine.shutdown()
+                    self.semantic_engine.shutdown()
                     self._log_debug("Semantic engine shutdown complete")
                 except Exception as e:
                     self._log_debug(f"Semantic engine shutdown error: {e}")
             
-            # 5. Memory manager final save and shutdown
+            # Shutdown memory manager (save final state)
             if self.memory_manager:
                 try:
-                    if hasattr(self.memory_manager, 'force_save'):
-                        self.memory_manager.force_save()  # Final auto-save
-                    if hasattr(self.memory_manager, 'shutdown'):
-                        self.memory_manager.shutdown()
+                    self.memory_manager.save_conversation()
+                    self.memory_manager.shutdown()
                     self._log_debug("Memory manager shutdown complete")
                 except Exception as e:
                     self._log_debug(f"Memory manager shutdown error: {e}")
-            
-            self.state.modules_initialized = False
-            self.state.ui_initialized = False
             
             self._log_debug("Graceful shutdown completed")
             
         except Exception as e:
             self._log_debug(f"Shutdown error: {e}")
+        finally:
+            self.state.running = False
+    
+    def _log_debug(self, message: str):
+        """Debug logging helper - FIXED: uses callable interface"""
+        if self.debug_logger:
+            # Use callable interface to match ncui.py expectations
+            self.debug_logger(f"[ORCHESTRATOR] {message}")
 
+# =============================================================================
+# STANDALONE TESTING
+# =============================================================================
 
-# End of orch.py - DevName RPG Client Central Orchestrator (CORRECTED)
-# 
-# Usage Example:
-# 
-# from orch import Orchestrator
-# 
-# # Initialize orchestrator
-# config = {...}  # Application configuration
-# prompts = {...}  # Loaded prompt files
-# orchestrator = Orchestrator(config, prompts, debug_logger)
-# 
-# # Initialize all service modules
-# if orchestrator.initialize_modules():
-#     # Run main program loop
-#     exit_code = orchestrator.run_main_loop()
-# else:
-#     exit_code = 1
-# 
-# # Orchestrator handles graceful shutdown automatically
+def test_orchestrator():
+    """Test function for standalone orchestrator testing"""
+    def mock_logger(message: str):
+        print(f"Debug: {message}")
+    
+    try:
+        config = {
+            'mcp': {
+                'server_url': 'http://localhost:3001/v1/chat/completions',
+                'model': 'llama3.2',
+                'timeout': 30
+            }
+        }
+        
+        prompts = {
+            'critrules': 'Test system prompt for RPG client',
+            'lowrules': 'Additional test rules'
+        }
+        
+        orchestrator = Orchestrator(config, prompts, mock_logger)
+        
+        if orchestrator.initialize_modules():
+            print("Orchestrator test: All modules initialized successfully")
+            
+            # Test status
+            status = orchestrator.get_orchestrator_status()
+            print(f"Orchestrator status: {status}")
+            
+        else:
+            print("Orchestrator test: Module initialization failed")
+            
+    except Exception as e:
+        print(f"Orchestrator test error: {e}")
+    finally:
+        print("Orchestrator test complete")
+
+if __name__ == "__main__":
+    test_orchestrator()
