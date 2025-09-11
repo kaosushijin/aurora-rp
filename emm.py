@@ -1,17 +1,37 @@
-# Chunk 1/1 - emm.py - Enhanced Memory Manager with Complete LLM Semantic Analysis
+# CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
+
 #!/usr/bin/env python3
+"""
+DevName RPG Client - Enhanced Memory Manager (emm.py)
+Remodularized for hub-and-spoke architecture - semantic analysis moved to sem.py
+"""
 
 import json
+import threading
+import time
+import asyncio
+import sys
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Callable, Tuple
+from datetime import datetime
+from dataclasses import dataclass, asdict
+
+# Ensure current directory is in Python path for local imports
+current_dir = Path(__file__).parent.absolute()
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+# Check for httpx availability (for any remaining LLM calls that need to be moved to orchestrator)
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    HTTPX_AVAILABLE = False
+
 import os
 import shutil
-import time
-from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
 from uuid import uuid4
-import threading
-import asyncio
-import httpx
 
 # Default memory file configuration
 DEFAULT_MEMORY_FILE = "memory.json"
@@ -32,7 +52,7 @@ class Message:
         self.timestamp = timestamp or datetime.now().isoformat()
         self.token_estimate = self._estimate_tokens(content)
         self.id = str(uuid4())
-        self.content_category = "standard"  # Default category for semantic analysis
+        self.content_category = "standard"  # Set by sem.py categorization
         self.condensed = False
     
     def _estimate_tokens(self, text: str) -> int:
@@ -56,350 +76,51 @@ class Message:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Message':
-        """Create message from dictionary"""
-        msg = cls(
+        """Create message from dictionary data"""
+        message = cls(
             content=data["content"],
             message_type=MessageType(data["type"]),
-            timestamp=data["timestamp"]
+            timestamp=data.get("timestamp")
         )
-        msg.id = data.get("id", str(uuid4()))
-        msg.content_category = data.get("content_category", "standard")
-        msg.condensed = data.get("condensed", False)
-        return msg
-
-# Semantic category preservation ratios
-CONDENSATION_STRATEGIES = {
-    "story_critical": {
-        "threshold": 100,
-        "preservation_ratio": 0.8,
-        "instruction": (
-            "Preserve all major plot developments, character deaths, world-changing events, "
-            "key player decisions, and their consequences. Use decisive language highlighting "
-            "the significance of events. Compress dialogue while maintaining essential meaning."
-        )
-    },
-    "character_focused": {
-        "threshold": 80,
-        "preservation_ratio": 0.7,
-        "instruction": (
-            "Preserve relationship changes, trust/betrayal moments, character motivations, "
-            "personality reveals, Aurora's development, and NPC traits. Emphasize emotional "
-            "weight and relationship dynamics. Condense descriptions while keeping character essence."
-        )
-    },
-    "relationship_dynamics": {
-        "threshold": 80,
-        "preservation_ratio": 0.8,
-        "instruction": (
-            "Preserve evolving relationships between characters, trust building, conflicts, "
-            "alliances, and interpersonal dynamics. Maintain emotional context and progression."
-        )
-    },
-    "emotional_significance": {
-        "threshold": 70,
-        "preservation_ratio": 0.75,
-        "instruction": (
-            "Preserve dramatic moments, emotional peaks, character growth, conflict resolution, "
-            "and significant emotional revelations. Maintain the emotional weight of scenes."
-        )
-    },
-    "world_building": {
-        "threshold": 60,
-        "preservation_ratio": 0.6,
-        "instruction": (
-            "Preserve new locations, lore revelations, cultural information, political changes, "
-            "economic systems, magical discoveries, and historical context. Provide rich "
-            "foundational details. Compress atmospheric descriptions while keeping key world facts."
-        )
-    },
-    "standard": {
-        "threshold": 40,
-        "preservation_ratio": 0.4,
-        "instruction": (
-            "Preserve player actions and immediate consequences for continuity. Compress "
-            "everything else aggressively while maintaining basic story flow."
-        )
-    }
-}
+        message.id = data.get("id", str(uuid4()))
+        message.token_estimate = data.get("tokens", message.token_estimate)
+        message.content_category = data.get("content_category", "standard")
+        message.condensed = data.get("condensed", False)
+        return message
 
 class EnhancedMemoryManager:
-    """Memory management with LLM-powered semantic condensation and auto-persistence"""
+    """
+    SIMPLIFIED: Storage and state management without semantic analysis
+    All semantic logic moved to sem.py
+    All LLM requests coordinated through orch.py hub
+    """
     
-    def __init__(self, max_memory_tokens: int = 16000, debug_logger=None, 
-                 auto_save_enabled: bool = True, memory_file: str = DEFAULT_MEMORY_FILE):
-        self.max_memory_tokens = max_memory_tokens
-        self.debug_logger = debug_logger
-        self.auto_save_enabled = auto_save_enabled
+    def __init__(self, memory_file: str = DEFAULT_MEMORY_FILE, auto_save_enabled: bool = True, debug_logger=None):
         self.memory_file = memory_file
+        self.auto_save_enabled = auto_save_enabled
+        self.debug_logger = debug_logger
+        
+        # Core storage
         self.messages: List[Message] = []
+        self.lock = threading.RLock()
+        
+        # Memory management settings
+        self.max_memory_tokens = 25000  # Conservative limit for context window
         self.condensation_count = 0
-        self.lock = threading.Lock()
         
-        # MCP client configuration
-        self.mcp_config = self._load_mcp_config()
+        # Orchestrator communication
+        self.orchestrator_callback = None  # Set by orchestrator for condensation requests
         
-        # Auto-load existing memory on initialization
-        if self.auto_save_enabled:
-            self._auto_load()
+        # Initialize from existing file
+        self._auto_load()
     
-    def _load_mcp_config(self) -> Dict[str, Any]:
-        """Load MCP configuration for LLM calls"""
-        return {
-            "server_url": "http://127.0.0.1:3456/chat",
-            "model": "qwen2.5:14b-instruct-q4_k_m",
-            "timeout": 300
-        }
+    def set_orchestrator_callback(self, callback):
+        """Set callback function to orchestrator for semantic operations"""
+        self.orchestrator_callback = callback
     
-    async def _call_llm(self, messages: List[Dict[str, str]]) -> Optional[str]:
-        """Make LLM request for semantic analysis using working MCP format"""
-        try:
-            async with httpx.AsyncClient(timeout=self.mcp_config.get("timeout", 30)) as client:
-                # Use same payload format as working mcp.py
-                payload = {
-                    "model": self.mcp_config["model"],
-                    "messages": messages,
-                    "stream": False
-                }
-
-                response = await client.post(self.mcp_config["server_url"], json=payload)
-                response.raise_for_status()
-
-                if response.status_code == 200:
-                    result = response.json()
-                    return result.get("message", {}).get("content", "")
-
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"EMM LLM call failed: {e}")
-            return None
-    
-    async def _analyze_message_semantics(self, target_idx: int) -> Optional[Dict[str, Any]]:
-        """Analyze message semantics with context window - 3 retry attempts"""
-        
-        # Create context window (5 before + target + 5 after)
-        start_idx = max(0, target_idx - 5)
-        end_idx = min(len(self.messages), target_idx + 6)
-        context_messages = self.messages[start_idx:end_idx]
-        
-        target_message = self.messages[target_idx]
-        
-        # Attempt 1: Full analysis with fragmentation
-        prompt1 = self._create_full_analysis_prompt(context_messages, target_idx - start_idx)
-        result = await self._call_llm([{"role": "system", "content": prompt1}])
-        
-        if result:
-            parsed = self._parse_semantic_response_robust(result, attempt=1)
-            if parsed:
-                return parsed
-        
-        # Attempt 2: Simplified analysis
-        prompt2 = self._create_simple_analysis_prompt(target_message.content)
-        result = await self._call_llm([{"role": "system", "content": prompt2}])
-        
-        if result:
-            parsed = self._parse_semantic_response_robust(result, attempt=2)
-            if parsed:
-                return parsed
-        
-        # Attempt 3: Binary preserve/condense decision
-        prompt3 = self._create_binary_prompt(target_message.content)
-        result = await self._call_llm([{"role": "system", "content": prompt3}])
-        
-        if result:
-            parsed = self._parse_semantic_response_robust(result, attempt=3)
-            if parsed:
-                return parsed
-        
-        # All attempts failed - return default
-        return {
-            "importance_score": 0.4,
-            "categories": ["standard"],
-            "fragments": None
-        }
-    
-    def _create_full_analysis_prompt(self, context_messages: List[Message], target_idx: int) -> str:
-        """Create detailed semantic analysis prompt"""
-        context_text = "\n".join([
-            f"[{i}] {msg.message_type.value}: {msg.content}"
-            for i, msg in enumerate(context_messages)
-        ])
-        
-        return f"""Analyze message [{target_idx}] in context for semantic importance and categorization.
-
-Context:
-{context_text}
-
-Categories:
-- story_critical: Major plot developments, character deaths, world-changing events
-- character_focused: Relationship changes, character development, personality reveals
-- relationship_dynamics: Evolving relationships between characters
-- emotional_significance: Dramatic moments, trust/betrayal, conflict resolution
-- world_building: New locations, lore, cultural info, political changes
-- standard: General interactions, travel, routine activities
-
-If the target message contains multiple semantic elements, fragment it.
-
-Return JSON format:
-{{
-  "importance_score": 0.0-1.0,
-  "categories": ["category1", "category2"],
-  "fragments": [
-    {{"text": "portion1", "categories": ["category"], "importance": 0.0-1.0}},
-    {{"text": "portion2", "categories": ["category"], "importance": 0.0-1.0}}
-  ]
-}}
-
-For single-category messages, set fragments to null."""
-    
-    def _create_simple_analysis_prompt(self, content: str) -> str:
-        """Create simplified analysis prompt"""
-        return f"""Categorize this message and rate its story importance:
-
-Message: {content}
-
-Categories: story_critical, character_focused, relationship_dynamics, emotional_significance, world_building, standard
-
-Return JSON:
-{{
-  "importance_score": 0.0-1.0,
-  "categories": ["primary_category"]
-}}"""
-    
-    def _create_binary_prompt(self, content: str) -> str:
-        """Create binary preserve/condense prompt"""
-        return f"""Should this message be preserved or condensed?
-
-Message: {content}
-
-Return JSON:
-{{
-  "preserve": true/false
-}}"""
-    
-    def _parse_semantic_response_robust(self, response: str, attempt: int) -> Optional[Dict[str, Any]]:
-        """Parse LLM semantic analysis response with 5-strategy defensive handling"""
-        
-        # Strategy 1: Direct JSON parsing
-        try:
-            data = json.loads(response.strip())
-            if self._validate_semantic_data(data, attempt):
-                return self._inject_missing_fields(data, attempt)
-        except json.JSONDecodeError:
-            pass
-        
-        # Strategy 2: Substring extraction
-        try:
-            start = response.find('{')
-            end = response.rfind('}') + 1
-            
-            if start >= 0 and end > start:
-                json_str = response[start:end]
-                data = json.loads(json_str)
-                if self._validate_semantic_data(data, attempt):
-                    return self._inject_missing_fields(data, attempt)
-        except (json.JSONDecodeError, ValueError):
-            pass
-        
-        # Strategy 3: Field validation and extraction
-        try:
-            # Look for specific patterns in response
-            if attempt == 3:  # Binary response
-                if "true" in response.lower() or "preserve" in response.lower():
-                    return {"importance_score": 0.8, "categories": ["story_critical"], "fragments": None}
-                else:
-                    return {"importance_score": 0.2, "categories": ["standard"], "fragments": None}
-            
-            # Try to extract numeric importance
-            import re
-            importance_match = re.search(r'"?importance_score"?\s*:\s*([0-9.]+)', response)
-            if importance_match:
-                importance = float(importance_match.group(1))
-                return {"importance_score": importance, "categories": ["standard"], "fragments": None}
-        except:
-            pass
-        
-        # Strategy 4: Default injection based on attempt type
-        if attempt == 3:  # Binary response
-            return {"importance_score": 0.4, "categories": ["standard"], "fragments": None}
-        elif attempt == 2:  # Simple response
-            return {"importance_score": 0.4, "categories": ["standard"], "fragments": None}
-        
-        # Strategy 5: Complete fallback
-        return {"importance_score": 0.4, "categories": ["standard"], "fragments": None}
-    
-    def _validate_semantic_data(self, data: Dict[str, Any], attempt: int) -> bool:
-        """Validate that semantic analysis data has required fields"""
-        if not isinstance(data, dict):
-            return False
-        
-        if attempt == 3:  # Binary response
-            return "preserve" in data
-        
-        required_fields = ["importance_score", "categories"]
-        return all(field in data for field in required_fields)
-    
-    def _inject_missing_fields(self, data: Dict[str, Any], attempt: int) -> Dict[str, Any]:
-        """Inject missing fields with sensible defaults"""
-        if attempt == 3:  # Binary response
-            preserve = data.get("preserve", False)
-            return {
-                "importance_score": 0.8 if preserve else 0.2,
-                "categories": ["story_critical"] if preserve else ["standard"],
-                "fragments": None
-            }
-        
-        # Ensure importance_score is valid
-        importance = data.get("importance_score", 0.4)
-        if not isinstance(importance, (int, float)) or importance < 0 or importance > 1:
-            importance = 0.4
-        data["importance_score"] = importance
-        
-        # Ensure categories is a list
-        categories = data.get("categories", ["standard"])
-        if not isinstance(categories, list):
-            categories = ["standard"]
-        data["categories"] = categories
-        
-        # Ensure fragments field exists
-        if "fragments" not in data:
-            data["fragments"] = None
-        
-        return data
-    
-    def _auto_load(self) -> None:
-        """Auto-load memory from file if it exists"""
-        try:
-            if os.path.exists(self.memory_file):
-                success = self.load_conversation(self.memory_file)
-                if success and self.debug_logger:
-                    self.debug_logger.debug(f"Auto-loaded {len(self.messages)} messages from {self.memory_file}")
-                elif not success and self.debug_logger:
-                    self.debug_logger.error(f"Failed to auto-load from {self.memory_file}")
-            elif self.debug_logger:
-                self.debug_logger.debug(f"No existing memory file found at {self.memory_file}")
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Auto-load error: {e}")
-    
-    def _auto_save(self) -> None:
-        """Auto-save memory to file"""
-        if not self.auto_save_enabled:
-            return
-            
-        try:
-            # Create backup of existing file
-            if os.path.exists(self.memory_file):
-                backup_file = f"{self.memory_file}.bak"
-                shutil.copy2(self.memory_file, backup_file)
-            
-            # Save current state
-            success = self.save_conversation(self.memory_file)
-            if not success and self.debug_logger:
-                self.debug_logger.error(f"Auto-save failed to {self.memory_file}")
-                
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Auto-save error: {e}")
+    # =============================================================================
+    # CORE STORAGE OPERATIONS
+    # =============================================================================
     
     def add_message(self, content: str, message_type: MessageType) -> None:
         """Add new message and manage memory with background auto-save"""
@@ -410,7 +131,7 @@ Return JSON:
             if self.debug_logger:
                 self.debug_logger.debug(f"Added {message_type.value} message: {len(content)} chars, {message.token_estimate} tokens")
 
-        # Move ALL auto-save operations to background thread to avoid blocking main thread
+        # Background auto-save to avoid blocking main thread
         if self.auto_save_enabled:
             auto_save_thread = threading.Thread(
                 target=self._background_auto_save,
@@ -419,328 +140,16 @@ Return JSON:
             )
             auto_save_thread.start()
 
-    def _background_auto_save(self) -> None:
-        """Handle auto-save and condensation in background thread"""
-        try:
-            # Auto-save first (file operations)
-            self._auto_save()
-
-            # Check if condensation needed
-            with self.lock:
-                current_tokens = sum(msg.token_estimate for msg in self.messages)
-
-            if current_tokens > self.max_memory_tokens:
-                if self.debug_logger:
-                    self.debug_logger.debug(f"Starting background condensation: {current_tokens} > {self.max_memory_tokens}")
-                self._perform_semantic_condensation()
-
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Background auto-save failed: {e}")
-    
-    def _perform_semantic_condensation(self) -> None:
-        """Execute multi-pass LLM-powered semantic condensation with auto-save"""
-        if len(self.messages) < 10:  # Need minimum messages for context
-            return
-            
-        # Run async condensation in thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(self._async_multi_pass_condensation())
-        finally:
-            loop.close()
-    
-    async def _async_multi_pass_condensation(self) -> None:
-        """Multi-pass async condensation with increasing aggressiveness and auto-save"""
-        max_passes = 3
-        
-        for pass_num in range(max_passes):
-            current_tokens = sum(msg.token_estimate for msg in self.messages)
-            
-            if current_tokens <= self.max_memory_tokens:
-                if self.debug_logger:
-                    self.debug_logger.debug(f"Condensation complete after {pass_num} passes: {current_tokens} tokens")
-                break
-                
-            if self.debug_logger:
-                self.debug_logger.debug(f"Condensation pass {pass_num + 1}/{max_passes}, tokens: {current_tokens}")
-            
-            # Ensure all messages have semantic categories
-            await self._categorize_uncategorized_messages()
-            
-            # Collect preservation candidates with increasing aggressiveness
-            preserve_messages, condense_candidates = await self._collect_preservation_candidates(pass_num)
-            
-            if not condense_candidates:
-                if self.debug_logger:
-                    self.debug_logger.debug(f"No condensation candidates found at aggressiveness level {pass_num}")
-                continue
-            
-            # Create condensed summary for candidates by category
-            condensed_message = await self._create_category_aware_summary(condense_candidates)
-            
-            if condensed_message:
-                # Replace candidates with condensed summary
-                with self.lock:
-                    self.messages = [condensed_message] + preserve_messages
-                    self.condensation_count += 1
-                
-                # Auto-save after successful condensation
-                self._auto_save()
-                
-                new_tokens = sum(msg.token_estimate for msg in self.messages)
-                if self.debug_logger:
-                    self.debug_logger.debug(
-                        f"Pass {pass_num + 1} complete: condensed {len(condense_candidates)} messages, "
-                        f"tokens: {current_tokens} → {new_tokens}"
-                    )
-            else:
-                if self.debug_logger:
-                    self.debug_logger.debug(f"Condensation failed at pass {pass_num + 1}")
-                break
-        
-        # Final status
-        final_tokens = sum(msg.token_estimate for msg in self.messages)
-        if final_tokens > self.max_memory_tokens:
-            if self.debug_logger:
-                self.debug_logger.debug(f"Condensation incomplete: {final_tokens} tokens still exceed limit")
-    
-    async def _categorize_uncategorized_messages(self) -> None:
-        """Ensure all messages have semantic categories"""
-        uncategorized = [
-            (i, msg) for i, msg in enumerate(self.messages)
-            if msg.message_type in [MessageType.USER, MessageType.ASSISTANT] 
-            and msg.content_category == "standard"
-            and not msg.condensed
-        ]
-        
-        if self.debug_logger and uncategorized:
-            self.debug_logger.debug(f"Categorizing {len(uncategorized)} uncategorized messages")
-        
-        # Process in batches to avoid overwhelming LLM
-        batch_size = 10
-        for batch_start in range(0, len(uncategorized), batch_size):
-            batch = uncategorized[batch_start:batch_start + batch_size]
-            
-            for msg_idx, message in batch:
-                analysis = await self._analyze_message_semantics(msg_idx)
-                if analysis:
-                    categories = analysis.get("categories", ["standard"])
-                    # Use highest-priority category
-                    message.content_category = self._get_highest_priority_category(categories)
-    
-    def _get_highest_priority_category(self, categories: List[str]) -> str:
-        """Get highest priority category from list"""
-        priority_order = [
-            "story_critical", "character_focused", "relationship_dynamics", 
-            "emotional_significance", "world_building", "standard"
-        ]
-        
-        for category in priority_order:
-            if category in categories:
-                return category
-        return "standard"
-    
-    async def _collect_preservation_candidates(self, aggressiveness_level: int) -> Tuple[List[Message], List[Message]]:
-        """Collect messages for preservation vs condensation with increasing aggressiveness"""
-        preserve_messages = []
-        condense_candidates = []
-        
-        # Always preserve recent messages (last 5)
-        recent_cutoff = max(0, len(self.messages) - 5)
-        
-        for i, message in enumerate(self.messages[:recent_cutoff]):
-            # Skip already condensed messages
-            if message.condensed:
-                preserve_messages.append(message)
-                continue
-            
-            # Skip non-conversation messages
-            if message.message_type not in [MessageType.USER, MessageType.ASSISTANT]:
-                preserve_messages.append(message)
-                continue
-            
-            # Analyze message for preservation decision
-            analysis = await self._analyze_message_semantics(i)
-            should_preserve = self._should_preserve_with_aggressiveness(analysis, aggressiveness_level)
-            
-            if should_preserve:
-                preserve_messages.append(message)
-            else:
-                condense_candidates.append(message)
-        
-        # Always preserve recent messages
-        preserve_messages.extend(self.messages[recent_cutoff:])
-        
-        if self.debug_logger:
-            self.debug_logger.debug(
-                f"Aggressiveness {aggressiveness_level}: preserve {len(preserve_messages)}, "
-                f"condense {len(condense_candidates)}"
-            )
-        
-        return preserve_messages, condense_candidates
-    
-    def _should_preserve_with_aggressiveness(self, analysis: Dict[str, Any], aggressiveness: int) -> bool:
-        """Determine preservation with increasing aggressiveness"""
-        categories = analysis.get("categories", ["standard"])
-        importance = analysis.get("importance_score", 0.4)
-        
-        # Get base preservation ratio for highest priority category
-        highest_category = self._get_highest_priority_category(categories)
-        base_ratio = CONDENSATION_STRATEGIES.get(highest_category, CONDENSATION_STRATEGIES["standard"])["preservation_ratio"]
-        
-        # Apply aggressiveness reduction
-        # Pass 0: base ratio, Pass 1: -0.15, Pass 2: -0.3
-        aggressiveness_reduction = aggressiveness * 0.15
-        adjusted_ratio = max(0.1, base_ratio - aggressiveness_reduction)
-        
-        # Preserve if importance exceeds adjusted threshold
-        preserve = importance >= adjusted_ratio
-        
-        return preserve
-    
-    async def _create_category_aware_summary(self, messages: List[Message]) -> Optional[Message]:
-        """Create condensed summary organized by semantic categories"""
-        if not messages:
-            return None
-        
-        # Group messages by category
-        category_groups = {}
-        for msg in messages:
-            category = msg.content_category
-            if category not in category_groups:
-                category_groups[category] = []
-            category_groups[category].append(msg)
-        
-        # Create summaries for each category
-        category_summaries = []
-        
-        for category, category_messages in category_groups.items():
-            strategy = CONDENSATION_STRATEGIES.get(category, CONDENSATION_STRATEGIES["standard"])
-            instruction = strategy["instruction"]
-            
-            content_to_condense = "\n".join([
-                f"[{msg.message_type.value}] {msg.content}"
-                for msg in category_messages
-            ])
-            
-            prompt = f"""Condense the following {category} conversation content according to these guidelines:
-
-{instruction}
-
-Content to condense:
-{content_to_condense}
-
-Return a concise summary that preserves the essential elements for this category while minimizing length. Maintain narrative continuity and emotional context."""
-            
-            summary_content = await self._call_llm([{"role": "system", "content": prompt}])
-            
-            if summary_content:
-                category_summaries.append(f"[{category.upper()}] {summary_content}")
-        
-        if category_summaries:
-            final_summary = "\n\n".join(category_summaries)
-            condensed_msg = Message(
-                content=f"[CONDENSED - {len(messages)} messages] {final_summary}",
-                message_type=MessageType.SYSTEM
-            )
-            condensed_msg.condensed = True
-            condensed_msg.content_category = "condensed_summary"
-            return condensed_msg
-        
-        return None
-    
-    def clear_memory_file(self) -> bool:
-        """Clear memory file and reset in-memory state"""
-        try:
-            with self.lock:
-                # Clear in-memory state
-                self.messages.clear()
-                self.condensation_count = 0
-                
-                # Remove memory file if it exists
-                if os.path.exists(self.memory_file):
-                    os.remove(self.memory_file)
-                
-                # Remove backup file if it exists
-                backup_file = f"{self.memory_file}.bak"
-                if os.path.exists(backup_file):
-                    os.remove(backup_file)
-            
-            if self.debug_logger:
-                self.debug_logger.debug(f"Memory file {self.memory_file} cleared")
-            
-            return True
-            
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to clear memory file: {e}")
-            return False
-    
-    def get_memory_file_info(self) -> Dict[str, Any]:
-        """Get memory file information for status reporting"""
-        try:
-            if not os.path.exists(self.memory_file):
-                return {
-                    "file_exists": False,
-                    "file_path": self.memory_file,
-                    "auto_save_enabled": self.auto_save_enabled
-                }
-            
-            stat = os.stat(self.memory_file)
-            
-            with self.lock:
-                return {
-                    "file_exists": True,
-                    "file_path": self.memory_file,
-                    "file_size": stat.st_size,
-                    "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "message_count": len(self.messages),
-                    "auto_save_enabled": self.auto_save_enabled,
-                    "backup_exists": os.path.exists(f"{self.memory_file}.bak")
-                }
-                
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to get memory file info: {e}")
-            return {
-                "file_exists": False,
-                "error": str(e),
-                "auto_save_enabled": self.auto_save_enabled
-            }
-    
-    def backup_memory_file(self, backup_filename: Optional[str] = None) -> bool:
-        """Create backup of memory file"""
-        try:
-            if not os.path.exists(self.memory_file):
-                return False
-            
-            if not backup_filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_filename = f"memory_backup_{timestamp}.json"
-            
-            shutil.copy2(self.memory_file, backup_filename)
-            
-            if self.debug_logger:
-                self.debug_logger.debug(f"Memory backed up to {backup_filename}")
-            
-            return True
-            
-        except Exception as e:
-            if self.debug_logger:
-                self.debug_logger.error(f"Failed to backup memory file: {e}")
-            return False
-
     def get_messages(self, limit: Optional[int] = None) -> List[Message]:
-        """Retrieve messages with optional limit"""
+        """Get messages with optional limit"""
         with self.lock:
-            if limit:
-                return self.messages[-limit:]
-            return self.messages.copy()
+            if limit is None:
+                return self.messages.copy()
+            else:
+                return self.messages[-limit:].copy()
     
     def get_conversation_for_mcp(self) -> List[Dict[str, str]]:
-        """Format conversation for MCP requests, excluding momentum state"""
+        """Get conversation in MCP format (excluding momentum state messages)"""
         with self.lock:
             return [
                 {"role": msg.message_type.value, "content": msg.content}
@@ -748,18 +157,60 @@ Return a concise summary that preserves the essential elements for this category
                 if msg.message_type != MessageType.MOMENTUM_STATE
             ]
     
-    def get_memory_stats(self) -> Dict[str, Any]:
-        """Return current memory statistics"""
+    def update_message_category(self, message_id: str, category: str) -> bool:
+        """Update message category (called by orchestrator after sem.py analysis)"""
         with self.lock:
-            total_tokens = sum(msg.token_estimate for msg in self.messages)
-            return {
-                "message_count": len(self.messages),
-                "total_tokens": total_tokens,
-                "max_tokens": self.max_memory_tokens,
-                "utilization": total_tokens / self.max_memory_tokens,
-                "condensations_performed": self.condensation_count
-            }
+            for message in self.messages:
+                if message.id == message_id:
+                    message.content_category = category
+                    if self.debug_logger:
+                        self.debug_logger.debug(f"Updated message {message_id} category to {category}")
+                    return True
+        return False
+    
+    def replace_messages_with_condensed(self, message_ids: List[str], condensed_content: str) -> bool:
+        """Replace specified messages with condensed version (called by orchestrator)"""
+        with self.lock:
+            # Find messages to replace
+            messages_to_remove = []
+            for i, message in enumerate(self.messages):
+                if message.id in message_ids:
+                    messages_to_remove.append(i)
+            
+            if not messages_to_remove:
+                return False
+            
+            # Create condensed message
+            condensed_message = Message(condensed_content, MessageType.SYSTEM)
+            condensed_message.condensed = True
+            condensed_message.content_category = "condensed_summary"
+            
+            # Replace messages (keep earliest position)
+            earliest_index = min(messages_to_remove)
+            
+            # Remove messages in reverse order to maintain indices
+            for i in reversed(messages_to_remove):
+                del self.messages[i]
+            
+            # Insert condensed message at earliest position
+            self.messages.insert(earliest_index, condensed_message)
+            
+            self.condensation_count += 1
+            
+            if self.debug_logger:
+                self.debug_logger.debug(f"Replaced {len(message_ids)} messages with condensed summary")
+            
+            # Auto-save after condensation
+            self._auto_save()
+            
+            return True
 
+# Chunk 2/3 - emm.py - File Operations and State Management
+
+    # =============================================================================
+    # FILE OPERATIONS 
+    # =============================================================================
+    
     def save_conversation(self, filename: Optional[str] = None) -> bool:
         """Save conversation to file with robust error handling"""
         if not filename:
@@ -849,61 +300,58 @@ Return a concise summary that preserves the essential elements for this category
                 self.condensation_count = metadata.get("condensations", 0)
             
             if self.debug_logger:
-                self.debug_logger.debug(f"Conversation loaded from {filename}: {len(self.messages)} messages")
+                self.debug_logger.debug(f"Loaded {len(self.messages)} messages from {filename}")
             
             return True
             
         except Exception as e:
             if self.debug_logger:
-                self.debug_logger.error(f"Failed to load conversation from {filename}: {e}")
+                self.debug_logger.error(f"Failed to load conversation: {e}")
             return False
     
-    def clear_memory(self) -> None:
-        """Clear all stored messages (in-memory only)"""
-        with self.lock:
-            self.messages.clear()
-            self.condensation_count = 0
+    def backup_memory_file(self, backup_filename: Optional[str] = None) -> bool:
+        """Create backup of current memory file"""
+        try:
+            if not os.path.exists(self.memory_file):
+                return False
             
-        if self.debug_logger:
-            self.debug_logger.debug("In-memory state cleared")
+            if not backup_filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_filename = f"{self.memory_file}.backup_{timestamp}"
+            
+            shutil.copy2(self.memory_file, backup_filename)
+            
+            if self.debug_logger:
+                self.debug_logger.debug(f"Created backup: {backup_filename}")
+            
+            return True
+            
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Backup failed: {e}")
+            return False
     
-    def analyze_conversation_patterns(self) -> Dict[str, Any]:
-        """Generate conversation statistics for debugging"""
-        with self.lock:
-            if not self.messages:
-                return {"status": "no_messages"}
+    def get_memory_file_info(self) -> Dict[str, Any]:
+        """Get information about memory file"""
+        try:
+            if not os.path.exists(self.memory_file):
+                return {"exists": False}
             
-            message_types = {}
-            category_counts = {}
-            
-            for msg in self.messages:
-                msg_type = msg.message_type.value
-                message_types[msg_type] = message_types.get(msg_type, 0) + 1
-                
-                category = getattr(msg, 'content_category', 'unknown')
-                category_counts[category] = category_counts.get(category, 0) + 1
-            
-            total_tokens = sum(msg.token_estimate for msg in self.messages)
-            avg_tokens = total_tokens / len(self.messages) if self.messages else 0
-            
-            condensed_count = sum(1 for msg in self.messages if getattr(msg, 'condensed', False))
-            
+            stat = os.stat(self.memory_file)
             return {
-                "total_messages": len(self.messages),
-                "message_types": message_types,
-                "semantic_categories": category_counts,
-                "condensed_messages": condensed_count,
-                "total_tokens": total_tokens,
-                "average_tokens_per_message": round(avg_tokens, 2),
-                "memory_utilization": round(total_tokens / self.max_memory_tokens, 3),
-                "condensations_performed": self.condensation_count,
-                "oldest_message": self.messages[0].timestamp if self.messages else None,
-                "newest_message": self.messages[-1].timestamp if self.messages else None,
-                "auto_save_enabled": self.auto_save_enabled,
-                "memory_file": self.memory_file
+                "exists": True,
+                "size_bytes": stat.st_size,
+                "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "filename": self.memory_file
             }
-
-    # SME Integration Methods
+            
+        except Exception:
+            return {"exists": False, "error": True}
+    
+    # =============================================================================
+    # STATE MANAGEMENT (SME INTEGRATION)
+    # =============================================================================
+    
     def get_momentum_state(self) -> Optional[Dict[str, Any]]:
         """Retrieve current momentum state from memory for SME"""
         with self.lock:
@@ -934,44 +382,309 @@ Return a concise summary that preserves the essential elements for this category
         # Trigger auto-save for momentum state
         if self.auto_save_enabled:
             self._auto_save()
+    
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """Return current memory statistics"""
+        with self.lock:
+            total_tokens = sum(msg.token_estimate for msg in self.messages)
+            return {
+                "message_count": len(self.messages),
+                "total_tokens": total_tokens,
+                "max_tokens": self.max_memory_tokens,
+                "utilization": round(total_tokens / self.max_memory_tokens, 3),
+                "condensations_performed": self.condensation_count,
+                "oldest_message": self.messages[0].timestamp if self.messages else None,
+                "newest_message": self.messages[-1].timestamp if self.messages else None,
+                "auto_save_enabled": self.auto_save_enabled,
+                "memory_file": self.memory_file
+            }
+    
+    def check_condensation_needed(self) -> bool:
+        """Check if condensation is needed (called by orchestrator)"""
+        with self.lock:
+            current_tokens = sum(msg.token_estimate for msg in self.messages)
+            return current_tokens > self.max_memory_tokens
+    
+    def get_condensation_candidates(self, preserve_recent: int = 5) -> List[str]:
+        """Get message IDs that are candidates for condensation"""
+        with self.lock:
+            if len(self.messages) <= preserve_recent:
+                return []
+            
+            # Return message IDs excluding recent messages and momentum state
+            candidates = []
+            messages_to_check = self.messages[:-preserve_recent]
+            
+            for message in messages_to_check:
+                if (message.message_type != MessageType.MOMENTUM_STATE and 
+                    not message.condensed and
+                    message.content_category in ["standard", "world_building"]):  # Lower priority categories
+                    candidates.append(message.id)
+            
+            return candidates
+    
+    # =============================================================================
+    # PRIVATE HELPER FUNCTIONS
+    # =============================================================================
+    
+    def _auto_load(self) -> None:
+        """Auto-load memory from file if it exists"""
+        try:
+            if os.path.exists(self.memory_file):
+                success = self.load_conversation(self.memory_file)
+                if success and self.debug_logger:
+                    self.debug_logger.debug(f"Auto-loaded {len(self.messages)} messages from {self.memory_file}")
+                elif not success and self.debug_logger:
+                    self.debug_logger.error(f"Failed to auto-load from {self.memory_file}")
+            elif self.debug_logger:
+                self.debug_logger.debug(f"No existing memory file found at {self.memory_file}")
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Auto-load error: {e}")
+    
+    def _auto_save(self) -> None:
+        """Auto-save memory to file"""
+        if not self.auto_save_enabled:
+            return
+            
+        try:
+            # Create backup of existing file
+            if os.path.exists(self.memory_file):
+                backup_file = f"{self.memory_file}.bak"
+                shutil.copy2(self.memory_file, backup_file)
+            
+            # Save current state
+            success = self.save_conversation(self.memory_file)
+            if not success and self.debug_logger:
+                self.debug_logger.error(f"Auto-save failed to {self.memory_file}")
+                
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Auto-save error: {e}")
+    
+    def _background_auto_save(self) -> None:
+        """Handle auto-save in background thread and check for condensation"""
+        try:
+            # Auto-save first (file operations)
+            self._auto_save()
 
-# Module test functionality
-if __name__ == "__main__":
-    print("DevName RPG Client - Enhanced Memory Manager with Complete LLM Semantic Analysis")
-    print("Testing memory management functionality...")
+            # Check if condensation needed - request through orchestrator
+            if self.check_condensation_needed() and self.orchestrator_callback:
+                if self.debug_logger:
+                    current_tokens = sum(msg.token_estimate for msg in self.messages)
+                    self.debug_logger.debug(f"Requesting condensation from orchestrator: {current_tokens} > {self.max_memory_tokens}")
+                
+                try:
+                    # Request condensation through orchestrator
+                    self.orchestrator_callback({
+                        "request_type": "condensation",
+                        "memory_stats": self.get_memory_stats(),
+                        "candidates": self.get_condensation_candidates()
+                    })
+                except Exception as e:
+                    if self.debug_logger:
+                        self.debug_logger.error(f"Orchestrator condensation request failed: {e}")
+
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Background auto-save failed: {e}")
+
+# Chunk 3/3 - emm.py - Testing and Module Interface
+
+    # =============================================================================
+    # UTILITY AND DIAGNOSTIC FUNCTIONS
+    # =============================================================================
+    
+    def clear_memory(self) -> None:
+        """Clear all messages from memory"""
+        with self.lock:
+            self.messages.clear()
+            self.condensation_count = 0
+        
+        if self.debug_logger:
+            self.debug_logger.debug("Memory cleared")
+    
+    def get_messages_by_category(self, category: str) -> List[Message]:
+        """Get messages filtered by content category"""
+        with self.lock:
+            return [msg for msg in self.messages if msg.content_category == category]
+    
+    def get_messages_by_type(self, message_type: MessageType) -> List[Message]:
+        """Get messages filtered by message type"""
+        with self.lock:
+            return [msg for msg in self.messages if msg.message_type == message_type]
+    
+    def get_recent_conversation_summary(self, limit: int = 10) -> str:
+        """Get summary of recent conversation for debugging"""
+        with self.lock:
+            recent_messages = self.messages[-limit:] if len(self.messages) > limit else self.messages
+            
+            summary_lines = []
+            for msg in recent_messages:
+                content_preview = msg.content[:50] + "..." if len(msg.content) > 50 else msg.content
+                summary_lines.append(f"[{msg.message_type.value}] {content_preview} ({msg.token_estimate} tokens)")
+            
+            return "\n".join(summary_lines)
+    
+    def validate_message_integrity(self) -> Dict[str, Any]:
+        """Validate integrity of stored messages"""
+        with self.lock:
+            validation_results = {
+                "total_messages": len(self.messages),
+                "corrupted_messages": 0,
+                "missing_ids": 0,
+                "duplicate_ids": 0,
+                "token_sum_mismatch": False,
+                "issues": []
+            }
+            
+            seen_ids = set()
+            calculated_tokens = 0
+            
+            for i, msg in enumerate(self.messages):
+                # Check for missing ID
+                if not msg.id:
+                    validation_results["missing_ids"] += 1
+                    validation_results["issues"].append(f"Message {i} missing ID")
+                
+                # Check for duplicate ID
+                elif msg.id in seen_ids:
+                    validation_results["duplicate_ids"] += 1
+                    validation_results["issues"].append(f"Message {i} duplicate ID: {msg.id}")
+                else:
+                    seen_ids.add(msg.id)
+                
+                # Check for corrupted content
+                if not isinstance(msg.content, str):
+                    validation_results["corrupted_messages"] += 1
+                    validation_results["issues"].append(f"Message {i} corrupted content type")
+                
+                # Check token estimate
+                actual_tokens = msg._estimate_tokens(msg.content)
+                if actual_tokens != msg.token_estimate:
+                    validation_results["issues"].append(f"Message {i} token mismatch: {msg.token_estimate} vs {actual_tokens}")
+                
+                calculated_tokens += actual_tokens
+            
+            # Check total token calculation
+            stored_total = sum(msg.token_estimate for msg in self.messages)
+            if calculated_tokens != stored_total:
+                validation_results["token_sum_mismatch"] = True
+                validation_results["issues"].append(f"Token sum mismatch: calculated {calculated_tokens} vs stored {stored_total}")
+            
+            return validation_results
+    
+    def export_conversation_text(self, filename: Optional[str] = None, include_metadata: bool = False) -> bool:
+        """Export conversation as plain text file"""
+        try:
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"conversation_export_{timestamp}.txt"
+            
+            with self.lock:
+                lines = []
+                
+                if include_metadata:
+                    stats = self.get_memory_stats()
+                    lines.append(f"=== CONVERSATION EXPORT ===")
+                    lines.append(f"Exported: {datetime.now().isoformat()}")
+                    lines.append(f"Total Messages: {stats['message_count']}")
+                    lines.append(f"Total Tokens: {stats['total_tokens']}")
+                    lines.append(f"Condensations: {stats['condensations_performed']}")
+                    lines.append(f"=" * 50)
+                    lines.append("")
+                
+                for msg in self.messages:
+                    if msg.message_type == MessageType.MOMENTUM_STATE:
+                        continue  # Skip internal state messages
+                    
+                    timestamp = datetime.fromisoformat(msg.timestamp).strftime("%H:%M:%S")
+                    header = f"[{timestamp}] {msg.message_type.value.upper()}"
+                    if msg.condensed:
+                        header += " (CONDENSED)"
+                    
+                    lines.append(header)
+                    lines.append("-" * len(header))
+                    lines.append(msg.content)
+                    lines.append("")
+            
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            
+            if self.debug_logger:
+                self.debug_logger.debug(f"Conversation exported to {filename}")
+            
+            return True
+            
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Export failed: {e}")
+            return False
+
+# =============================================================================
+# MODULE TEST FUNCTIONALITY
+# =============================================================================
+
+def test_memory_manager():
+    """Test basic memory manager functionality"""
+    print("DevName RPG Client - Enhanced Memory Manager (Simplified)")
+    print("Testing storage and state management functionality...")
     
     # Test with auto-save enabled
-    emm = EnhancedMemoryManager(auto_save_enabled=True, memory_file="test_memory.json")
+    test_emm = EnhancedMemoryManager(auto_save_enabled=True, memory_file="test_memory.json")
     
-    # Test basic functionality
-    emm.add_message("Hello there!", MessageType.USER)
-    emm.add_message("Greetings, traveler!", MessageType.ASSISTANT)
+    print(f"Initial state: {test_emm.get_memory_stats()}")
     
-    stats = emm.get_memory_stats()
-    print(f"Memory stats: {stats}")
+    # Test basic message operations
+    test_emm.add_message("Hello there!", MessageType.USER)
+    test_emm.add_message("Greetings, traveler! Welcome to the tavern.", MessageType.ASSISTANT)
+    test_emm.add_message("I look around the tavern for any interesting characters.", MessageType.USER)
     
-    file_info = emm.get_memory_file_info()
-    print(f"Memory file info: {file_info}")
+    print(f"After adding messages: {test_emm.get_memory_stats()}")
     
-    patterns = emm.analyze_conversation_patterns()
-    print(f"Conversation patterns: {patterns}")
+    # Test message categorization (simulating orchestrator)
+    messages = test_emm.get_messages()
+    if messages:
+        test_emm.update_message_category(messages[0].id, "character_focused")
+        print("Updated first message category")
     
-    # Test SME integration
+    # Test momentum state
     test_state = {
-        "narrative_pressure": 0.3,
-        "pressure_source": "antagonist",
-        "manifestation_type": "tension",
-        "escalation_count": 1,
-        "base_pressure_floor": 0.0,
-        "last_analysis_count": 5,
-        "antagonist": {"name": "Test Villain", "motivation": "test purposes"}
+        "narrative_pressure": 0.6,
+        "pressure_source": "social",
+        "antagonist_present": False
     }
+    test_emm.update_momentum_state(test_state)
+    retrieved_state = test_emm.get_momentum_state()
+    print(f"Momentum state test: {retrieved_state}")
     
-    emm.update_momentum_state(test_state)
-    retrieved_state = emm.get_momentum_state()
-    print(f"SME state integration: {retrieved_state}")
+    # Test file operations
+    save_success = test_emm.save_conversation("test_export.json")
+    print(f"Save test: {save_success}")
     
-    # Test memory clearing
-    emm.clear_memory_file()
+    # Test validation
+    validation = test_emm.validate_message_integrity()
+    print(f"Validation: {validation['total_messages']} messages, {len(validation['issues'])} issues")
     
-    print("Memory manager test completed successfully.")
+    # Test export
+    export_success = test_emm.export_conversation_text("test_export.txt", include_metadata=True)
+    print(f"Export test: {export_success}")
+    
+    # Test condensation candidates
+    candidates = test_emm.get_condensation_candidates()
+    print(f"Condensation candidates: {len(candidates)} messages")
+    
+    # Cleanup test files
+    try:
+        import os
+        for test_file in ["test_memory.json", "test_memory.json.bak", "test_export.json", "test_export.txt"]:
+            if os.path.exists(test_file):
+                os.remove(test_file)
+        print("Test files cleaned up")
+    except:
+        print("Warning: Could not clean up all test files")
+    
+    print("Memory manager test completed successfully!")
+
+if __name__ == "__main__":
+    test_memory_manager()

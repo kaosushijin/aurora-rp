@@ -1,6 +1,5 @@
 # CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
 
-# Chunk 1/3 - ncui.py - Pure UI Management Interface
 #!/usr/bin/env python3
 """
 DevName RPG Client - NCurses UI Controller (ncui.py)
@@ -9,9 +8,16 @@ Simplified UI management without orchestration logic - business logic moved to o
 
 import curses
 import time
+import sys
+from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Callable
 
-# Import consolidated UI library
+# Ensure current directory is in Python path for local imports
+current_dir = Path(__file__).parent.absolute()
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+# Import consolidated UI library - direct import from current directory
 try:
     from uilib import (
         ColorManager, ColorTheme, TerminalManager, LayoutGeometry,
@@ -20,6 +26,7 @@ try:
     )
 except ImportError as e:
     print(f"UI library import failed: {e}")
+    print("Ensure uilib.py is present in current directory")
     raise
 
 # =============================================================================

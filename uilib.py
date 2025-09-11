@@ -1,18 +1,31 @@
 # CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
 
-# Chunk 1/4 - uilib.py - Terminal Management Components
 #!/usr/bin/env python3
 """
-DevName RPG Client - Unified UI Library (uilib.py)
-Consolidates all UI utilities from nci_terminal.py, nci_input.py, nci_scroll.py, nci_display.py, nci_colors.py
+DevName RPG Client - Consolidated UI Library (uilib.py)
+Consolidates all nci_*.py files into single cohesive UI library
+Remodularized for hub-and-spoke architecture
 """
 
 import curses
+import re
+import os
+import threading
 import time
-import textwrap
-from typing import Tuple, List, Dict, Any
+import sys
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+
+# Ensure current directory is in Python path for local imports
+current_dir = Path(__file__).parent.absolute()
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+# No external module imports needed - uilib.py is self-contained
+# All UI utilities consolidated from nci_terminal.py, nci_input.py, nci_scroll.py, nci_display.py, nci_colors.py
 
 # Configuration constants
 MIN_SCREEN_WIDTH = 80

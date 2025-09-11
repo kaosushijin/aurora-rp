@@ -1,7 +1,6 @@
 # CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
 
-# Chunk 1/4 - Central Orchestrator Hub
-# orch.py - DevName RPG Client Central Orchestrator
+#!/usr/bin/env python3
 """
 Central Hub Orchestrator for DevName RPG Client
 Coordinates all service modules and contains main program logic
@@ -11,16 +10,52 @@ ONLY module that communicates with mcp.py for LLM requests
 import asyncio
 import threading
 import time
+import sys
+from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
 from dataclasses import dataclass
 
-# Service module imports (spoke modules)
-from remod_staging.ncui import NCursesUIController
-from remod_staging.emm import EnhancedMemoryManager
-from remod_staging.sme import StoryMomentumEngine
-from remod_staging.sem import SemanticAnalysisEngine
-from remod_staging.uilib import TerminalManager
-import mcp
+# Ensure current directory is in Python path for local imports
+current_dir = Path(__file__).parent.absolute()
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+# Service module imports (spoke modules) - direct imports from current directory
+try:
+    from ncui import NCursesUIController
+except ImportError as e:
+    print(f"Failed to import ncui: {e}")
+    sys.exit(1)
+
+try:
+    from emm import EnhancedMemoryManager
+except ImportError as e:
+    print(f"Failed to import emm: {e}")
+    sys.exit(1)
+
+try:
+    from sme import StoryMomentumEngine
+except ImportError as e:
+    print(f"Failed to import sme: {e}")
+    sys.exit(1)
+
+try:
+    from sem import SemanticAnalysisEngine
+except ImportError as e:
+    print(f"Failed to import sem: {e}")
+    sys.exit(1)
+
+try:
+    from uilib import TerminalManager
+except ImportError as e:
+    print(f"Failed to import uilib: {e}")
+    sys.exit(1)
+
+try:
+    import mcp
+except ImportError as e:
+    print(f"Failed to import mcp: {e}")
+    sys.exit(1)
 
 @dataclass
 class OrchestrationState:

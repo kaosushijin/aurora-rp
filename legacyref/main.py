@@ -1,13 +1,10 @@
-# CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
-
+# Chunk 1/3 - main.py - Core Dependencies and Configuration
 #!/usr/bin/env python3
 """
 DevName RPG Client - Main Application Entry Point (main.py)
-Updated for hub-and-spoke architecture with orch.py orchestrator
-Located in /remod-staging/ directory with all other modules
 
 Module architecture and interconnects documented in genai.txt
-Now coordinates through orch.py instead of nci.py directly
+Coordinates all modules: nci.py, mcp.py, emm.py, sme.py
 """
 
 import sys
@@ -21,13 +18,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, List
 
-# Import application modules - all in same directory
+# Import application modules
 try:
-    from orch import Orchestrator
+    from nci import CursesInterface
     from mcp import MCPClient
 except ImportError as e:
     print(f"Failed to import required modules: {e}")
-    print("Ensure all remodularized module files are present in current directory")
+    print("Ensure all module files are present in the current directory")
     sys.exit(1)
 
 # Configuration constants
@@ -35,11 +32,11 @@ DEFAULT_CONFIG_FILE = "devname_config.json"
 DEBUG_LOG_FILE = "debug.log"
 MAX_LOG_AGE_DAYS = 7
 
-# Prompt file configuration - look in parent directory
+# Prompt file configuration
 PROMPT_FILES = {
-    'critrules': Path("../critrules.prompt"),
-    'companion': Path("../companion.prompt"), 
-    'lowrules': Path("../lowrules.prompt")
+    'critrules': Path("critrules.prompt"),
+    'companion': Path("companion.prompt"), 
+    'lowrules': Path("lowrules.prompt")
 }
 
 # Token allocation for prompt system
@@ -91,37 +88,35 @@ class DebugLogger:
         self.debug(message, "SYSTEM")
 
 class ApplicationConfig:
-    """Hardcoded configuration values - no file creation"""
+    """Application configuration management - hardcoded values"""
     
     def __init__(self, config_file: str = DEFAULT_CONFIG_FILE):
-        # Hardcoded configuration - no file reading
-        self.config_data = {
+        self.config_file = config_file
+        self.config_data = self._get_hardcoded_config()
+    
+    def _get_hardcoded_config(self) -> Dict[str, Any]:
+        """Return hardcoded configuration - no file creation"""
+        return {
             "mcp": {
-                "server_url": "http://localhost:3000/v1/chat/completions",
-                "model": "gpt-4o",
-                "timeout": 30
+                "server_url": "http://127.0.0.1:3456/chat",
+                "model": "qwen2.5:14b-instruct-q4_k_m",
+                "timeout": 300
             },
             "interface": {
-                "theme": "default",
-                "output_ratio": 0.85,
-                "auto_scroll": True,
-                "max_history": 1000
+                "color_theme": "classic",
+                "auto_save_conversation": False
             },
             "memory": {
-                "auto_save_interval": 30,
-                "max_messages": 1000,
-                "backup_count": 5
+                "max_tokens": 16000
             },
-            "analysis": {
-                "trigger_interval": 15,
-                "max_analysis_time": 30,
-                "enable_momentum": True,
-                "enable_semantic": True
+            "story": {
+                "pressure_decay_rate": 0.05,
+                "antagonist_threshold": 0.6
             }
         }
     
-    def get(self, key: str, default: Any = None) -> Any:
-        """Get configuration value with dot notation"""
+    def get(self, key: str, default=None):
+        """Get configuration value"""
         keys = key.split('.')
         value = self.config_data
         
@@ -189,47 +184,73 @@ class PromptManager:
                 "You are optimizing a character definition prompt for an RPG companion. "
                 "Condense the following prompt while preserving the companion's complete personality, "
                 "appearance, abilities, relationship dynamics, and behavioral patterns. "
-                "Maintain character consistency while reducing token count:\n\n"
+                "Maintain all essential character traits while reducing token count:\n\n"
                 f"{content}\n\n"
-                "Provide only the condensed character prompt that preserves full personality."
+                "Provide only the condensed prompt text that fully preserves the companion character."
             ),
             "lowrules": (
-                "You are optimizing supplementary game rules for an RPG. "
-                "Condense the following rules while preserving all mechanical functionality, "
-                "edge case handling, and rule interactions. Keep essential game balance:\n\n"
+                "You are optimizing a narrative generation prompt for an RPG system. "
+                "Condense the following prompt while preserving all narrative guidelines, "
+                "storytelling rules, and generation principles. Maintain effectiveness "
+                "in guiding story creation while reducing token count:\n\n"
                 f"{content}\n\n"
-                "Provide only the condensed rules that maintain complete functionality."
+                "Provide only the condensed prompt text that maintains narrative quality."
             )
         }
         
-        condensation_prompt = condensation_prompts.get(prompt_type, 
-            f"Condense the following text while preserving essential meaning and functionality:\n\n{content}"
-        )
+        prompt_instruction = condensation_prompts.get(prompt_type, condensation_prompts["critrules"])
         
         try:
-            messages = [{"role": "user", "content": condensation_prompt}]
-            condensed = await self.mcp_client.send_message(messages)
+            condensed = await self.mcp_client.send_message(
+                "Please condense this prompt.",
+                conversation_history=[],
+                story_context=""
+            )
             
-            if condensed and len(condensed) < len(content):
-                self._log_debug(f"Condensed {prompt_type}: {len(content)} -> {len(condensed)} chars")
-                return condensed
-            else:
-                self._log_debug(f"Condensation failed or ineffective for {prompt_type}")
-                return content
-                
+            # Override system prompt temporarily for condensation
+            original_prompt = self.mcp_client.system_prompt
+            self.mcp_client.system_prompt = prompt_instruction
+            
+            # Get condensed version
+            response = await self.mcp_client._execute_request({
+                "model": self.mcp_client.model,
+                "messages": [{"role": "system", "content": prompt_instruction}],
+                "stream": False
+            })
+            
+            # Restore original prompt
+            self.mcp_client.system_prompt = original_prompt
+            
+            self._log_debug(f"Condensed {prompt_type}: {len(content)} -> {len(response)} chars")
+            return response.strip()
+            
         except Exception as e:
-            self._log_debug(f"Condensation error for {prompt_type}: {e}")
+            self._log_debug(f"Condensation failed for {prompt_type}: {e}")
+            print(f"Warning: Failed to condense {prompt_type} prompt: {e}")
             return content
     
     async def load_and_optimize_prompts(self, mcp_client: MCPClient) -> Dict[str, str]:
-        """Load all prompt files and apply condensation if needed"""
+        """Load all prompt files and apply condensation if they exceed the token budget"""
         self.mcp_client = mcp_client
         
-        # Load all prompt files
+        # Load all prompt files with graceful handling
         prompts = {}
         for prompt_type, file_path in PROMPT_FILES.items():
-            content = self.load_prompt_file(file_path)
-            prompts[prompt_type] = content
+            prompts[prompt_type] = self.load_prompt_file(file_path)
+        
+        # Check if any required prompts are missing
+        missing_prompts = [name for name, content in prompts.items() if not content.strip()]
+        if missing_prompts:
+            print(f"Warning: Missing prompt files: {', '.join(missing_prompts)}")
+            print("System will continue with available prompts")
+        
+        # Critical validation - critrules is required
+        if not prompts.get('critrules', '').strip():
+            raise ValueError(
+                "Critical prompt file 'critrules.prompt' is missing!\n"
+                "The system cannot function without the core game master rules.\n"
+                "Please ensure 'critrules.prompt' exists in the current directory."
+            )
         
         # Calculate combined token count
         total_tokens = sum(estimate_tokens(content) for content in prompts.values() if content)
@@ -261,16 +282,15 @@ class PromptManager:
         
         return prompts
 
+# Chunk 2/3 - main.py - Application Classes and Initialization
+
 class DevNameRPGClient:
-    """
-    Main application class with orchestrator integration
-    Updated to use orch.py instead of nci.py directly
-    """
+    """Main application class with prompt management integration"""
     
     def __init__(self, config: ApplicationConfig, debug_logger: Optional[DebugLogger] = None):
         self.config = config
         self.debug_logger = debug_logger
-        self.orchestrator = None
+        self.interface = None
         self.running = False
         self.prompt_manager = PromptManager(debug_logger)
         self.loaded_prompts = {}
@@ -287,7 +307,7 @@ class DevNameRPGClient:
         self.shutdown()
     
     async def _load_prompts(self):
-        """Load and process prompt files using temporary MCP client"""
+        """Load and process prompt files"""
         # Create temporary MCP client for prompt condensation
         temp_mcp = MCPClient(
             server_url=self.config.get('mcp.server_url'),
@@ -306,114 +326,62 @@ class DevNameRPGClient:
             if self.debug_logger:
                 self.debug_logger.error(f"Prompt loading failed: {e}")
             raise
-        finally:
-            # Clean up temporary client
-            temp_mcp.cleanup()
     
     def run(self) -> int:
-        """
-        Run the application with orchestrator coordination
-        Updated to use orch.py instead of nci.py
-        """
+        """Run the application with async prompt loading"""
         try:
+            if self.debug_logger:
+                self.debug_logger.system("Application starting")
+            
+            # Run async prompt loading
+            asyncio.run(self._load_prompts())
+            
+            # Initialize interface with loaded prompts
+            interface_config = {
+                'color_theme': self.config.get('interface.color_theme', 'classic'),
+                'auto_save_conversation': self.config.get('interface.auto_save_conversation', False),
+                'mcp': {
+                    'server_url': self.config.get('mcp.server_url'),
+                    'model': self.config.get('mcp.model'),
+                    'timeout': self.config.get('mcp.timeout')
+                },
+                'prompts': self.loaded_prompts  # Pass prompts to interface
+            }
+            
+            self.interface = CursesInterface(
+                debug_logger=self.debug_logger,
+                config=interface_config
+            )
+            
             self.running = True
             
             if self.debug_logger:
-                self.debug_logger.system("DevName RPG Client starting with orchestrator")
+                self.debug_logger.system("Starting interface")
             
-            # Load prompts with async processing
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                loop.run_until_complete(self._load_prompts())
-            except Exception as e:
-                print(f"Failed to load prompts: {e}")
-                return 1
-            finally:
-                loop.close()
-            
-            # Convert config to dict for orchestrator
-            config_dict = self.config.config_data
-            
-            # Create orchestrator with loaded prompts
-            self.orchestrator = Orchestrator(
-                config=config_dict,
-                loaded_prompts=self.loaded_prompts,
-                debug_logger=self.debug_logger
-            )
+            # Run interface
+            exit_code = self.interface.run()
             
             if self.debug_logger:
-                self.debug_logger.system("Orchestrator created")
-            
-            # Initialize all service modules through orchestrator
-            if not self.orchestrator.initialize_modules():
-                print("Failed to initialize service modules")
-                if self.debug_logger:
-                    self.debug_logger.error("Module initialization failed")
-                return 1
-            
-            if self.debug_logger:
-                self.debug_logger.system("All modules initialized successfully")
-            
-            # Run main program loop through orchestrator
-            print("Starting main program loop...")
-            exit_code = self.orchestrator.run_main_loop()
-            
-            if self.debug_logger:
-                self.debug_logger.system(f"Main loop ended with exit code: {exit_code}")
+                self.debug_logger.system(f"Application finished with exit code: {exit_code}")
             
             return exit_code
             
         except Exception as e:
             if self.debug_logger:
-                self.debug_logger.error(f"Application run error: {e}")
+                self.debug_logger.error(f"Application error: {e}")
+            
             print(f"Application error: {e}")
             return 1
-        finally:
-            self.running = False
     
     def shutdown(self):
-        """Graceful shutdown through orchestrator"""
-        if self.debug_logger:
-            self.debug_logger.system("Application shutdown initiated")
-        
+        """Graceful shutdown"""
         self.running = False
         
-        if self.orchestrator:
-            self.orchestrator.shutdown_gracefully()
+        if self.interface:
+            self.interface.shutdown()
         
         if self.debug_logger:
             self.debug_logger.system("Application shutdown complete")
-
-def verify_modules() -> bool:
-    """Verify all required modules are available in current directory"""
-    required_modules = [
-        'orch',
-        'ncui', 
-        'emm',
-        'sme',
-        'sem',
-        'uilib',
-        'mcp'
-    ]
-    
-    missing_modules = []
-    
-    for module_name in required_modules:
-        try:
-            __import__(module_name)
-        except ImportError:
-            missing_modules.append(module_name)
-    
-    if missing_modules:
-        print("ERROR: Missing required modules in current directory:")
-        for module in missing_modules:
-            print(f"  - {module}.py")
-        print("\nEnsure all remodularized files are in the current directory")
-        return False
-    
-    return True
 
 def check_dependencies() -> Tuple[bool, List[str]]:
     """Check for optional dependencies"""
@@ -436,7 +404,7 @@ def check_dependencies() -> Tuple[bool, List[str]]:
 def setup_argument_parser() -> argparse.ArgumentParser:
     """Setup command line argument parser"""
     parser = argparse.ArgumentParser(
-        description="DevName RPG Client - Hub and Spoke Architecture with Orchestrator",
+        description="DevName RPG Client - Modular ncurses RPG interface",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
@@ -455,21 +423,21 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--version',
         action='version',
-        version='DevName RPG Client 1.0.0 - Remodularized Hub & Spoke'
+        version='DevName RPG Client 1.0.0'
     )
     
     return parser
 
 def initialize_environment():
     """Initialize application environment"""
-    # Clean up old log files in current directory
+    # Clean up old log files
     cleanup_old_files()
     
-    # Ensure current directory is ready
+    # Ensure required directories exist
     Path('.').mkdir(exist_ok=True)
 
 def cleanup_old_files():
-    """Clean up old log and history files in current directory"""
+    """Clean up old log and history files"""
     import time
     
     current_time = time.time()
@@ -484,29 +452,53 @@ def cleanup_old_files():
             pass
     
     # Clean up old conversation history
-    for history_file in Path('.').glob('conversation_*.json'):
+    for history_file in Path('.').glob('chat_history_*.json'):
         try:
             if history_file.stat().st_mtime < cutoff_time:
                 history_file.unlink()
         except Exception:
             pass
 
+def verify_modules() -> bool:
+    """Verify all required modules are available"""
+    required_modules = {
+        'nci': 'Ncurses interface module',
+        'mcp': 'MCP communication module', 
+        'emm': 'Enhanced memory manager',
+        'sme': 'Story momentum engine'
+    }
+    
+    missing_modules = []
+    
+    for module_name, description in required_modules.items():
+        try:
+            __import__(module_name)
+        except ImportError:
+            missing_modules.append(f"{module_name}.py ({description})")
+    
+    if missing_modules:
+        print("Missing required modules:")
+        for module in missing_modules:
+            print(f"  - {module}")
+        print("\nEnsure all module files are present in the current directory.")
+        return False
+    
+    return True
+
 def show_startup_info():
-    """Show startup information with remodularization notes"""
-    print("DevName RPG Client - Hub & Spoke Architecture")
-    print("Running from remod-staging/ with orchestrator coordination...")
-    print("✓ Remodularized with central hub orchestration")
+    """Show minimal startup information"""
+    print("DevName RPG Client")
+    print("Starting modular RPG interface...")
 
 def initialize_application(args) -> DevNameRPGClient:
-    """Initialize main application with orchestrator"""
+    """Initialize main application"""
     # Initialize debug logger
     debug_logger = DebugLogger(args.debug, DEBUG_LOG_FILE) if args.debug else None
     
     if debug_logger:
-        debug_logger.system("DevName RPG Client starting - remodularized version")
+        debug_logger.system("DevName RPG Client starting")
         debug_logger.system(f"Arguments: {vars(args)}")
-        debug_logger.system("Using hub-and-spoke architecture with orchestrator")
-        debug_logger.system("Running from remod-staging/ directory")
+        debug_logger.system("Using hardcoded configuration values")
     
     # Load configuration (hardcoded values)
     config = ApplicationConfig(args.config)
@@ -514,7 +506,7 @@ def initialize_application(args) -> DevNameRPGClient:
     if debug_logger:
         debug_logger.system("Configuration loaded with hardcoded values")
     
-    # Create application with orchestrator support
+    # Create application
     app = DevNameRPGClient(config, debug_logger)
     
     return app
@@ -532,7 +524,7 @@ def check_terminal_requirements():
         pass
 
 def validate_prompt_files():
-    """Validate prompt file existence in parent directory"""
+    """Validate prompt file existence and provide helpful feedback"""
     missing_files = []
     existing_files = []
     
@@ -547,7 +539,6 @@ def validate_prompt_files():
     
     if missing_files:
         print(f"Missing prompt files: {', '.join([f.split()[0] for f in missing_files])}")
-        print("Note: Looking for prompt files in parent directory (../)")
         
         # Check for critical missing file
         if not PROMPT_FILES['critrules'].exists():
@@ -555,6 +546,8 @@ def validate_prompt_files():
             return False
     
     return True
+
+# Chunk 3/3 - main.py - Main Entry Point and Application Execution
 
 def main():
     """Main application entry point"""
@@ -566,11 +559,9 @@ def main():
         # Initialize environment
         initialize_environment()
         
-        # Verify all remodularized modules are available
+        # Verify all modules are available
         if not verify_modules():
             print("Module verification failed")
-            print("Ensure all remodularized files are in the current directory:")
-            print("  - orch.py, ncui.py, emm.py, sme.py, sem.py, uilib.py, mcp.py")
             return 1
         
         # Check dependencies
@@ -586,22 +577,21 @@ def main():
         # Check terminal
         check_terminal_requirements()
         
-        # Validate prompt files in parent directory
+        # Validate prompt files
         if not validate_prompt_files():
             print("Critical prompt files missing - application cannot start")
-            print("Ensure critrules.prompt exists in parent directory")
             return 1
         
         # Show startup info
         show_startup_info()
         
-        # Initialize application with orchestrator
+        # Initialize application
         app = initialize_application(args)
         
         # Small delay for user to read messages
         time.sleep(1)
         
-        # Run application through orchestrator
+        # Run application
         exit_code = app.run()
         
         return exit_code
@@ -617,5 +607,3 @@ if __name__ == "__main__":
     sys.exit(main())
 
 # End of main.py - DevName RPG Client Main Application
-# Updated for hub-and-spoke architecture with orch.py orchestrator
-# Designed as root codebase with all files in same directory

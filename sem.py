@@ -1,20 +1,28 @@
 # CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
 
-# Chunk 1/3 - sem.py - Semantic Analysis Engine
 #!/usr/bin/env python3
 """
 DevName RPG Client - Semantic Analysis Engine (sem.py)
-Centralizes all semantic analysis logic extracted from emm.py and sme.py
-Prepares LLM requests but coordinates sending through orch.py
+Centralized semantic analysis logic extracted from emm.py and sme.py
+Remodularized for hub-and-spoke architecture
 """
 
-import json
-import re
+import asyncio
 import time
+import sys
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Callable, Tuple
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
+
+# Ensure current directory is in Python path for local imports
+current_dir = Path(__file__).parent.absolute()
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+# NOTE: sem.py should NOT import mcp directly - all LLM requests go through orchestrator
+# Any LLM communication should be coordinated through the orchestrator callback pattern
 
 # =============================================================================
 # SEMANTIC CATEGORIZATION SYSTEM
