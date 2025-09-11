@@ -1,276 +1,327 @@
-# GENAI.TXT - AI ANALYSIS REFERENCE FOR DEVNAME RPG CLIENT (REMODULARIZED - CURRENT STATE)
-================================================================
+# GENAI.TXT - AI CONTEXT REFERENCE FOR DEVNAME RPG CLIENT
+================================================================================
+**CRITICAL NOTICE**: This document serves as the primary reference for generative AI to understand the complete project scope beyond its active context window. It enforces module boundaries and prevents regressions when modifying functions that affect multiple modules. Always consult this document before making changes that could ripple across the codebase.
 
-## PROJECT SCOPE
-Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Context Protocol). Features clean hub-and-spoke architecture with centralized orchestration, consolidated UI library, and exclusive LLM communication patterns for optimal maintainability and performance.
+## PROJECT OVERVIEW
+Terminal-based RPG storytelling client using Large Language Models via MCP (Model Context Protocol). 
+Architecture: Hub-and-spoke pattern with centralized orchestration through `orch.py`.
+Status: Remodularization complete, debug logger interface standardization required.
 
-## CURRENT PROJECT STATUS (Commit: 3b905923a97f34febe050c16f431a72c66e712c9)
+## COMPLETE MODULE REGISTRY AND INTERCONNECTS
 
-**🚨 ARCHITECTURE STATUS: 95% COMPLETE - CRITICAL DEBUG LOGGER INTERFACE INCONSISTENCY**
-
-The remodularization is architecturally sound with successful module consolidation and hub-and-spoke pattern implementation. However, a critical interface inconsistency exists between debug logger implementations across modules, preventing successful application startup.
-
-## REMODULARIZED FILE STRUCTURE (ROOT DIRECTORY - CURRENT)
-
+### FILE STRUCTURE (All in root directory)
 ```
 aurora-rp/
-├── main.py              # ✅ Application entry point with orchestrator coordination
-├── orch.py              # 🔧 Central orchestrator hub (debug interface mismatch)
-├── mcp.py               # ✅ MCP communication with Node.js ollama server
-├── ncui.py              # ✅ Pure UI controller (ScrollManager fixed)
-├── uilib.py             # ✅ Consolidated UI library (consolidates nci_*.py)
-├── emm.py               # 🔧 Enhanced memory manager (debug interface mismatch)
-├── sme.py               # 🔧 Story momentum engine (debug interface mismatch)
-├── sem.py               # 🔧 Semantic analysis engine (debug interface mismatch)
-├── critrules.prompt     # ✅ Core game rules (REQUIRED)
-├── lowrules.prompt      # ✅ Additional rules (optional)
-├── companion.prompt     # ⚠️  Companion AI prompt (optional - currently missing)
-├── genai.txt            # 📝 This architecture reference
-└── legacyref/           # 📚 Legacy codebase preserved for reference
+├── main.py              # Entry point, prompt management, debug logger
+├── orch.py              # Central hub orchestrator - ONLY module calling mcp.py
+├── mcp.py               # LLM communication - accessed ONLY by orch.py
+├── ncui.py              # Pure UI controller (imports uilib.py)
+├── uilib.py             # Consolidated UI components library
+├── emm.py               # Enhanced memory manager
+├── sme.py               # Story momentum engine
+├── sem.py               # Semantic analysis engine
+├── critrules.prompt     # Core rules (REQUIRED)
+├── lowrules.prompt      # Additional rules (optional)
+├── companion.prompt     # Companion definitions (optional)
+├── genai.txt            # This reference document
+└── legacyref/           # Legacy code reference (do not modify)
 ```
 
-**Legend**: ✅ Working | 🔧 Interface fixes needed | ⚠️ Optional missing | 📝 Documentation | 📚 Reference
+### MODULE INTERCONNECTION MATRIX
 
-## CRITICAL ISSUE ANALYSIS
+#### main.py
+**Purpose**: Application entry, prompt loading, debug logging
+**Imports**: `orch.Orchestrator`, `mcp.MCPClient`
+**Exports**: `DebugLogger`, `PromptManager`, `DevNameRPGClient`
+**Data Sent**: 
+- To orch.py: `config` dict, `loaded_prompts` dict, `debug_logger` object
+**Data Received**: 
+- From orch.py: Integer exit code
+**Critical Functions**:
+- `load_and_optimize_prompts()`: Condenses prompts to 5000 token budget
+- `validate_prompt_files()`: Ensures critrules.prompt exists
+**Dependencies**: Python 3.8+, asyncio, pathlib
 
-### Debug Logger Interface Inconsistency
+#### orch.py (CENTRAL HUB)
+**Purpose**: Central orchestration of all service modules
+**Imports**: `ncui`, `emm`, `sme`, `sem`, `mcp`
+**Exports**: `Orchestrator`, `OrchestrationState`
+**Data Sent**:
+- To ncui.py: Display messages, UI commands
+- To emm.py: Messages for storage, memory operations
+- To sme.py: Story state updates, analysis triggers
+- To sem.py: Analysis requests
+- To mcp.py: LLM request payloads (EXCLUSIVE ACCESS)
+**Data Received**:
+- From ncui.py: User input strings, UI events
+- From emm.py: Message history, memory state
+- From sme.py: Momentum analysis results
+- From sem.py: Semantic categorization results
+- From mcp.py: LLM responses
+**Critical Functions**:
+- `initialize_modules()`: Sets up all service modules with callbacks
+- `process_user_input()`: Routes input through processing pipeline
+- `trigger_periodic_analysis()`: Manages 15-message analysis cycles
+- `make_llm_request()`: ONLY function that calls mcp.py
+**Threading**: Background analysis thread for non-blocking operations
 
-**Root Cause**: Mixed debug logger calling patterns across the codebase create startup failures.
+#### mcp.py
+**Purpose**: HTTP communication with Node.js ollama MCP server
+**Imports**: httpx (optional), asyncio
+**Exports**: `MCPClient`, `MCPState`
+**Data Sent**:
+- To ollama server: HTTP POST requests with prompts
+**Data Received**:
+- From orch.py: System prompts, user messages, context
+- From ollama server: JSON responses with generated text
+**Critical Functions**:
+- `send_message()`: Async HTTP request with retry logic
+- `parse_response()`: 5-strategy JSON parsing for reliability
+- `build_context()`: Assembles prompts with token management
+**Configuration**:
+- Server URL: http://127.0.0.1:3456/chat
+- Model: qwen2.5:14b-instruct-q4_k_m
+- Timeout: 300 seconds
+- Context window: 32,000 tokens
 
-**Current Debug Logger Implementations**:
+#### ncui.py
+**Purpose**: Terminal UI controller using ncurses
+**Imports**: `uilib` components, curses
+**Exports**: `NCursesUIController`
+**Data Sent**:
+- To orch.py: User input, UI commands
+**Data Received**:
+- From orch.py: Messages to display, UI updates
+- From uilib.py: UI component instances
+**Critical Functions**:
+- `initialize_ui()`: Sets up curses windows
+- `process_input()`: Handles keyboard input
+- `display_message()`: Renders messages to screen
+- `handle_resize()`: Manages terminal resize events
 
-1. **main.py (DebugLogger class)**:
-   ```python
-   class DebugLogger:
-       def debug(self, message: str, category: str = "MAIN"): ...
-       def error(self, message: str, category: str = "ERROR"): ...
-       def system(self, message: str): ...
-   ```
+#### uilib.py
+**Purpose**: Consolidated UI component library
+**Imports**: curses, standard library only
+**Exports**: `TerminalManager`, `ColorManager`, `ScrollManager`, `MultiLineInput`, `DisplayMessage`
+**Data Sent**:
+- To ncui.py: Component instances and methods
+**Data Received**:
+- Configuration parameters from ncui.py
+**Critical Components**:
+- `TerminalManager`: Dynamic coordinate calculation
+- `ColorManager`: Theme management (classic/dark/bright)
+- `ScrollManager`: Scroll position with bounds checking
+- `MultiLineInput`: Multi-line input with word wrap
+- `DisplayMessage`: Message formatting and wrapping
 
-2. **main.py calling pattern**:
-   ```python
-   self.debug_logger.system("message")    # Method call pattern
-   self.debug_logger.error("message")     # Method call pattern
-   ```
+#### emm.py
+**Purpose**: Message storage and memory management
+**Imports**: Standard library only
+**Exports**: `EnhancedMemoryManager`, `Message`, `MessageType`
+**Data Sent**:
+- To orch.py: Message history, memory state
+**Data Received**:
+- From orch.py: New messages, memory operations
+**Critical Functions**:
+- `add_message()`: Store with metadata and token estimation
+- `get_conversation_context()`: Retrieve for LLM context
+- `save_conversation()`: Persist to JSON file
+- `condense_memory()`: Reduce when approaching limits
+**Threading**: Background auto-save every 30 seconds
+**File Operations**: memory.json for persistence
 
-3. **ncui.py expecting pattern**:
-   ```python
-   self.debug_logger(f"[NCUI] {message}")  # Callable function pattern
-   ```
+#### sme.py
+**Purpose**: Story momentum and narrative tracking
+**Imports**: Standard library only
+**Exports**: `StoryMomentumEngine`, `Antagonist`, `StoryArc`
+**Data Sent**:
+- To orch.py: Momentum analysis results
+**Data Received**:
+- From orch.py: Story events, analysis triggers
+**Critical Functions**:
+- `analyze_momentum()`: Evaluate narrative progression
+- `generate_antagonist()`: Create story antagonists
+- `track_narrative_time()`: Monitor story timeline
+- `calculate_pressure()`: Determine story tension
+**Analysis Cycle**: Every 15 messages
 
-4. **orch.py (current corrected version)**:
-   ```python
-   self.debug_logger(f"[ORCHESTRATOR] {message}")  # Callable function pattern
-   ```
+#### sem.py
+**Purpose**: Semantic analysis and categorization
+**Imports**: Standard library only
+**Exports**: `SemanticAnalysisEngine`, `SemanticAnalysisRequest`, `SemanticAnalysisResult`
+**Data Sent**:
+- To orch.py: Analysis results, categorizations
+**Data Received**:
+- From orch.py: Content for analysis
+**Critical Functions**:
+- `categorize_content()`: Assign semantic categories
+- `analyze_importance()`: Determine preservation priority
+- `condense_content()`: Intelligently reduce text
+**Categories**: story_critical, character_focused, relationship_dynamics, emotional_significance, world_building, standard
 
-5. **Other modules (emm.py, sme.py, sem.py)**:
-   ```python
-   self.debug_logger.debug(message, category)  # Method call pattern
-   ```
+## CRITICAL INTERFACE CONTRACTS
 
-**Error Manifestation**: 
-```
-ERROR: Application run error: 'DebugLogger' object is not callable
-```
+### Debug Logger Interface (NEEDS STANDARDIZATION)
+**Current Issue**: Mixed calling patterns causing startup failure
 
-This occurs because `orch.py` tries to call `debug_logger()` as a function, but `DebugLogger` is an object with methods, not a callable function.
-
-## ARCHITECTURAL STATUS ASSESSMENT
-
-### Successfully Implemented Components
-
-1. **Hub-and-Spoke Pattern**: ✅ Centralized orchestrator coordination established
-2. **Module Consolidation**: ✅ UI components successfully consolidated into uilib.py
-3. **ScrollManager Fix**: ✅ Dynamic initialization pattern correctly implemented
-4. **Exclusive LLM Access**: ✅ Only orchestrator communicates with mcp.py
-5. **Service Module Separation**: ✅ Clean boundaries between service providers
-6. **Background Threading**: ✅ Analysis threading architecture preserved
-
-### Critical Interface Issues
-
-1. **Debug Logger Interface**: 🚨 BLOCKING - Inconsistent calling patterns prevent startup
-2. **Module Communication**: 🔧 Service modules expect method-based debug logging
-3. **Error Propagation**: 🔧 Interface mismatches cause cascading failures
-
-## PROGRAM FLOW ANALYSIS (CURRENT BROKEN STATE)
-
-### Failed Initialization Sequence
-```
-main() → DevNameRPGClient.run() → Orchestrator() [FAILS: debug logger interface mismatch]
-```
-
-**Successful Steps**:
-1. ✅ **Environment Setup**: Module verification and dependency checking
-2. ✅ **Prompt Loading**: critrules.prompt and lowrules.prompt loaded successfully  
-3. ✅ **Configuration**: Hardcoded config values applied
-4. ✅ **Orchestrator Creation**: Object instantiation succeeds
-
-**Failure Point**:
-5. 🚨 **Module Initialization**: `orch.py` constructor calls `self._log_debug()` which attempts `self.debug_logger(message)` but `debug_logger` is a `DebugLogger` object with methods, not a callable function
-
-### Debug Output Analysis
-```
-[12:21:04.181] SYSTEM: Prompts loaded: 1582 tokens
-[12:21:04.181] MCP: MCP client shutdown complete  
-[12:21:04.181] ERROR: ERROR: Application run error: 'DebugLogger' object is not callable
-```
-
-**Issue**: The error occurs immediately during orchestrator creation, before any service modules are initialized.
-
-## INTERFACE STANDARDIZATION REQUIREMENTS
-
-### Option 1: Standardize on Method-Based Interface (Recommended)
-**Approach**: Update `ncui.py` and `orch.py` to use method-based debug logging
-
-**Changes Required**:
-- `ncui.py`: Change `self.debug_logger(message)` to `self.debug_logger.debug(message, "NCUI")`
-- `orch.py`: Change `self.debug_logger(message)` to `self.debug_logger.debug(message, "ORCHESTRATOR")`
-- Maintains consistency with existing service modules (emm.py, sme.py, sem.py)
-
-### Option 2: Standardize on Callable Interface
-**Approach**: Modify `DebugLogger` class to be callable and update all service modules
-
-**Changes Required**:
-- Add `__call__` method to `DebugLogger` class
-- Update emm.py, sme.py, sem.py to use callable pattern
-- More extensive changes across multiple modules
-
-## MODULE DEPENDENCY CHAIN (CURRENT STATE)
-
-### Initialization Dependencies
-```
-main.py (DebugLogger) → orch.py [FAILS] → ncui.py, emm.py, sme.py, sem.py, mcp.py
-```
-
-**Interface Contracts**:
-- **main.py → orch.py**: Passes DebugLogger object expecting method calls
-- **orch.py → ncui.py**: Passes debug_logger expecting callable function
-- **orch.py → service modules**: Passes debug_logger expecting method calls
-
-**Conflict**: `orch.py` expects callable but receives object with methods
-
-## IMPLEMENTATION PRIORITY
-
-### Critical Path Resolution (Estimated: 5 minutes)
-
-1. **Fix orch.py debug logging** (1 minute):
-   ```python
-   # Current (broken):
-   self.debug_logger(f"[ORCHESTRATOR] {message}")
-   
-   # Fix to:
-   self.debug_logger.debug(f"[ORCHESTRATOR] {message}", "ORCHESTRATOR")
-   ```
-
-2. **Fix ncui.py debug logging** (1 minute):
-   ```python
-   # Current:
-   self.debug_logger(f"[NCUI] {message}")
-   
-   # Fix to:
-   self.debug_logger.debug(f"[NCUI] {message}", "NCUI")
-   ```
-
-3. **Verification testing** (3 minutes):
-   - Confirm application starts successfully
-   - Verify UI initialization completes
-   - Test basic input/output functionality
-
-### Expected Success Pattern (After Fix)
-```
-[timestamp] ORCHESTRATOR: Orchestrator created
-[timestamp] ORCHESTRATOR: Starting module initialization  
-[timestamp] ORCHESTRATOR: Memory manager initialized
-[timestamp] ORCHESTRATOR: Semantic engine initialized
-[timestamp] ORCHESTRATOR: Momentum engine initialized
-[timestamp] ORCHESTRATOR: MCP client initialized
-[timestamp] ORCHESTRATOR: UI controller initialized
-[timestamp] ORCHESTRATOR: All modules initialized successfully
-[timestamp] ORCHESTRATOR: Starting main orchestration loop
-[timestamp] ORCHESTRATOR: Background analysis thread started
-[timestamp] NCUI: UI initialization complete
+**Required Pattern** (Method-based):
+```python
+self.debug_logger.debug(message, category)
+self.debug_logger.error(message, category)
+self.debug_logger.system(message)
 ```
 
-## ARCHITECTURAL BENEFITS PRESERVED
+**Files Requiring Fix**:
+- orch.py: Line ~385 - Change `self.debug_logger(f"[ORCHESTRATOR] {message}")` to `self.debug_logger.debug(message, "ORCHESTRATOR")`
+- ncui.py: All debug calls - Change callable pattern to method pattern
 
-### Maintainability
-- Single responsibility principle enforced across all modules
-- Clear boundaries prevent coupling issues
-- Centralized business logic in orchestrator
-- UI consolidation eliminates fragmentation
+### Service Module Initialization Pattern
+All service modules must implement:
+```python
+def __init__(self, debug_logger=None):
+    self.debug_logger = debug_logger
+    self.orchestrator_callback = None
 
-### Testability
-- Individual modules can be unit tested in isolation
-- Mock orchestrator enables service module testing
-- Clear interfaces facilitate integration testing
-- Predictable data flow patterns
-
-### Scalability
-- New features added through orchestrator coordination
-- Service modules can be enhanced independently
-- Clean extension points for additional functionality
-- No impact on UI when adding business logic
-
-### Performance
-- No additional overhead from hub-and-spoke pattern
-- Background threading preserved and coordinated
-- Efficient LLM communication through single channel
-- Optimized memory management maintained
-
-## TECHNICAL DEBT ASSESSMENT
-
-### Interface Consistency
-- **Current State**: Mixed debug logger interfaces create startup failures
-- **Resolution**: Standardize on method-based interface across all modules
-- **Effort**: Low (5 minutes)
-- **Risk**: Minimal - isolated to debug logging functionality
-
-### Error Handling
-- **Current State**: Interface mismatches cause cascading failures
-- **Resolution**: Consistent error propagation patterns
-- **Effort**: Included in interface standardization
-- **Risk**: Low - debug logging is non-critical functionality
-
-## USAGE INSTRUCTIONS (POST-FIX)
-
-### Basic Operation
-```bash
-cd aurora-rp/
-python main.py                    # Standard operation
-python main.py --debug           # Debug logging enabled
+def set_orchestrator_callback(self, callback):
+    self.orchestrator_callback = callback
 ```
 
-### Requirements
-- **Required**: Python 3.8+, curses library
-- **Optional**: httpx (for MCP functionality)
-- **Prompts**: critrules.prompt (required), lowrules.prompt, companion.prompt (optional)
+### LLM Request Pattern (EXCLUSIVE)
+**ONLY orch.py may call mcp.py functions**
+All other modules must use:
+```python
+result = self.orchestrator_callback('llm_request', {
+    'prompt': prompt_text,
+    'context': context_data
+})
+```
 
-### Commands (When UI Functional)
-- **Multi-line Input**: Type naturally, double-enter to submit
-- **Navigation**: PgUp/PgDn for scrolling, Home/End for quick navigation
-- **Commands**: `/help`, `/stats`, `/analyze`, `/theme <n>`, `/clearmemory`
+## DATA FLOW SEQUENCES
 
-## LEGACY PRESERVATION
+### User Input Processing
+1. ncui.py captures keyboard input
+2. ncui.py sends to orch.py via callback
+3. orch.py validates through sem.py
+4. orch.py stores in emm.py
+5. orch.py sends to mcp.py for LLM processing
+6. mcp.py returns response to orch.py
+7. orch.py stores response in emm.py
+8. orch.py sends to ncui.py for display
 
-The original working codebase has been preserved in `legacyref/` directory as the last known working version with:
-- Correct ncurses interface patterns
-- MCP communication with Node.js ollama server  
-- Enhanced memory management
-- Semantic analysis functionality
-- Dynamic UI component initialization patterns
+### Periodic Analysis (15-message cycle)
+1. orch.py monitors message count
+2. At 15 messages, triggers background thread
+3. Thread collects context from emm.py
+4. Thread requests analysis from sme.py
+5. sme.py returns momentum state
+6. orch.py updates emm.py with state
+7. orch.py may trigger antagonist generation
 
-## PROJECT ASSESSMENT
+### Memory Condensation
+1. emm.py detects token limit approach
+2. emm.py requests categorization from sem.py via orch.py
+3. sem.py analyzes and categorizes messages
+4. emm.py condenses based on categories
+5. emm.py saves condensed state to disk
 
-**Overall Architecture**: ✅ **EXCELLENT** - Clean hub-and-spoke implementation achieved
-**Code Quality**: ✅ **HIGH** - Proper separation of concerns and error handling
-**Integration Status**: 🚨 **95% COMPLETE** - Single debug logger interface fix blocking startup
-**Maintainability**: ✅ **SIGNIFICANTLY IMPROVED** - Modular, testable, scalable
-**Performance**: ✅ **MAINTAINED** - All original features preserved with architectural benefits
+## CONFIGURATION PARAMETERS
+
+### Token Budgets
+- Context Window: 32,000 tokens
+- System Prompt: 5,000 tokens max
+- User Input: 2,000 tokens max
+- Memory Threshold: 20,000 tokens
+
+### Timing Parameters
+- Auto-save: Every 30 seconds
+- Momentum Analysis: Every 15 messages
+- Connection Timeout: 300 seconds
+- Retry Delay: 2 seconds
+
+### File Paths
+- Memory: memory.json
+- Debug Log: debug.log
+- Prompts: *.prompt (same directory)
+
+## KNOWN ISSUES AND FIXES
+
+### Issue 1: Debug Logger Interface Mismatch
+**Status**: CRITICAL - Blocks startup
+**Fix Required**: Standardize all modules to use method-based pattern
+**Files**: orch.py (line ~385), ncui.py (all debug calls)
+**Time to Fix**: 5 minutes
+
+### Issue 2: Prompt Path References
+**Status**: RESOLVED in current version
+**Note**: All prompt files must be in root directory
+
+### Issue 3: Import Path Issues
+**Status**: RESOLVED in current version
+**Note**: All modules import from same directory
+
+## REGRESSION PREVENTION RULES
+
+### Before Modifying Any Function
+1. Check this document for module interconnects
+2. Identify all modules that call the function
+3. Identify all modules the function calls
+4. Consider data structure changes
+5. Verify threading implications
+6. Test with debug mode enabled
+
+### Hub-and-Spoke Enforcement
+- NEVER allow direct module-to-module calls except through orch.py
+- NEVER allow any module except orch.py to import mcp.py
+- NEVER bypass the orchestrator callback pattern
+- ALWAYS route cross-module communication through orchestrator
+
+### Threading Safety
+- emm.py uses threading.Lock for all operations
+- Background threads must not modify UI directly
+- Analysis threads communicate results via callbacks
+- Auto-save runs independently with atomic writes
+
+### Error Handling Patterns
+- All modules must handle None debug_logger
+- Network failures must not crash the application
+- File I/O errors must be logged but not fatal
+- UI resize must not lose message history
+
+## TESTING CHECKLIST
+
+### Startup Sequence
+- [ ] All modules import successfully
+- [ ] Debug logger initializes without errors
+- [ ] Prompts load from correct directory
+- [ ] Orchestrator initializes all modules
+- [ ] UI displays without crashes
+
+### Core Functionality
+- [ ] User input processes correctly
+- [ ] LLM responses display properly
+- [ ] Messages save to memory.json
+- [ ] 15-message analysis triggers
+- [ ] Theme switching works
+
+### Error Scenarios
+- [ ] Missing prompt files handled gracefully
+- [ ] Network timeout doesn't crash
+- [ ] Terminal resize maintains state
+- [ ] Ctrl+C shuts down cleanly
+
+## VERSION HISTORY
+
+### Current Version (Commit: 5170347a6ddd490afb877493032367bf6602828c)
+- Architecture: Hub-and-spoke pattern complete
+- Status: Debug logger interface fix required
+- Modules: 8 primary Python files
+- Dependencies: Python 3.8+, curses, httpx (optional)
+
+### Previous Working Version (legacyref/)
+- Architecture: Direct module interconnections
+- Status: Fully functional but less maintainable
+- Preserved for reference and rollback
 
 ---
-
-**Status**: 🎯 **REMODULARIZATION 95% COMPLETE - SINGLE DEBUG INTERFACE FIX NEEDED**  
-**Last Updated**: Analysis of commit 3b905923a97f34febe050c16f431a72c66e712c9  
-**Architecture**: Fully Functional Hub-and-Spoke with Single Debug Logger Interface Standardization Required
-
-The remodularization has been highly successful, achieving all architectural goals while maintaining functionality. The project is in its final integration phase requiring only debug logger interface standardization to achieve full operational status.
+**END OF GENAI.TXT** - Last Updated: Analysis of repository state
+**Remember**: This document is the authoritative source for understanding module interactions and preventing regressions. Always consult before making changes that could affect multiple modules.
