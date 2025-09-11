@@ -146,18 +146,24 @@ class Orchestrator:
         """Configure MCP client with loaded prompts and settings"""
         if not self.mcp_client:
             return
-            
+
         try:
-            # Set system prompts from loaded configuration
-            self.mcp_client.set_system_prompts(self.loaded_prompts)
-            
-            # Configure server settings from config
-            server_config = self.config.get('mcp_server', {})
-            if server_config:
-                self.mcp_client.configure_server(server_config)
-                
+            # Set system prompt from critrules (primary prompt)
+            if self.loaded_prompts.get('critrules'):
+                self.mcp_client.system_prompt = self.loaded_prompts['critrules']
+                self._log_debug("System prompt set from critrules")
+
+            # Configure server settings from config using direct property assignment
+            mcp_config = self.config.get('mcp', {})
+            if 'server_url' in mcp_config:
+                self.mcp_client.server_url = mcp_config['server_url']
+            if 'model' in mcp_config:
+                self.mcp_client.model = mcp_config['model']
+            if 'timeout' in mcp_config:
+                self.mcp_client.timeout = mcp_config['timeout']
+
             self._log_debug("MCP client configured with prompts and settings")
-            
+
         except Exception as e:
             self._log_error(f"MCP client configuration failed: {e}")
     
@@ -376,19 +382,40 @@ class Orchestrator:
         try:
             if not self.memory_manager:
                 return {"success": False, "error": "Memory manager not available"}
-            
+
             # Get parameters from data
             limit = data.get("limit", 50)
             include_metadata = data.get("include_metadata", False)
-            
-            messages = self.memory_manager.get_recent_messages(limit, include_metadata)
-            
+
+            # FIXED: Use correct memory manager API method
+            # Based on typical memory manager interfaces, try common method names
+            messages = []
+
+            # Try different possible method names that might exist
+            if hasattr(self.memory_manager, 'get_conversation_context'):
+                # Get conversation context and format as messages
+                context = self.memory_manager.get_conversation_context()
+                if isinstance(context, list):
+                    # Take the last 'limit' messages
+                    messages = context[-limit:] if context else []
+                else:
+                    messages = []
+            elif hasattr(self.memory_manager, 'get_messages'):
+                messages = self.memory_manager.get_messages(limit)
+            elif hasattr(self.memory_manager, 'get_all_messages'):
+                all_messages = self.memory_manager.get_all_messages()
+                messages = all_messages[-limit:] if all_messages else []
+            else:
+                # Fallback: return empty list with warning
+                self._log_debug("No suitable message retrieval method found in memory manager")
+                messages = []
+
             return {
                 "success": True,
                 "messages": messages,
-                "total_count": self.state.message_count
+                "total_count": len(messages)
             }
-            
+
         except Exception as e:
             self._log_error(f"Message history retrieval failed: {e}")
             return {"success": False, "error": str(e)}

@@ -110,18 +110,19 @@ class NCursesUIController:
     def _update_layout(self):
         """Update layout based on current terminal size"""
         try:
-            # Get current terminal geometry
-            self.current_layout = self.terminal_manager.calculate_layout()
-            
+            # FIXED: Use correct method name from uilib.py
+            self.current_layout = self.terminal_manager.get_box_layout()
+
             # FIXED: Update ScrollManager height after layout calculation
-            if self.current_layout and hasattr(self.current_layout, 'output_height'):
-                self.scroll_manager.update_height(self.current_layout.output_height)
-            
+            if self.current_layout and hasattr(self.current_layout, 'output_box'):
+                # Use output_box.inner_height for content area (excluding borders)
+                self.scroll_manager.update_height(self.current_layout.output_box.inner_height)
+
             # Create/recreate windows with new layout
             self._create_windows()
-            
+
             self._log_debug("Layout updated successfully")
-            
+
         except Exception as e:
             self._log_error(f"Layout update failed: {e}")
     
@@ -129,43 +130,44 @@ class NCursesUIController:
         """Create or recreate curses windows based on current layout"""
         if not self.current_layout or not self.stdscr:
             return
-        
+
         try:
             layout = self.current_layout
-            
+
+            # FIXED: Use correct LayoutGeometry structure from uilib.py
             # Create output window (main display area)
             self.output_window = curses.newwin(
-                layout.output_height,
-                layout.output_width,
-                layout.output_y,
-                layout.output_x
+                layout.output_box.height,
+                layout.output_box.width,
+                layout.output_box.top,
+                layout.output_box.left
             )
-            
+
             # Create input window
             self.input_window = curses.newwin(
-                layout.input_height,
-                layout.input_width,
-                layout.input_y,
-                layout.input_x
+                layout.input_box.height,
+                layout.input_box.width,
+                layout.input_box.top,
+                layout.input_box.left
             )
-            
+
             # Create status window
             self.status_window = curses.newwin(
-                layout.status_height,
-                layout.status_width,
-                layout.status_y,
-                layout.status_x
+                layout.status_line.height,
+                layout.status_line.width,
+                layout.status_line.top,
+                layout.status_line.left
             )
-            
+
             # Enable scrolling for output window
             self.output_window.scrollok(True)
             self.output_window.idlok(True)
-            
+
             # Draw borders
             self._draw_borders()
-            
+
             self._log_debug("Windows created successfully")
-            
+
         except Exception as e:
             self._log_error(f"Window creation failed: {e}")
     
@@ -174,15 +176,17 @@ class NCursesUIController:
         try:
             # Reset multi-line input for new layout
             if self.current_layout:
-                max_width = self.current_layout.input_width - 4  # Account for borders
+                # FIXED: Use correct layout structure - input_box instead of input_width
+                max_width = self.current_layout.input_box.inner_width - 4  # Account for borders
                 self.multi_input.reset_for_width(max_width)
-            
+
             # Update scroll manager with proper content height
             if self.current_layout:
-                self.scroll_manager.update_height(self.current_layout.output_height - 2)  # Account for borders
-            
+                # FIXED: Use correct layout structure - output_box instead of output_height
+                self.scroll_manager.update_height(self.current_layout.output_box.inner_height - 2)  # Account for borders
+
             self._log_debug("UI components initialized")
-            
+
         except Exception as e:
             self._log_error(f"Component initialization failed: {e}")
     
@@ -207,22 +211,23 @@ class NCursesUIController:
     def _initial_display(self):
         """Show initial display content"""
         try:
-            # Display welcome message
+            # FIXED: Use correct DisplayMessage constructor parameters
             welcome_msg = DisplayMessage(
                 content="Welcome to DevName RPG Client",
-                message_type="system",
-                timestamp=time.time()
+                msg_type="system"  # FIXED: parameter name changed from message_type to msg_type
             )
+            # FIXED: Add timestamp as attribute after creation (not in constructor)
+            welcome_msg.timestamp = time.time()
             self.display_buffer.append(welcome_msg)
-            
+
             # Show initial status
             self.status_message = "Ready - Type your message and press Enter twice to send"
-            
+
             # Refresh all displays
             self._refresh_all_windows()
-            
+
             self._log_debug("Initial display complete")
-            
+
         except Exception as e:
             self._log_error(f"Initial display failed: {e}")
     
@@ -247,48 +252,55 @@ class NCursesUIController:
 # Chunk 3/6 - ncui.py - Main Run Loop and Input Processing (Debug Logger Fix)
 
     def run(self) -> int:
-        """
-        Main UI run loop - handles user input and display updates
-        Pure UI management without business logic
-        """
-        try:
-            if not self.stdscr:
-                self._log_error("Cannot run without initialized screen")
+        """Run interface using curses wrapper"""
+        def _curses_main(stdscr):
+            try:
+                # Initialize the interface
+                if not self.initialize(stdscr):
+                    self._log_error("UI initialization failed")
+                    return 1
+
+                self.running = True
+                self._log_debug("Starting UI main loop")
+
+                # Main event loop
+                while self.running:
+                    try:
+                        # Process user input
+                        if self._handle_input():
+                            # Input was processed, refresh display
+                            self._refresh_all_windows()
+
+                        # Handle any pending display updates
+                        self._process_display_updates()
+
+                        # Brief sleep to prevent CPU spinning
+                        time.sleep(0.01)
+
+                    except KeyboardInterrupt:
+                        self._log_debug("Keyboard interrupt received")
+                        break
+                    except Exception as e:
+                        self._log_error(f"Error in main loop: {e}")
+                        # Don't break on individual errors, just log and continue
+
+                self._log_debug("UI main loop ended")
+                return 0
+
+            except Exception as e:
+                self._log_error(f"Interface error: {e}")
                 return 1
-            
-            self.running = True
-            self._log_debug("Starting UI main loop")
-            
-            # Main event loop
-            while self.running:
-                try:
-                    # Process user input
-                    if self._handle_input():
-                        # Input was processed, refresh display
-                        self._refresh_all_windows()
-                    
-                    # Handle any pending display updates
-                    self._process_display_updates()
-                    
-                    # Brief sleep to prevent CPU spinning
-                    time.sleep(0.01)
-                    
-                except KeyboardInterrupt:
-                    self._log_debug("Keyboard interrupt received")
-                    break
-                except Exception as e:
-                    self._log_error(f"Error in main loop: {e}")
-                    # Don't break on individual errors, just log and continue
-            
-            self._log_debug("UI main loop ended")
-            return 0
-            
+            finally:
+                self.running = False
+                if hasattr(self, '_cleanup'):
+                    self._cleanup()
+
+        try:
+            self._log_debug("Starting curses wrapper")
+            return curses.wrapper(_curses_main)
         except Exception as e:
-            self._log_error(f"Fatal error in UI run loop: {e}")
+            self._log_error(f"Curses wrapper error: {e}")
             return 1
-        finally:
-            self.running = False
-            self._cleanup()
     
     def _handle_input(self) -> bool:
         """
@@ -297,17 +309,17 @@ class NCursesUIController:
         try:
             # Get character with timeout
             ch = self.stdscr.getch()
-            
+
             if ch == -1:  # No input available
                 return False
-            
+
             # Handle special keys
             if ch == curses.KEY_RESIZE:
                 self._handle_resize()
                 return True
             elif ch == 27:  # Escape key
                 return self._handle_escape()
-            elif ch in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_PAGER_UP, curses.KEY_PAGER_DOWN):
+            elif ch in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_PPAGE, curses.KEY_NPAGE):  # FIXED: Use correct constants
                 return self._handle_scroll_keys(ch)
             elif ch == 10 or ch == 13:  # Enter key
                 return self._handle_enter()
@@ -321,7 +333,7 @@ class NCursesUIController:
                 # Unknown key, log for debugging
                 self._log_debug(f"Unknown key code: {ch}")
                 return False
-                
+
         except Exception as e:
             self._log_error(f"Input handling error: {e}")
             return False
@@ -400,13 +412,13 @@ class NCursesUIController:
                 self.scroll_manager.scroll_up(1)
             elif key == curses.KEY_DOWN:
                 self.scroll_manager.scroll_down(1)
-            elif key == curses.KEY_PAGER_UP:
+            elif key == curses.KEY_PPAGE:  # FIXED: Use correct Page Up constant
                 self.scroll_manager.scroll_up(10)
-            elif key == curses.KEY_PAGER_DOWN:
+            elif key == curses.KEY_NPAGE:  # FIXED: Use correct Page Down constant
                 self.scroll_manager.scroll_down(10)
-            
+
             return True
-            
+
         except Exception as e:
             self._log_error(f"Scroll key handling error: {e}")
             return False
@@ -471,22 +483,24 @@ class NCursesUIController:
     def _add_message(self, content: str, message_type: str):
         """Add message to display buffer"""
         try:
+            # FIXED: Use correct DisplayMessage constructor and add timestamp after
             message = DisplayMessage(
                 content=content,
-                message_type=message_type,
-                timestamp=time.time()
+                msg_type=message_type  # FIXED: Use msg_type parameter name
             )
-            
+            # FIXED: Add timestamp as attribute after creation
+            message.timestamp = time.time()
+
             self.display_buffer.append(message)
-            
+
             # Update scroll manager with new content
             self.scroll_manager.update_content_lines(len(self.display_buffer))
-            
+
             # Auto-scroll to bottom for new messages
             self.scroll_manager.scroll_to_bottom()
-            
+
             self._log_debug(f"Added {message_type} message")
-            
+
         except Exception as e:
             self._log_error(f"Message addition error: {e}")
     
@@ -516,38 +530,45 @@ class NCursesUIController:
         try:
             if not self.output_window or not self.current_layout:
                 return
-            
+
             # Clear the window
             self.output_window.clear()
             self._draw_borders()
-            
+
+            # FIXED: Use correct layout structure - output_box instead of output_height/width
             # Calculate display area (account for borders)
-            display_height = self.current_layout.output_height - 2
-            display_width = self.current_layout.output_width - 2
-            
+            display_height = self.current_layout.output_box.inner_height
+            display_width = self.current_layout.output_box.inner_width
+
             # Get visible messages based on scroll position
             start_line = self.scroll_manager.scroll_position
             visible_messages = self.display_buffer[start_line:start_line + display_height]
-            
+
             # Display messages
             y_pos = 1  # Start after top border
             for message in visible_messages:
                 if y_pos >= display_height + 1:  # Stop before bottom border
                     break
-                
-                # Format message with timestamp and type
-                timestamp_str = time.strftime("%H:%M:%S", time.localtime(message.timestamp))
-                
-                # Choose color based on message type
-                color_pair = self.color_manager.get_color_pair(message.message_type)
-                
+
+                # FIXED: Handle timestamp attribute properly
+                if hasattr(message, 'timestamp') and message.timestamp:
+                    timestamp_str = time.strftime("%H:%M:%S", time.localtime(message.timestamp))
+                else:
+                    timestamp_str = time.strftime("%H:%M:%S")
+
+                # FIXED: Use msg_type attribute name
+                message_type = getattr(message, 'msg_type', 'user')
+
+                # Choose color based on message type - FIXED: Use get_color instead of get_color_pair
+                color_pair = self.color_manager.get_color(message_type)
+
                 # Wrap long messages
                 wrapped_lines = self._wrap_text(message.content, display_width - 12)  # Account for timestamp
-                
+
                 for i, line in enumerate(wrapped_lines):
                     if y_pos >= display_height + 1:
                         break
-                    
+
                     try:
                         if i == 0:
                             # First line includes timestamp
@@ -555,18 +576,18 @@ class NCursesUIController:
                         else:
                             # Continuation lines are indented
                             display_line = f"           {line}"
-                        
+
                         # Truncate if too long
                         if len(display_line) > display_width:
                             display_line = display_line[:display_width-3] + "..."
-                        
+
                         self.output_window.addstr(y_pos, 1, display_line, color_pair)
                         y_pos += 1
-                        
+
                     except curses.error:
                         # Ignore drawing errors (e.g., writing outside window)
                         break
-            
+
             # Show scroll indicator if needed
             if len(self.display_buffer) > display_height:
                 scroll_info = f"({self.scroll_manager.scroll_position + 1}/{len(self.display_buffer)})"
@@ -574,9 +595,9 @@ class NCursesUIController:
                     self.output_window.addstr(0, display_width - len(scroll_info) - 1, scroll_info)
                 except curses.error:
                     pass
-            
+
             self.output_window.noutrefresh()
-            
+
         except Exception as e:
             self._log_error(f"Output window refresh error: {e}")
     
@@ -585,47 +606,48 @@ class NCursesUIController:
         try:
             if not self.input_window or not self.current_layout:
                 return
-            
+
             # Clear the window
             self.input_window.clear()
             self._draw_borders()
-            
+
+            # FIXED: Use correct layout structure - input_box instead of input_height/width
             # Get input display area
-            display_height = self.current_layout.input_height - 2
-            display_width = self.current_layout.input_width - 2
-            
+            display_height = self.current_layout.input_box.inner_height
+            display_width = self.current_layout.input_box.inner_width
+
             # Get current input lines
             input_lines = self.multi_input.get_display_lines()
             cursor_pos = self.multi_input.get_cursor_position()
-            
+
             # Display input lines
             y_pos = 1
             for i, line in enumerate(input_lines):
                 if y_pos >= display_height + 1:
                     break
-                
+
                 try:
                     # Truncate line if too long
                     display_line = line[:display_width] if len(line) > display_width else line
                     self.input_window.addstr(y_pos, 1, display_line)
                     y_pos += 1
-                    
+
                 except curses.error:
                     break
-            
+
             # Position cursor
             try:
                 cursor_y = cursor_pos[0] + 1  # Account for border
                 cursor_x = cursor_pos[1] + 1  # Account for border
-                
+
                 if 1 <= cursor_y <= display_height and 1 <= cursor_x <= display_width:
                     self.input_window.move(cursor_y, cursor_x)
-                
+
             except curses.error:
                 pass
-            
+
             self.input_window.noutrefresh()
-            
+
         except Exception as e:
             self._log_error(f"Input window refresh error: {e}")
     
@@ -634,31 +656,32 @@ class NCursesUIController:
         try:
             if not self.status_window or not self.current_layout:
                 return
-            
+
             # Clear the window
             self.status_window.clear()
             self._draw_borders()
-            
+
+            # FIXED: Use correct layout structure - status_line instead of status_width
             # Display status message
-            status_width = self.current_layout.status_width - 2
-            
+            status_width = self.current_layout.status_line.inner_width
+
             # Truncate status if too long
             display_status = self.status_message
             if len(display_status) > status_width:
                 display_status = display_status[:status_width-3] + "..."
-            
+
             try:
                 # Add processing indicator
                 if self.processing:
-                    display_status = f"🔄 {display_status}"
-                
+                    display_status = f"Processing... {display_status}"
+
                 self.status_window.addstr(1, 1, display_status)
-                
+
             except curses.error:
                 pass
-            
+
             self.status_window.noutrefresh()
-            
+
         except Exception as e:
             self._log_error(f"Status window refresh error: {e}")
     
