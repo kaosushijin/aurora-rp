@@ -1,0 +1,111 @@
+
+--- Debug session started: 2025-09-11T17:17:15.135925 ---
+[17:17:15.135] SYSTEM: DevName RPG Client starting - remodularized version
+[17:17:15.135] SYSTEM: Arguments: {'debug': True, 'config': 'devname_config.json'}
+[17:17:15.136] SYSTEM: Using hub-and-spoke architecture with orchestrator
+[17:17:15.136] SYSTEM: Running from root directory: /home/jinx/git/aurora-rp
+[17:17:15.136] SYSTEM: Configuration loaded with hardcoded values
+[17:17:15.136] SYSTEM: DevName RPG Client starting with orchestrator
+[17:17:16.136] SYSTEM: Starting orchestrator run sequence
+[17:17:16.136] ORCHESTRATOR: Orchestrator created
+[17:17:16.136] ORCHESTRATOR: Starting orchestrator run sequence
+[17:17:16.136] ORCHESTRATOR: Starting module initialization
+[17:17:16.136] MAIN: No existing memory file found at memory.json
+[17:17:16.136] ORCHESTRATOR: Memory manager initialized
+[17:17:16.136] ORCHESTRATOR: Semantic engine initialized
+[17:17:16.136] ORCHESTRATOR: Momentum engine initialized
+[17:17:16.136] ORCHESTRATOR: System prompt set from critrules
+[17:17:16.136] ORCHESTRATOR: MCP client configured with prompts and settings
+[17:17:16.136] ORCHESTRATOR: MCP client initialized
+[17:17:16.136] NCUI: UI controller created
+[17:17:16.136] ORCHESTRATOR: UI controller initialized
+[17:17:16.136] ORCHESTRATOR: Module callbacks configured
+[17:17:16.136] ORCHESTRATOR: Background analysis thread started
+[17:17:16.136] ORCHESTRATOR: Analysis worker thread started
+[17:17:16.136] ORCHESTRATOR: All modules initialized successfully
+[17:17:16.136] ORCHESTRATOR: Transferring control to UI controller
+[17:17:16.137] NCUI: Starting curses wrapper
+[17:17:16.137] NCUI: ERROR: Window creation failed: curses function returned NULL
+[17:17:16.137] NCUI: Layout updated successfully
+[17:17:16.137] NCUI: UI components initialized
+[17:17:16.137] NCUI: Initial display complete
+[17:17:16.137] NCUI: UI initialization complete
+[17:17:16.137] NCUI: Starting UI main loop
+[17:17:16.237] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:16.348] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:16.458] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:16.568] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:16.678] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:16.789] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:16.899] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.009] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.120] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.230] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.340] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.450] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.555] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.588] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.622] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.673] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.683] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.707] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.739] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.832] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.875] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.899] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.909] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.950] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.984] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:17.994] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.004] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.114] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.225] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.236] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.260] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.344] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.445] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.555] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.571] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.639] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.698] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.708] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.819] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.915] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:18.965] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.034] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.044] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.125] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.176] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.243] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.276] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.327] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.437] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.495] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.605] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.715] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.826] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:19.936] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.046] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.156] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.267] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.377] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.487] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.597] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.708] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.818] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:20.928] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.039] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.149] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.259] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.369] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.480] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.590] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.700] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.810] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:21.921] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:22.031] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:22.141] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:22.252] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:22.362] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:22.472] ORCHESTRATOR: Processing UI callback: get_messages
+[17:17:22.582] ORCHESTRATOR: Processing UI callback: get_messages

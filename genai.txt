@@ -5,14 +5,27 @@
 ## PROJECT OVERVIEW
 Terminal-based RPG storytelling client using Large Language Models via MCP (Model Context Protocol). 
 Architecture: Hub-and-spoke pattern with centralized orchestration through `orch.py`.
-Status: Remodularization complete, debug logger interface standardized.
+Status: Remodularization in progress - method signature fixes completed, window creation issue pending.
 
-## CURRENT PROJECT STATE (Updated for Latest Commit Analysis)
-- **Architecture**: Hub-and-spoke pattern fully implemented and operational
-- **Debug Logger**: Interface standardized across all modules with method-based pattern
+## CURRENT PROJECT STATE (Updated: September 11, 2025)
+- **Architecture**: Hub-and-spoke pattern implemented and operational
+- **Method Signatures**: All ncui.py method calls corrected to match uilib.py interfaces
 - **File Structure**: All 8 primary modules consolidated in root directory
 - **Dependencies**: Python 3.8+, curses, httpx (optional for LLM communication)
-- **Status**: Production-ready after successful remodularization
+- **Status**: Debugging phase - window creation failure preventing UI display
+
+### CURRENT ISSUE STATUS
+- ✅ **Method Signature Fixes**: All completed (insert_char, update_window_height, etc.)
+- ✅ **Import Path Corrections**: Module imports working correctly
+- ✅ **Debug Logger Interface**: Standardized across all modules
+- ❌ **Window Creation**: Curses returning NULL - terminal compatibility issue
+- ❌ **UI Display**: Black screen with cursor - no visual interface yet
+
+### IMMEDIATE NEXT STEPS
+1. **Terminal Compatibility**: Investigate curses window creation failure
+2. **Layout Validation**: Verify LayoutGeometry calculations produce valid dimensions
+3. **Terminal Requirements**: Check minimum size validation and terminal type support
+4. **Fallback Handling**: Implement graceful degradation for unsupported terminals
 
 ## COMPLETE MODULE REGISTRY AND INTERCONNECTS
 
@@ -22,7 +35,7 @@ aurora-rp/
 ├── main.py              # Entry point, prompt management, debug logger
 ├── orch.py              # Central hub orchestrator - ONLY module calling mcp.py
 ├── mcp.py               # LLM communication - accessed ONLY by orch.py
-├── ncui.py              # Pure UI controller (imports uilib.py)
+├── ncui.py              # Pure UI controller (imports uilib.py) - RECENTLY FIXED
 ├── uilib.py             # Consolidated UI components library
 ├── emm.py               # Enhanced memory manager
 ├── sme.py               # Story momentum engine  
@@ -76,6 +89,43 @@ aurora-rp/
 **Threading**: Background analysis thread for non-blocking operations
 **Debug Logging**: Uses helper methods `_log_debug()`, `_log_error()`
 
+#### ncui.py (RECENTLY FIXED)
+**Purpose**: Pure UI controller and event dispatcher
+**Imports**: `uilib` (consolidated UI components)
+**Exports**: `NCursesUIController`, `UIEvent`, `UIState`
+**Data Sent**: User input strings, UI events, shutdown requests  
+**Data Received**: Display messages, UI commands via orchestrator callback
+**Critical Functions**:
+- `run()`: Main UI event loop
+- `_handle_input()`: Input processing and validation
+- `_refresh_all_windows()`: Coordinate UI refresh through uilib
+- `_handle_character()`: Uses insert_char() method (FIXED)
+- `_handle_scroll_keys()`: Uses handle_line_scroll/handle_page_scroll methods (FIXED)
+**Dependencies**: curses, uilib components
+**Threading**: Main thread only, no direct threading operations
+**Recent Fixes**: All method signatures corrected to match uilib.py interfaces
+**Current Issue**: Window creation failing with curses NULL return
+
+#### uilib.py
+**Purpose**: Consolidated UI components library (replaces multiple nci_*.py files)
+**Imports**: curses
+**Exports**: `TerminalManager`, `MultiLineInput`, `ScrollManager`, `DisplayManager`, `ColorManager`
+**Components**:
+- `TerminalManager`: Dynamic coordinate system and layout geometry
+- `MultiLineInput`: Multi-line input with cursor navigation and word wrapping
+  - Methods: insert_char(), handle_enter(), update_max_width()
+- `ScrollManager`: Scroll position management with bounds checking
+  - Methods: update_window_height(), handle_line_scroll(), handle_page_scroll()
+- `DisplayManager`: Message formatting and display rendering
+- `ColorManager`: Theme switching and color management
+**Features**: 
+- Dynamic coordinate system prevents layout bugs
+- Responsive terminal geometry handling
+- Intelligent submission detection (double-enter or sentence-ending punctuation)
+- Three built-in color schemes (classic/dark/bright)
+**Dependencies**: curses
+**Interface Compatibility**: All method signatures verified with ncui.py
+
 #### mcp.py
 **Purpose**: LLM communication via Model Context Protocol (HTTP-based)
 **Imports**: None (leaf module)
@@ -89,37 +139,6 @@ aurora-rp/
 - `_parse_response_content()`: Handles multiple response format strategies
 **Dependencies**: httpx, asyncio, json
 **Error Handling**: Graceful fallbacks, network timeout handling
-
-#### ncui.py  
-**Purpose**: Pure UI controller and event dispatcher
-**Imports**: `uilib` (consolidated UI components)
-**Exports**: `NCursesUIController`, `UIEvent`, `UIState`
-**Data Sent**: User input strings, UI events, shutdown requests  
-**Data Received**: Display messages, UI commands via orchestrator callback
-**Critical Functions**:
-- `run()`: Main UI event loop
-- `_handle_user_input()`: Input processing and validation
-- `_update_display()`: Coordinate UI refresh through uilib
-- `_process_commands()`: Handle special commands (/help, /stats, etc.)
-**Dependencies**: curses, uilib components
-**Threading**: Main thread only, no direct threading operations
-
-#### uilib.py
-**Purpose**: Consolidated UI components library (replaces multiple nci_*.py files)
-**Imports**: curses
-**Exports**: `TerminalManager`, `MultiLineInput`, `ScrollManager`, `DisplayManager`, `ColorManager`
-**Components**:
-- `TerminalManager`: Dynamic coordinate system and layout geometry
-- `MultiLineInput`: Multi-line input with cursor navigation and word wrapping
-- `ScrollManager`: Scroll position management with bounds checking
-- `DisplayManager`: Message formatting and display rendering
-- `ColorManager`: Theme switching and color management
-**Features**: 
-- Dynamic coordinate system prevents layout bugs
-- Responsive terminal geometry handling
-- Intelligent submission detection (double-enter or sentence-ending punctuation)
-- Three built-in color schemes (classic/dark/bright)
-**Dependencies**: curses
 
 #### emm.py
 **Purpose**: Enhanced memory manager with semantic categorization
@@ -163,175 +182,50 @@ aurora-rp/
 - `analyze_content_importance()`: Determine condensation priority
 - `batch_categorize()`: Efficient multi-message processing
 **Categories**: character_focused, plot_advancing, world_building, meta_discussion, etc.
-**Dependencies**: None (LLM requests routed through orchestrator)
-**Threading**: Background processing via orchestrator coordination
+**Dependencies**: None (communicates via orchestrator callbacks)
+**Threading**: Background processing to prevent UI blocking
 
-## CRITICAL OPERATIONAL PATTERNS
+## DEBUGGING STATUS AND KNOWN ISSUES
 
-### Debug Logger Interface (STANDARDIZED)
-All modules use consistent method-based debug logging:
-```python
-def _log_debug(self, message: str, category: str = "general"):
-    """Helper method for debug logging with null safety"""
-    if self.debug_logger:
-        self.debug_logger.debug(message, category)
+### RESOLVED ISSUES ✅
+1. **Method Signature Mismatches**: All ncui.py calls now match uilib.py interfaces
+   - ScrollManager: update_height() → update_window_height()
+   - MultiLineInput: insert_character() → insert_char()
+   - MultiLineInput: reset_for_width() → update_max_width()
+   - MultiLineInput: get_display_lines() now called with required parameters
+   - ScrollManager: scroll_up/scroll_down → handle_line_scroll/handle_page_scroll
 
-def _log_error(self, message: str, category: str = "error"):
-    """Helper method for error logging with null safety"""  
-    if self.debug_logger:
-        self.debug_logger.debug(f"ERROR: {message}", category)
-```
-- All modules handle None debug_logger gracefully
-- Use category parameter for log organization
-- No manual prefixes: Category parameter handles organization
+2. **Import Path Issues**: All modules importing correctly from root directory
+3. **Debug Logger**: Standardized method-based pattern across all modules
 
-### Service Module Initialization Pattern
-All service modules must implement:
-```python
-def __init__(self, debug_logger=None):
-    self.debug_logger = debug_logger
-    self.orchestrator_callback = None
+### CURRENT ISSUE ❌
+**Window Creation Failure**: `curses function returned NULL`
+- **Symptom**: Black screen with cursor in top-left, unresponsive
+- **Log Evidence**: `[17:17:16.137] NCUI: ERROR: Window creation failed: curses function returned NULL`
+- **Analysis**: curses.newwin() returning NULL suggests invalid window dimensions or terminal incompatibility
+- **Potential Causes**:
+  - LayoutGeometry calculations producing invalid coordinates (negative/zero dimensions)
+  - Terminal size below minimum requirements (80x24)
+  - Terminal type not supporting required curses features
+  - Coordinate arithmetic errors in window positioning
 
-def set_orchestrator_callback(self, callback):
-    self.orchestrator_callback = callback
-```
-
-### LLM Request Pattern (EXCLUSIVE ACCESS)
-**ONLY orch.py may import and call mcp.py functions**
-All other modules must use orchestrator callback:
-```python
-result = self.orchestrator_callback('llm_request', {
-    'prompt': prompt_text,
-    'context': context_data
-})
-```
-
-### UI Callback Interface
-ncui.py communicates with orch.py via callback:
-```python
-# UI to Orchestrator
-result = self.callback_handler(action, data)
-
-# Supported actions:
-# "user_input", "get_messages", "clear_memory", 
-# "get_stats", "analyze_now", "shutdown"
-```
-
-## CURRENT OPERATIONAL STATUS
-
-### Successfully Implemented
-- ✅ Hub-and-spoke architecture complete and operational
-- ✅ Debug logger interface standardized across all modules
-- ✅ All 8 modules consolidated in root directory
-- ✅ Import path issues resolved
-- ✅ Prompt file loading from root directory
-- ✅ Threading safety with proper locks
-- ✅ Memory auto-save functionality
-- ✅ UI event handling and display refresh
-- ✅ Exclusive LLM access pattern enforced
-- ✅ Semantic categorization with background processing
-- ✅ 15-message momentum analysis cycles
-
-### Recently Completed Fixes
-- ✅ Debug logger callable pattern → method pattern conversion
-- ✅ Mixed debug logging interfaces standardized
-- ✅ Orchestrator callback handler implementation
-- ✅ UI component consolidation into uilib.py
-- ✅ Prompt file path references corrected to root directory
-- ✅ Module import dependencies resolved
-- ✅ Threading safety in memory operations
-- ✅ Background analysis coordination
-
-### Testing Status
-- **Startup Sequence**: Fully implemented and ready
-- **Module Initialization**: All 8 modules initialize in dependency order
-- **UI Display**: Consolidated uilib.py handles all interface operations  
-- **Input Processing**: Complete pipeline through orchestrator
-- **LLM Communication**: Exclusive access pattern operational
-- **Memory Management**: Thread-safe with auto-save
-- **Analysis Cycles**: Background processing prevents UI blocking
-
-## REGRESSION PREVENTION RULES
-
-### Before Modifying Any Function
-1. **Check this document** for module interconnects and dependencies
-2. **Identify all modules** that call the function
-3. **Identify all modules** the function calls
-4. **Consider data structure changes** and their ripple effects
-5. **Verify threading implications** and race conditions
-6. **Test with debug mode enabled** to verify logging works
-
-### Hub-and-Spoke Enforcement
-- **NEVER** allow direct module-to-module calls except through orch.py
-- **NEVER** allow any module except orch.py to import mcp.py
-- **NEVER** bypass the orchestrator callback pattern
-- **ALWAYS** route cross-module communication through orchestrator
-
-### Threading Safety Requirements
-- emm.py uses threading.Lock for all file operations
-- Background threads must not modify UI directly
-- Analysis threads communicate results via orchestrator callbacks
-- Auto-save runs independently with atomic file writes
-- UI resizing must not lose message history or state
-
-### Error Handling Patterns
-- All modules must handle None debug_logger gracefully
-- Network failures must not crash the application
-- File I/O errors must be logged but not fatal
-- Missing prompt files handled with warnings, not crashes
-- Terminal resize must maintain application state
-
-## TESTING CHECKLIST
-
-### Startup Sequence Validation
-- [ ] All 8 modules import successfully without errors
-- [ ] Debug logger initializes and creates log file
-- [ ] Prompt files load from root directory (critrules.prompt required)
-- [ ] Orchestrator initializes all service modules in correct order
-- [ ] UI displays without curses crashes
-
-### Core Functionality Testing
-- [ ] User input processes correctly through full pipeline
-- [ ] LLM responses display properly in UI via orchestrator
-- [ ] Messages save to memory.json automatically
-- [ ] 15-message analysis triggers background processing
-- [ ] Theme switching works with uilib.py color management
-- [ ] Terminal resize maintains state and redisplays correctly
-
-### Error Scenario Handling
-- [ ] Missing prompt files handled gracefully with warnings
-- [ ] Network timeout doesn't crash (falls back gracefully)
-- [ ] Terminal resize during input doesn't lose cursor state
-- [ ] Ctrl+C shuts down cleanly with proper cleanup
-- [ ] Debug logger handles file write failures gracefully
-
-### Command System Testing
-- [ ] `/help` shows command documentation
-- [ ] `/clear` clears display buffer
-- [ ] `/stats` shows system statistics via orchestrator
-- [ ] `/quit` and `/exit` trigger clean shutdown
-- [ ] `/theme` command changes colors and refreshes display
-
-### Advanced Feature Testing
-- [ ] Semantic categorization operates in background
-- [ ] Memory condensation when token limits exceeded
-- [ ] Momentum analysis triggers every 15 messages
-- [ ] Auto-save maintains conversation state
-- [ ] Multi-line input with intelligent submission detection
+### DEBUGGING PRIORITIES
+1. **Layout Validation**: Add bounds checking to LayoutGeometry calculations
+2. **Terminal Compatibility**: Verify terminal type and feature support
+3. **Dimension Logging**: Log all window creation parameters before curses.newwin() calls
+4. **Fallback Handling**: Implement graceful degradation for incompatible terminals
 
 ## VERSION HISTORY
 
-### Current Version (Latest Commit Analysis)
+### Current Version (Latest Commit - September 11, 2025)
 - **Architecture**: Complete hub-and-spoke implementation
-- **Status**: Production-ready remodularized codebase
-- **Debug Logger**: Standardized interface across all modules
-- **UI Components**: Consolidated into uilib.py from multiple nci_*.py files
-- **File Structure**: All 8 modules in root directory with flat organization
-- **Key Features**: Centralized orchestration, standardized logging, responsive UI
+- **Status**: Method signature fixes completed, debugging window creation
+- **Progress**: All ncui.py interface calls corrected to match uilib.py
+- **Next Phase**: Terminal compatibility and window creation debugging
 
 ### Previous Working Version (legacyref/)
-- **Architecture**: Direct module interconnections
-- **Status**: Fully functional but less maintainable  
+- **Architecture**: Direct module interconnections with multiple nci_*.py files
+- **Status**: Fully functional interface with working curses display
 - **Purpose**: Preserved for reference and emergency rollback
 - **Usage**: Read-only reference, do not modify
 
@@ -341,8 +235,7 @@ result = self.callback_handler(action, data)
 - **Standardized Logging**: Consistent debug interface across modules
 - **Flat File Structure**: All modules in root directory
 - **Enhanced UI**: Consolidated uilib.py with better components
-- **Thread Safety**: Improved locking and background processing
-- **Error Handling**: Graceful degradation patterns
+- **Method Standardization**: All interface calls verified and corrected
 
 ## USAGE INSTRUCTIONS
 
@@ -353,19 +246,33 @@ result = self.callback_handler(action, data)
 - companion.prompt and lowrules.prompt are optional
 - Terminal minimum size: 80x24 characters
 
-### Commands
-- **Multi-line Input**: Type naturally, double-enter to submit
-- **Navigation**: PgUp/PgDn for scrolling, Home/End for quick navigation
-- **Commands**: `/help`, `/stats`, `/analyze`, `/theme <n>`, `/clearmemory`, `/quit`
+### Current Limitations
+- UI display not functional due to window creation issue
+- Input processing working but not visible
+- All backend modules (orch, emm, sme, sem, mcp) operational
+- Debug logging fully functional
 
 ### Debug Features
 - Comprehensive logging of all module interactions
-- Semantic categorization decision tracking
-- Momentum analysis results monitoring
-- Background thread operations visibility
-- Token budget management logging
-- Memory condensation process tracking
+- Method signature validation logging
+- Window creation failure diagnostics
+- Layout calculation tracking
+- Terminal compatibility checking
+
+## NEXT DEVELOPMENT PHASE
+
+### Immediate Tasks
+1. **Window Creation Debug**: Add detailed logging to _create_windows() method
+2. **Layout Validation**: Verify LayoutGeometry produces valid dimensions
+3. **Terminal Compatibility**: Check curses feature requirements
+4. **Error Handling**: Implement fallback for unsupported terminals
+
+### Testing Priorities
+1. **Layout Calculations**: Verify all coordinates are positive and within bounds
+2. **Terminal Types**: Test across different terminal emulators
+3. **Size Validation**: Ensure minimum terminal size requirements
+4. **Graceful Degradation**: Fallback to text-only mode if curses fails
 
 ---
-**END OF GENAI.TXT** - Last Updated: Analysis of latest commit state
-**Remember**: This document is the authoritative source for understanding module interactions and preventing regressions. Always consult before making changes that could affect multiple modules. The hub-and-spoke architecture is complete and the project is production-ready.
+**END OF GENAI.TXT** - Last Updated: September 11, 2025 - Method Signature Fix Phase Complete
+**Remember**: This document is the authoritative source for understanding module interactions and current debugging status. The hub-and-spoke architecture is complete and method signatures are corrected - focus is now on terminal compatibility and window creation debugging.

@@ -1,10 +1,10 @@
-# Chunk 1/6 - ncui.py - Header, Imports, and Constructor (Debug Logger Fix)
+# Chunk 1/6 - ncui.py - Header, Imports, and Constructor (Method Signature Fixes)
 
 #!/usr/bin/env python3
 """
 DevName RPG Client - NCurses UI Controller (ncui.py)
 Simplified UI management without orchestration logic - business logic moved to orch.py
-FIXED: All debug logger calls use method pattern with null safety checks
+FIXED: All method calls corrected to match actual uilib.py signatures
 """
 
 import curses
@@ -75,7 +75,7 @@ class NCursesUIController:
 
         self._log_debug("UI controller created")
 
-# Chunk 2/6 - ncui.py - Initialization and Layout Methods (Debug Logger Fix)
+# Chunk 2/6 - ncui.py - Initialization and Layout Methods (Method Signature Fixes)
         
     def initialize(self, stdscr) -> bool:
         """Initialize curses interface and UI components"""
@@ -116,7 +116,7 @@ class NCursesUIController:
             # FIXED: Update ScrollManager height after layout calculation
             if self.current_layout and hasattr(self.current_layout, 'output_box'):
                 # Use output_box.inner_height for content area (excluding borders)
-                self.scroll_manager.update_height(self.current_layout.output_box.inner_height)
+                self.scroll_manager.update_window_height(self.current_layout.output_box.inner_height)
 
             # Create/recreate windows with new layout
             self._create_windows()
@@ -178,12 +178,12 @@ class NCursesUIController:
             if self.current_layout:
                 # FIXED: Use correct layout structure - input_box instead of input_width
                 max_width = self.current_layout.input_box.inner_width - 4  # Account for borders
-                self.multi_input.reset_for_width(max_width)
+                self.multi_input.update_max_width(max_width)
 
             # Update scroll manager with proper content height
             if self.current_layout:
-                # FIXED: Use correct layout structure - output_box instead of output_height
-                self.scroll_manager.update_height(self.current_layout.output_box.inner_height - 2)  # Account for borders
+                # FIXED: Use correct method name - update_window_height instead of update_height
+                self.scroll_manager.update_window_height(self.current_layout.output_box.inner_height - 2)  # Account for borders
 
             self._log_debug("UI components initialized")
 
@@ -249,7 +249,7 @@ class NCursesUIController:
         except Exception as e:
             self._log_error(f"Window refresh failed: {e}")
 
-# Chunk 3/6 - ncui.py - Main Run Loop and Input Processing (Debug Logger Fix)
+# Chunk 3/6 - ncui.py - Main Run Loop and Input Processing (Method Signature Fixes)
 
     def run(self) -> int:
         """Run interface using curses wrapper"""
@@ -319,7 +319,7 @@ class NCursesUIController:
                 return True
             elif ch == 27:  # Escape key
                 return self._handle_escape()
-            elif ch in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_PPAGE, curses.KEY_NPAGE):  # FIXED: Use correct constants
+            elif ch in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_PPAGE, curses.KEY_NPAGE):
                 return self._handle_scroll_keys(ch)
             elif ch == 10 or ch == 13:  # Enter key
                 return self._handle_enter()
@@ -341,8 +341,8 @@ class NCursesUIController:
     def _handle_character(self, char: str) -> bool:
         """Handle printable character input"""
         try:
-            # Add character to multi-line input
-            self.multi_input.insert_character(char)
+            # FIXED: Use correct method name - insert_char instead of insert_character
+            self.multi_input.insert_char(char)
             return True
             
         except Exception as e:
@@ -380,8 +380,8 @@ class NCursesUIController:
     def _handle_tab(self) -> bool:
         """Handle tab key - could be used for autocomplete in future"""
         try:
-            # For now, just insert spaces
-            self.multi_input.insert_character("    ")
+            # FIXED: Use correct method name - insert_char instead of insert_character
+            self.multi_input.insert_char("    ")
             return True
             
         except Exception as e:
@@ -408,14 +408,15 @@ class NCursesUIController:
     def _handle_scroll_keys(self, key: int) -> bool:
         """Handle scrolling keys"""
         try:
+            # FIXED: Use correct ScrollManager method names from uilib.py
             if key == curses.KEY_UP:
-                self.scroll_manager.scroll_up(1)
+                self.scroll_manager.handle_line_scroll(-1)
             elif key == curses.KEY_DOWN:
-                self.scroll_manager.scroll_down(1)
-            elif key == curses.KEY_PPAGE:  # FIXED: Use correct Page Up constant
-                self.scroll_manager.scroll_up(10)
-            elif key == curses.KEY_NPAGE:  # FIXED: Use correct Page Down constant
-                self.scroll_manager.scroll_down(10)
+                self.scroll_manager.handle_line_scroll(1)
+            elif key == curses.KEY_PPAGE:  # Page Up
+                self.scroll_manager.handle_page_scroll(-1)
+            elif key == curses.KEY_NPAGE:  # Page Down
+                self.scroll_manager.handle_page_scroll(1)
 
             return True
 
@@ -478,7 +479,7 @@ class NCursesUIController:
         finally:
             self.processing = False
 
-# Chunk 4/6 - ncui.py - Display and Message Management (Debug Logger Fix)
+# Chunk 4/6 - ncui.py - Display and Message Management (Method Signature Fixes)
 
     def _add_message(self, content: str, message_type: str):
         """Add message to display buffer"""
@@ -494,7 +495,7 @@ class NCursesUIController:
             self.display_buffer.append(message)
 
             # Update scroll manager with new content
-            self.scroll_manager.update_content_lines(len(self.display_buffer))
+            self.scroll_manager.update_max_scroll(len(self.display_buffer))
 
             # Auto-scroll to bottom for new messages
             self.scroll_manager.scroll_to_bottom()
@@ -541,7 +542,7 @@ class NCursesUIController:
             display_width = self.current_layout.output_box.inner_width
 
             # Get visible messages based on scroll position
-            start_line = self.scroll_manager.scroll_position
+            start_line = self.scroll_manager.scroll_offset
             visible_messages = self.display_buffer[start_line:start_line + display_height]
 
             # Display messages
@@ -590,7 +591,7 @@ class NCursesUIController:
 
             # Show scroll indicator if needed
             if len(self.display_buffer) > display_height:
-                scroll_info = f"({self.scroll_manager.scroll_position + 1}/{len(self.display_buffer)})"
+                scroll_info = f"({self.scroll_manager.scroll_offset + 1}/{len(self.display_buffer)})"
                 try:
                     self.output_window.addstr(0, display_width - len(scroll_info) - 1, scroll_info)
                 except curses.error:
@@ -616,9 +617,11 @@ class NCursesUIController:
             display_height = self.current_layout.input_box.inner_height
             display_width = self.current_layout.input_box.inner_width
 
-            # Get current input lines
-            input_lines = self.multi_input.get_display_lines()
-            cursor_pos = self.multi_input.get_cursor_position()
+            # FIXED: Get current input lines with required parameters
+            input_lines = self.multi_input.get_display_lines(display_width, display_height)
+            
+            # FIXED: Get cursor position from direct attributes instead of method call
+            cursor_pos = (self.multi_input.cursor_line, self.multi_input.cursor_col)
 
             # Display input lines
             y_pos = 1
@@ -717,7 +720,7 @@ class NCursesUIController:
         
         return lines if lines else [""]
 
-# Chunk 5/6 - ncui.py - Command Handling and Utility Methods (Debug Logger Fix)
+# Chunk 5/6 - ncui.py - Command Handling and Utility Methods (Method Signature Fixes)
 
     def _handle_command(self, command: str) -> bool:
         """Handle special commands starting with /"""
@@ -786,7 +789,7 @@ class NCursesUIController:
         """Clear the display buffer"""
         try:
             self.display_buffer.clear()
-            self.scroll_manager.update_content_lines(0)
+            self.scroll_manager.update_max_scroll(0)
             self._add_message("Display cleared.", "system")
             
             self._log_debug("Display cleared by user")
@@ -946,7 +949,7 @@ class NCursesUIController:
         """Check if UI is currently running"""
         return self.running
 
-# Chunk 6/6 - ncui.py - Debug Logging Helper Methods and Module Exports (Debug Logger Fix)
+# Chunk 6/6 - ncui.py - Debug Logging Helper Methods and Module Exports (Method Signature Fixes)
 
     def _log_debug(self, message: str):
         """
