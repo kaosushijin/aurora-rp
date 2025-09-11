@@ -1,12 +1,13 @@
-# Chunk 1/3 - orch.py - Main Orchestrator with Central Coordination
+# Chunk 1/4 - orch.py with AsyncSyncBridge integration
 #!/usr/bin/env python3
 
 import asyncio
 import threading
 import time
 import signal
-from typing import Dict, List, Any, Optional, Callable
+from typing import Dict, List, Any, Optional, Callable, Coroutine
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 # Import semantic logic module
 from sem import SemanticProcessor, create_semantic_processor
@@ -22,6 +23,143 @@ try:
     from ui import UIController
 except ImportError:
     from nci import CursesInterface as UIController
+
+
+class AsyncSyncBridge:
+    """
+    Bridge for running async operations from synchronous context
+    Manages dedicated event loop in separate thread
+    """
+    
+    def __init__(self, debug_logger=None):
+        self.debug_logger = debug_logger
+        self.loop = None
+        self.thread = None
+        self.executor = ThreadPoolExecutor(max_workers=2)
+        self._shutdown = False
+        
+    def start(self):
+        """Start the async event loop in dedicated thread"""
+        if self.thread is not None:
+            return  # Already started
+            
+        if self.debug_logger:
+            self.debug_logger.debug("Starting AsyncSyncBridge", "BRIDGE")
+            
+        # Create new event loop for this thread
+        self.loop = asyncio.new_event_loop()
+        
+        # Start thread with event loop
+        self.thread = threading.Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+        
+        # Wait for loop to be ready
+        timeout = 5.0
+        start_time = time.time()
+        while not self.loop.is_running() and (time.time() - start_time) < timeout:
+            time.sleep(0.01)
+            
+        if not self.loop.is_running():
+            raise RuntimeError("Failed to start async event loop")
+            
+        if self.debug_logger:
+            self.debug_logger.debug("AsyncSyncBridge started successfully", "BRIDGE")
+    
+    def _run_loop(self):
+        """Run the event loop in dedicated thread"""
+        asyncio.set_event_loop(self.loop)
+        try:
+            self.loop.run_forever()
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Event loop error: {e}", "BRIDGE")
+        finally:
+            if self.debug_logger:
+                self.debug_logger.debug("Event loop stopped", "BRIDGE")
+    
+    def run_async(self, coro: Coroutine, timeout: float = 30.0) -> Any:
+        """
+        Run async coroutine from sync context
+        Returns the result or raises exception
+        """
+        if self._shutdown:
+            raise RuntimeError("AsyncSyncBridge is shut down")
+            
+        if self.loop is None or not self.loop.is_running():
+            raise RuntimeError("AsyncSyncBridge not started")
+        
+        try:
+            if self.debug_logger:
+                self.debug_logger.debug(f"Running async operation with {timeout}s timeout", "BRIDGE")
+                
+            # Submit coroutine to async event loop
+            future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            
+            # Wait for result with timeout
+            result = future.result(timeout=timeout)
+            
+            if self.debug_logger:
+                self.debug_logger.debug("Async operation completed successfully", "BRIDGE")
+                
+            return result
+            
+        except TimeoutError:
+            if self.debug_logger:
+                self.debug_logger.error(f"Async operation timed out after {timeout}s", "BRIDGE")
+            raise TimeoutError(f"Async operation timed out after {timeout} seconds")
+            
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Async operation failed: {e}", "BRIDGE")
+            raise
+    
+    def run_async_safely(self, coro: Coroutine, timeout: float = 30.0, default=None) -> Any:
+        """
+        Run async coroutine with error handling
+        Returns result on success, default value on failure
+        """
+        try:
+            return self.run_async(coro, timeout)
+        except Exception as e:
+            if self.debug_logger:
+                self.debug_logger.error(f"Async operation failed safely: {e}", "BRIDGE")
+            return default
+    
+    def shutdown(self):
+        """Shutdown the async bridge and clean up resources"""
+        if self._shutdown:
+            return
+            
+        if self.debug_logger:
+            self.debug_logger.debug("Shutting down AsyncSyncBridge", "BRIDGE")
+            
+        self._shutdown = True
+        
+        # Stop event loop
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        
+        # Wait for thread to finish
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5.0)
+            if self.thread.is_alive():
+                if self.debug_logger:
+                    self.debug_logger.warning("Thread did not stop cleanly", "BRIDGE")
+        
+        # Shutdown executor
+        self.executor.shutdown(wait=True)
+        
+        if self.debug_logger:
+            self.debug_logger.debug("AsyncSyncBridge shutdown complete", "BRIDGE")
+    
+    def is_running(self) -> bool:
+        """Check if bridge is running and ready"""
+        return (not self._shutdown and 
+                self.loop is not None and 
+                self.loop.is_running() and
+                self.thread is not None and 
+                self.thread.is_alive())
+
 
 class OrchestratorState:
     """State tracking for orchestrator lifecycle"""
@@ -48,6 +186,7 @@ class OrchestratorState:
             "last_error": self.last_error
         }
 
+# Chunk 2/4 - orch.py with AsyncSyncBridge integration
 
 class ModuleRegistry:
     """Registry for managing module instances and dependencies"""
@@ -93,7 +232,7 @@ class ModuleRegistry:
 
 class DevNameOrchestrator:
     """
-    Main orchestrator for DevName RPG Client
+    Main orchestrator for DevName RPG Client with AsyncSyncBridge support
     
     Responsibilities:
     - Initialize all subsystems in correct order
@@ -101,6 +240,7 @@ class DevNameOrchestrator:
     - Handle background thread coordination  
     - Process configuration and prompts from main.py
     - Coordinate shutdown sequence
+    - Bridge async/sync operations
     """
     
     def __init__(self, config: Dict[str, Any] = None, debug_logger=None):
@@ -122,6 +262,9 @@ class DevNameOrchestrator:
         # Background processing
         self.background_tasks = {}
         self.analysis_coordinator = None
+        
+        # Async/Sync bridge
+        self.async_bridge = AsyncSyncBridge(debug_logger)
         
         # Signal handling
         self._setup_signal_handlers()
@@ -146,6 +289,10 @@ class DevNameOrchestrator:
             self.state.initialization_phase = "starting"
             self.state.initialization_time = datetime.now().isoformat()
             self._log_debug("Starting system initialization")
+            
+            # Start async bridge first
+            self.async_bridge.start()
+            self._log_debug("AsyncSyncBridge started")
             
             # Initialize modules in dependency order
             for module_name in self.module_registry.get_initialization_order():
@@ -278,7 +425,7 @@ class DevNameOrchestrator:
             self._log_debug(f"Failed to initialize memory manager: {e}")
             return None
 
-# Chunk 2/3 - orch.py - Story Engine Initialization and Background Thread Coordination
+# Chunk 3/4 - orch.py with AsyncSyncBridge integration
 
     async def _initialize_story_engine(self) -> Optional[StoryMomentumEngine]:
         """Initialize story momentum engine with semantic integration"""
@@ -310,102 +457,157 @@ class DevNameOrchestrator:
             return None
     
     async def _initialize_ui_controller(self) -> Optional['UIController']:
-        """Initialize UI controller with proper orchestrator integration"""
+        """Initialize UI controller with proper orchestrator integration and async bridge"""
         try:
-            from ui import UIController
-
-            # Create UI controller with configuration
             ui_controller = UIController(
                 debug_logger=self.debug_logger,
                 config=self.config
             )
 
-            # Set up message processor callback
+            # Create bridge-enabled message processor
             def message_processor(user_input: str) -> Dict[str, Any]:
-                """Process user messages through backend modules"""
+                """Process user messages through backend modules using async bridge"""
                 try:
-                    # Get required modules
-                    memory_manager = self.module_registry.get_module("memory_manager")
-                    story_engine = self.module_registry.get_module("story_engine")
-                    mcp_client = self.module_registry.get_module("mcp_client")
+                    # Define async message processing coroutine
+                    async def async_message_process():
+                        memory_manager = self.module_registry.get_module("memory_manager")
+                        story_engine = self.module_registry.get_module("story_engine")
+                        mcp_client = self.module_registry.get_module("mcp_client")
 
-                    if not all([memory_manager, story_engine, mcp_client]):
-                        return {"success": False, "error": "Backend modules not available"}
+                        if not all([memory_manager, story_engine, mcp_client]):
+                            return {"success": False, "error": "Backend modules not available"}
 
-                    # Store message in memory (like original nci.py)
-                    from emm import MessageType
-                    memory_manager.add_message(user_input, MessageType.USER)
+                        # Store message in memory
+                        memory_manager.add_message(user_input, MessageType.USER)
 
-                    # Process through story engine (like original nci.py)
-                    momentum_result = story_engine.process_user_input(user_input)
+                        # Process through story engine
+                        momentum_result = story_engine.process_user_input(user_input)
 
-                    # Build context for MCP request
-                    conversation_history = memory_manager.get_conversation_for_mcp()
-                    story_context_dict = story_engine.get_story_context()
+                        # Build context for MCP request
+                        conversation_history = memory_manager.get_conversation_for_mcp()
+                        story_context_dict = story_engine.get_story_context()
 
-                    # Format story context as string for MCP (fix the bug here)
-                    if isinstance(story_context_dict, dict):
-                        pressure = story_context_dict.get('pressure_level', 0)
-                        arc = story_context_dict.get('story_arc', 'setup')
-                        story_context = f"Story Pressure: {pressure:.2f}, Arc: {arc}"
-                    else:
-                        # Fallback if get_story_context returns a string
-                        story_context = str(story_context_dict)
+                        # Format story context as string for MCP
+                        if isinstance(story_context_dict, dict):
+                            pressure = story_context_dict.get('pressure_level', 0)
+                            arc = story_context_dict.get('story_arc', 'setup')
+                            story_context = f"Story Pressure: {pressure:.2f}, Arc: {arc}"
+                        else:
+                            story_context = str(story_context_dict)
 
-                    # Send to MCP server (like original nci.py)
-                    try:
-                        ai_response = mcp_client.send_message(
-                            user_input,
-                            conversation_history=conversation_history,
-                            story_context=story_context
+                        # Build system messages with story context (like original nci.py)
+                        system_messages = []
+                        if self.loaded_prompts.get('critrules'):
+                            primary_prompt = self.loaded_prompts['critrules']
+                            if story_context:
+                                primary_prompt += f"\n\n**COMPLETE STORY CONTEXT**: {story_context}"
+                            system_messages.append({"role": "system", "content": primary_prompt})
+
+                        if self.loaded_prompts.get('companion'):
+                            system_messages.append({"role": "system", "content": self.loaded_prompts['companion']})
+
+                        if self.loaded_prompts.get('lowrules'):
+                            system_messages.append({"role": "system", "content": self.loaded_prompts['lowrules']})
+
+                        # Combine system messages with conversation history
+                        full_messages = system_messages + conversation_history
+
+                        # Send to MCP server via direct httpx call (consistent with Phase 2)
+                        try:
+                            import httpx
+
+                            # Build proper MCP payload with required fields
+                            payload = {
+                                "model": "qwen2.5:14b-instruct-q4_k_m",
+                                "messages": full_messages,
+                                "stream": False
+                            }
+
+                            async with httpx.AsyncClient(timeout=30.0) as client:
+                                response = await client.post(
+                                    "http://127.0.0.1:3456/chat",
+                                    json=payload
+                                )
+
+                                if response.status_code == 200:
+                                    response_data = response.json()
+                                    # Debug: log the actual response structure
+                                    print(f"DEBUG: MCP Response: {response_data}")
+
+                                    # Use correct MCP server response format
+                                    if (isinstance(response_data, dict) and
+                                        "message" in response_data and
+                                        isinstance(response_data["message"], dict) and
+                                        "content" in response_data["message"]):
+                                        ai_response = response_data["message"]["content"]
+                                    else:
+                                        return {"success": False, "error": f"Invalid response format from MCP server. Got: {response_data}"}
+
+                            # Store AI response in memory
+                            memory_manager.add_message(ai_response, MessageType.ASSISTANT)
+
+                            # Update story momentum with AI response
+                            if hasattr(story_engine, 'process_ai_response'):
+                                story_engine.process_ai_response(ai_response)
+
+                            return {
+                                "success": True,
+                                "ai_response": ai_response,
+                                "momentum_result": momentum_result
+                            }
+
+                        except Exception as e:
+                            return {"success": False, "error": f"MCP error: {e}"}
+
+                    # Use async bridge to run async operation from sync context
+                    if self.async_bridge.is_running():
+                        return self.async_bridge.run_async_safely(
+                            async_message_process(),
+                            timeout=30.0,
+                            default={"success": False, "error": "Async operation failed"}
                         )
-
-                        # Store AI response in memory
-                        memory_manager.add_message(ai_response, MessageType.ASSISTANT)
-
-                        # Update story momentum with AI response
-                        if hasattr(story_engine, 'process_ai_response'):
-                            story_engine.process_ai_response(ai_response)
-
-                        return {
-                            "success": True,
-                            "ai_response": ai_response,
-                            "momentum_result": momentum_result
-                        }
-
-                    except Exception as e:
-                        return {"success": False, "error": f"MCP error: {e}"}
+                    else:
+                        return {"success": False, "error": "Async bridge not available"}
 
                 except Exception as e:
                     self._log_debug(f"Message processing error: {e}")
                     return {"success": False, "error": str(e)}
 
-            # Set up command processor callback
+            # Create simplified command processor (remove duplicate logic)
             def command_processor(command: str) -> Dict[str, Any]:
                 """Process user commands through appropriate handlers"""
                 try:
-                    # Handle built-in commands
                     if command == "/help":
                         return {"success": True, "system_message": "Available commands: /help, /stats, /analyze, /clearmemory, /theme, /quit"}
-                    elif command == "/stats":
-                        # Get stats from modules
-                        memory_manager = self.module_registry.get_module("memory_manager")
-                        story_engine = self.module_registry.get_module("story_engine")
-
-                        stats = []
-                        if memory_manager:
-                            messages = memory_manager.get_messages() if hasattr(memory_manager, 'get_messages') else []
-                            stats.append(f"Memory: {len(messages)} messages")
-                        if story_engine:
-                            current_state = story_engine.get_current_state()
-                            if isinstance(current_state, dict):
-                                stats.append(f"Story pressure: {current_state.get('narrative_pressure', 0):.2f}")
-                                stats.append(f"Story arc: {current_state.get('story_arc', 'setup')}")
-
-                        return {"success": True, "system_message": "\n".join(stats)}
                     elif command == "/quit":
                         self.request_shutdown()
                         return {"success": True, "system_message": "Shutting down..."}
+                    elif command == "/stats":
+                        # Use async bridge for stats that might need async operations
+                        async def async_stats():
+                            memory_manager = self.module_registry.get_module("memory_manager")
+                            story_engine = self.module_registry.get_module("story_engine")
+
+                            stats = []
+                            if memory_manager:
+                                messages = memory_manager.get_messages() if hasattr(memory_manager, 'get_messages') else []
+                                stats.append(f"Memory: {len(messages)} messages")
+                            if story_engine:
+                                current_state = story_engine.get_current_state()
+                                if isinstance(current_state, dict):
+                                    stats.append(f"Story pressure: {current_state.get('narrative_pressure', 0):.2f}")
+                                    stats.append(f"Story arc: {current_state.get('story_arc', 'setup')}")
+
+                            return {"success": True, "system_message": "\n".join(stats)}
+
+                        if self.async_bridge.is_running():
+                            return self.async_bridge.run_async_safely(
+                                async_stats(),
+                                timeout=10.0,
+                                default={"success": False, "error": "Stats command failed"}
+                            )
+                        else:
+                            return {"success": False, "error": "Async bridge not available"}
                     else:
                         return {"success": False, "error": f"Unknown command: {command}"}
 
@@ -419,26 +621,16 @@ class DevNameOrchestrator:
             # Set status updater callback
             def status_updater(status: str):
                 """Update status from orchestrator"""
-                # This can be used for orchestrator-level status updates
                 pass
 
             ui_controller.set_status_updater(status_updater)
 
-            self._log_debug("UI controller initialized with orchestrator integration")
+            self._log_debug("UI controller initialized with orchestrator integration and async bridge")
             return ui_controller
 
         except Exception as e:
             self._log_debug(f"Failed to initialize UI controller: {e}")
             return None
-    
-    async def _configure_ui_components(self, ui_controller):
-        """Configure UI components through orchestrator"""
-        try:
-            # This will be simplified when UI is refactored to ui.py
-            if hasattr(ui_controller, '_configure_components'):
-                ui_controller._configure_components()
-        except Exception as e:
-            self._log_debug(f"Failed to configure UI components: {e}")
     
     async def _start_background_processing(self):
         """Start background processing coordination"""
@@ -474,100 +666,13 @@ class DevNameOrchestrator:
         """Get all registered modules"""
         return self.module_registry.modules.copy()
     
-    async def process_user_message(self, content: str) -> Dict[str, Any]:
-        """Process user message through complete pipeline"""
-        try:
-            result = {
-                "success": False,
-                "user_content": content,
-                "ai_response": None,
-                "semantic_analysis": None,
-                "momentum_update": None,
-                "error": None
-            }
-            
-            # Get modules
-            memory_manager = self.get_module("memory_manager")
-            story_engine = self.get_module("story_engine")
-            mcp_client = self.get_module("mcp_client")
-            semantic_processor = self.get_module("semantic_processor")
-            
-            if not all([memory_manager, story_engine, mcp_client, semantic_processor]):
-                result["error"] = "Required modules not initialized"
-                return result
-            
-            # Store user message with background semantic analysis
-            user_message = memory_manager.add_message(content, MessageType.USER)
-            
-            # Process immediate story momentum patterns
-            momentum_result = story_engine.process_user_input(content)
-            result["momentum_update"] = momentum_result
-            
-            # Build system messages with story context
-            story_context = story_engine.get_story_context()
-            system_messages = self._build_system_messages(story_context)
-            
-            # Get conversation history for MCP
-            conversation_messages = memory_manager.get_conversation_for_mcp()
-            
-            # Send to LLM via MCP
-            full_messages = system_messages + conversation_messages
-            ai_response = await mcp_client.send_request(full_messages)
-            
-            if ai_response:
-                # Store AI response
-                memory_manager.add_message(ai_response, MessageType.ASSISTANT)
-                result["ai_response"] = ai_response
-                
-                # Check if comprehensive analysis is needed
-                total_messages = memory_manager.get_message_count()
-                if total_messages % 15 == 0:
-                    await self._trigger_comprehensive_analysis(total_messages)
-                
-                result["success"] = True
-            else:
-                result["error"] = "No response from LLM"
-            
-            return result
-            
-        except Exception as e:
-            self._log_debug(f"Error processing user message: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "user_content": content
-            }
-    
-    def _build_system_messages(self, story_context: str) -> List[Dict[str, str]]:
-        """Build system messages with integrated prompts and story context"""
-        system_messages = []
-        
-        if self.loaded_prompts.get('critrules'):
-            primary_prompt = self.loaded_prompts['critrules']
-            if story_context:
-                primary_prompt += f"\n\n**COMPLETE STORY CONTEXT**: {story_context}"
-            system_messages.append({"role": "system", "content": primary_prompt})
-        
-        if self.loaded_prompts.get('companion'):
-            system_messages.append({"role": "system", "content": self.loaded_prompts['companion']})
-        
-        if self.loaded_prompts.get('lowrules'):
-            system_messages.append({"role": "system", "content": self.loaded_prompts['lowrules']})
-        
-        return system_messages
-    
-    async def _trigger_comprehensive_analysis(self, total_messages: int):
-        """Trigger comprehensive momentum analysis via coordinator"""
-        if self.analysis_coordinator:
-            await self.analysis_coordinator.queue_comprehensive_analysis(total_messages)
-    
     def request_shutdown(self):
         """Request graceful shutdown"""
         self.state.shutdown_requested = True
         self.shutdown_event.set()
     
     async def shutdown_system(self) -> bool:
-        """Graceful shutdown of all subsystems"""
+        """Graceful shutdown of all subsystems including async bridge"""
         try:
             self.state.shutdown_time = datetime.now().isoformat()
             self._log_debug("Starting system shutdown")
@@ -580,6 +685,11 @@ class DevNameOrchestrator:
             
             # Shutdown modules in reverse order
             await self._shutdown_modules()
+            
+            # Shutdown async bridge
+            if self.async_bridge:
+                self.async_bridge.shutdown()
+                self._log_debug("AsyncSyncBridge shutdown complete")
             
             self.state.running = False
             self._log_debug("System shutdown complete")
@@ -658,12 +768,15 @@ class DevNameOrchestrator:
             self._log_debug(f"Error during module shutdown: {e}")
     
     def get_system_status(self) -> Dict[str, Any]:
-        """Get comprehensive system status"""
+        """Get comprehensive system status including async bridge"""
         status = {
             "orchestrator_state": self.state.to_dict(),
             "modules": {},
             "background_tasks": {},
-            "memory_usage": {}
+            "async_bridge": {
+                "running": self.async_bridge.is_running() if self.async_bridge else False,
+                "shutdown": self.async_bridge._shutdown if self.async_bridge else True
+            }
         }
         
         # Module status
@@ -706,6 +819,9 @@ class BackgroundAnalysisCoordinator:
         while self.running:
             try:
                 # Wait for analysis requests
+
+# Chunk 4/4 - orch.py with AsyncSyncBridge integration
+
                 analysis_request = await asyncio.wait_for(self.analysis_queue.get(), timeout=1.0)
                 
                 if analysis_request:
@@ -781,248 +897,6 @@ class BackgroundAnalysisCoordinator:
         """Stop coordination loop"""
         self.running = False
 
-# Chunk 3/3 - orch.py - Main Orchestrator Interface and Integration
-
-class CommandProcessor:
-    """Processes commands through the orchestrator"""
-    
-    def __init__(self, orchestrator: DevNameOrchestrator):
-        self.orchestrator = orchestrator
-        self.debug_logger = orchestrator.debug_logger
-        
-        self.command_handlers = {
-            '/help': self._handle_help,
-            '/quit': self._handle_quit,
-            '/exit': self._handle_quit,
-            '/clearmemory': self._handle_clear_memory,
-            '/savememory': self._handle_save_memory,
-            '/loadmemory': self._handle_load_memory,
-            '/stats': self._handle_stats,
-            '/analyze': self._handle_force_analysis,
-            '/reset_momentum': self._handle_reset_momentum,
-            '/theme': self._handle_theme_change,
-            '/status': self._handle_system_status
-        }
-    
-    async def process_command(self, command: str) -> Dict[str, Any]:
-        """Process command and return result"""
-        try:
-            cmd_parts = command.strip().split()
-            if not cmd_parts:
-                return {"error": "Empty command"}
-            
-            base_cmd = cmd_parts[0].lower()
-            args = cmd_parts[1:] if len(cmd_parts) > 1 else []
-            
-            if base_cmd in self.command_handlers:
-                return await self.command_handlers[base_cmd](args)
-            else:
-                return {"error": f"Unknown command: {base_cmd}"}
-                
-        except Exception as e:
-            return {"error": f"Command processing error: {str(e)}"}
-    
-    async def _handle_help(self, args: List[str]) -> Dict[str, Any]:
-        """Handle help command"""
-        help_text = """
-DevName RPG Client - Available Commands:
-
-/help                    - Show this help message
-/quit, /exit            - Exit the application
-/clearmemory [backup]   - Clear conversation memory (optional backup filename)
-/savememory [filename]  - Save conversation to file
-/loadmemory <filename>  - Load conversation from file
-/stats                  - Show comprehensive system statistics
-/analyze                - Force immediate comprehensive analysis
-/reset_momentum         - Reset story momentum engine
-/theme <name>           - Change color theme (classic/dark/bright)
-/status                 - Show detailed system status
-
-Background Analysis Features:
-- Automatic semantic categorization of all messages
-- Comprehensive momentum analysis every 15 messages
-- Dynamic antagonist generation and commitment tracking
-- Pressure floor ratcheting prevents narrative stalling
-"""
-        return {"message": help_text}
-    
-    async def _handle_quit(self, args: List[str]) -> Dict[str, Any]:
-        """Handle quit command"""
-        self.orchestrator.request_shutdown()
-        return {"message": "Shutting down...", "shutdown": True}
-    
-    async def _handle_clear_memory(self, args: List[str]) -> Dict[str, Any]:
-        """Handle clear memory command"""
-        memory_manager = self.orchestrator.get_module("memory_manager")
-        if not memory_manager:
-            return {"error": "Memory manager not available"}
-        
-        backup_filename = args[0] if args else None
-        
-        try:
-            if backup_filename:
-                if memory_manager.save_conversation(backup_filename):
-                    memory_manager.clear_conversation()
-                    return {"message": f"Memory cleared, backup saved to {backup_filename}"}
-                else:
-                    return {"error": f"Failed to create backup {backup_filename}"}
-            else:
-                memory_manager.clear_conversation()
-                return {"message": "Memory cleared"}
-        except Exception as e:
-            return {"error": f"Failed to clear memory: {str(e)}"}
-    
-    async def _handle_save_memory(self, args: List[str]) -> Dict[str, Any]:
-        """Handle save memory command"""
-        memory_manager = self.orchestrator.get_module("memory_manager")
-        if not memory_manager:
-            return {"error": "Memory manager not available"}
-        
-        filename = args[0] if args else f"conversation_{int(time.time())}.json"
-        
-        try:
-            if memory_manager.save_conversation(filename):
-                return {"message": f"Conversation saved to {filename}"}
-            else:
-                return {"error": f"Failed to save to {filename}"}
-        except Exception as e:
-            return {"error": f"Save failed: {str(e)}"}
-    
-    async def _handle_load_memory(self, args: List[str]) -> Dict[str, Any]:
-        """Handle load memory command"""
-        if not args:
-            return {"error": "Usage: /loadmemory <filename>"}
-        
-        memory_manager = self.orchestrator.get_module("memory_manager")
-        if not memory_manager:
-            return {"error": "Memory manager not available"}
-        
-        filename = args[0]
-        
-        try:
-            if memory_manager.load_conversation(filename):
-                return {"message": f"Conversation loaded from {filename}"}
-            else:
-                return {"error": f"Failed to load from {filename}"}
-        except Exception as e:
-            return {"error": f"Load failed: {str(e)}"}
-    
-    async def _handle_stats(self, args: List[str]) -> Dict[str, Any]:
-        """Handle stats command"""
-        try:
-            # Get stats from all modules
-            stats = {}
-            
-            memory_manager = self.orchestrator.get_module("memory_manager")
-            if memory_manager and hasattr(memory_manager, 'get_stats'):
-                stats["memory"] = memory_manager.get_stats()
-            
-            story_engine = self.orchestrator.get_module("story_engine")
-            if story_engine and hasattr(story_engine, 'get_pressure_stats'):
-                stats["story_momentum"] = story_engine.get_pressure_stats()
-            
-            semantic_processor = self.orchestrator.get_module("semantic_processor")
-            if semantic_processor and hasattr(semantic_processor, 'get_comprehensive_stats'):
-                stats["semantic"] = semantic_processor.get_comprehensive_stats()
-            
-            # Format stats message
-            stats_message = "=== System Statistics ===\n"
-            
-            if "memory" in stats:
-                mem_stats = stats["memory"]
-                stats_message += f"Memory: {mem_stats.get('message_count', 0)} messages, "
-                stats_message += f"{mem_stats.get('total_tokens', 0)} tokens\n"
-            
-            if "story_momentum" in stats:
-                sm_stats = stats["story_momentum"]
-                stats_message += f"Pressure: {sm_stats.get('current_pressure', 0):.3f}, "
-                stats_message += f"Arc: {sm_stats.get('current_arc', 'unknown')}\n"
-            
-            if "semantic" in stats:
-                sem_stats = stats["semantic"]
-                analysis_stats = sem_stats.get("analysis_stats", {})
-                stats_message += f"Analyses: {analysis_stats.get('total_analyses', 0)} total, "
-                stats_message += f"{analysis_stats.get('successful_analyses', 0)} successful\n"
-            
-            return {"message": stats_message, "detailed_stats": stats}
-            
-        except Exception as e:
-            return {"error": f"Failed to get stats: {str(e)}"}
-    
-    async def _handle_force_analysis(self, args: List[str]) -> Dict[str, Any]:
-        """Handle force analysis command"""
-        try:
-            memory_manager = self.orchestrator.get_module("memory_manager")
-            if not memory_manager:
-                return {"error": "Memory manager not available"}
-            
-            total_messages = memory_manager.get_message_count()
-            await self.orchestrator._trigger_comprehensive_analysis(total_messages)
-            
-            return {"message": "Comprehensive analysis initiated"}
-            
-        except Exception as e:
-            return {"error": f"Analysis failed: {str(e)}"}
-    
-    async def _handle_reset_momentum(self, args: List[str]) -> Dict[str, Any]:
-        """Handle reset momentum command"""
-        try:
-            story_engine = self.orchestrator.get_module("story_engine")
-            memory_manager = self.orchestrator.get_module("memory_manager")
-            
-            if not story_engine or not memory_manager:
-                return {"error": "Required modules not available"}
-            
-            # Reset story engine
-            if hasattr(story_engine, 'reset_momentum'):
-                story_engine.reset_momentum()
-            
-            # Clear momentum state in memory
-            memory_manager.update_momentum_state({})
-            
-            return {"message": "Story momentum reset complete"}
-            
-        except Exception as e:
-            return {"error": f"Reset failed: {str(e)}"}
-    
-    async def _handle_theme_change(self, args: List[str]) -> Dict[str, Any]:
-        """Handle theme change command"""
-        if not args:
-            return {"error": "Usage: /theme <name> (classic/dark/bright)"}
-        
-        theme_name = args[0].lower()
-        valid_themes = ["classic", "dark", "bright"]
-        
-        if theme_name not in valid_themes:
-            return {"error": f"Invalid theme. Available: {', '.join(valid_themes)}"}
-        
-        # This will be handled by UI controller
-        ui_controller = self.orchestrator.get_module("ui_controller")
-        if ui_controller and hasattr(ui_controller, '_change_theme'):
-            try:
-                ui_controller._change_theme(theme_name)
-                return {"message": f"Theme changed to {theme_name}"}
-            except Exception as e:
-                return {"error": f"Theme change failed: {str(e)}"}
-        else:
-            return {"error": "UI controller not available"}
-    
-    async def _handle_system_status(self, args: List[str]) -> Dict[str, Any]:
-        """Handle system status command"""
-        try:
-            status = self.orchestrator.get_system_status()
-            
-            status_message = "=== System Status ===\n"
-            status_message += f"Orchestrator: {status['orchestrator_state']['phase']}\n"
-            status_message += f"Running: {status['orchestrator_state']['running']}\n"
-            status_message += f"Modules: {len(status['modules'])} initialized\n"
-            status_message += f"Background Tasks: {len([t for t in status['background_tasks'].values() if t['running']])} active\n"
-            
-            return {"message": status_message, "detailed_status": status}
-            
-        except Exception as e:
-            return {"error": f"Status check failed: {str(e)}"}
-
 
 # Main orchestrator interface functions for integration with main.py
 
@@ -1036,19 +910,18 @@ async def create_orchestrator(config: Dict[str, Any], debug_logger=None) -> DevN
     else:
         raise RuntimeError("Failed to initialize orchestrator system")
 
-def create_command_processor(orchestrator: DevNameOrchestrator) -> CommandProcessor:
-    """Factory function to create command processor"""
-    return CommandProcessor(orchestrator)
 
 async def run_orchestrated_application(config: Dict[str, Any], debug_logger=None) -> int:
-    """Run the complete orchestrated application with proper async/sync separation"""
+    """Run the complete orchestrated application with proper async/sync separation and bridge"""
+
+    orchestrator = None
 
     # PHASE 1: Initialize orchestrator and extract components
     try:
         if debug_logger:
             debug_logger.debug("Phase 1: Initializing orchestrator components", "ORCHESTRATOR")
 
-        # Create and initialize orchestrator
+        # Create and initialize orchestrator (includes AsyncSyncBridge)
         orchestrator = await create_orchestrator(config, debug_logger)
 
         # Extract modules for synchronous use
@@ -1069,153 +942,161 @@ async def run_orchestrated_application(config: Dict[str, Any], debug_logger=None
         print(f"Initialization error: {e}")
         return 1
 
-    # PHASE 2: Clean shutdown of async components before UI
+    # PHASE 2: Setup synchronous processors with live orchestrator and async bridge
     try:
         if debug_logger:
-            debug_logger.debug("Phase 2: Shutting down async components", "ORCHESTRATOR")
+            debug_logger.debug("Phase 2: Setting up sync processors with async bridge", "ORCHESTRATOR")
 
-        # Request shutdown and wait for clean async shutdown
-        orchestrator.request_shutdown()
-        await orchestrator.shutdown_system()
-        orchestrator = None  # Clear reference
-
-        if debug_logger:
-            debug_logger.debug("Phase 2 complete: Async components shut down", "ORCHESTRATOR")
-
-    except Exception as e:
-        if debug_logger:
-            debug_logger.error(f"Phase 2 failed: {e}", "ORCHESTRATOR")
-        # Continue anyway, the UI might still work
-
-    # PHASE 3: Run UI synchronously with extracted components
-    try:
-        if debug_logger:
-            debug_logger.debug("Phase 3: Running synchronous UI", "ORCHESTRATOR")
-
-        # Create simple synchronous processors using extracted components
-        def sync_message_processor(message: str):
-            """Simple synchronous message processor"""
+        # Create sync message processor that uses async bridge for MCP communication
+        def sync_message_processor(messages):
+            """Process messages synchronously using async bridge for MCP calls"""
             try:
-                if not memory_manager or not mcp_client:
-                    return {"success": False, "error": "Components not available"}
+                print(f"DEBUG: sync_message_processor called with {len(messages)} messages")
 
-                # Store user message
-                from emm import MessageType
-                memory_manager.add_message(message, MessageType.USER)
-
-                # Get conversation history
-                conversation_history = memory_manager.get_conversation_for_mcp()
-
-                # Get story context if available
-                story_context = None
-                if story_engine:
-                    try:
-                        story_context_dict = story_engine.get_story_context()
-                        if isinstance(story_context_dict, dict):
-                            pressure = story_context_dict.get('pressure_level', 0)
-                            arc = story_context_dict.get('story_arc', 'setup')
-                            story_context = f"Story Pressure: {pressure:.2f}, Arc: {arc}"
-                        else:
-                            story_context = str(story_context_dict)
-                    except:
-                        story_context = None
-
-                # FIXED: Use completely synchronous HTTP request instead of async
-                try:
-                    import requests  # Use requests instead of httpx for synchronous operation
-
-                    # Build messages like the original
-                    messages = [{"role": "system", "content": mcp_client.system_prompt}]
-
-                    # Add story context if available
-                    if story_context:
-                        messages.append({"role": "system", "content": f"Story Context: {story_context}"})
-
-                    # Add conversation history (last 10 messages)
-                    if conversation_history:
-                        for msg in conversation_history[-10:]:
-                            messages.append(msg)
-
-                    # Add current user input
-                    messages.append({"role": "user", "content": message})
-
-                    # Prepare request payload
-                    payload = {
-                        "model": mcp_client.model,
-                        "messages": messages,
-                        "stream": False
-                    }
-
-                    # Make synchronous HTTP request
-                    response = requests.post(
-                        mcp_client.server_url,
-                        json=payload,
-                        timeout=30.0
-                    )
-                    response.raise_for_status()
-
-                    # Parse response - use the same format as original MCPClient
-                    response_data = response.json()
-
-                    # Original MCPClient expects: response_data["message"]["content"]
-                    if (isinstance(response_data, dict) and
-                        "message" in response_data and
-                        isinstance(response_data["message"], dict) and
-                        "content" in response_data["message"]):
-
-                        ai_response = response_data["message"]["content"]
-
-                        if ai_response and ai_response.strip():
-                            memory_manager.add_message(ai_response, MessageType.ASSISTANT)
-                            return {"success": True, "ai_response": ai_response}
-                        else:
-                            return {"success": False, "error": "Empty content in MCP response"}
-                    else:
-                        return {"success": False, "error": f"Invalid MCP response format. Expected message.content, got: {list(response_data.keys())}"}
-
-                except ImportError:
-                    return {"success": False, "error": "requests library not available - install with: pip install requests"}
-                except requests.exceptions.RequestException as e:
-                    return {"success": False, "error": f"MCP request failed: {str(e)}"}
-                except Exception as e:
-                    return {"success": False, "error": f"MCP processing error: {str(e)}"}
-
-            except Exception as e:
                 if debug_logger:
-                    debug_logger.error(f"Message processing error: {e}", "ORCHESTRATOR")
-                return {"success": False, "error": str(e)}
+                    debug_logger.debug(f"Processing {len(messages)} messages via bridge", "ORCHESTRATOR")
 
-        def sync_command_processor(command: str):
-            """Simple synchronous command processor"""
-            try:
-                if command.startswith('/quit') or command.startswith('/exit'):
-                    return {"success": True, "system_message": "Shutting down...", "shutdown": True}
-                elif command.startswith('/help'):
-                    return {"success": True, "system_message": "Available commands: /help, /stats, /clear, /quit"}
-                elif command.startswith('/stats'):
-                    if memory_manager and hasattr(memory_manager, 'get_messages'):
-                        messages = memory_manager.get_messages()
-                        return {"success": True, "system_message": f"Memory: {len(messages)} messages"}
-                    return {"success": True, "system_message": "Stats not available"}
-                elif command.startswith('/clear'):
-                    if memory_manager and hasattr(memory_manager, 'clear_conversation'):
-                        memory_manager.clear_conversation()
-                        return {"success": True, "system_message": "Memory cleared"}
-                    return {"success": False, "error": "Clear not available"}
+                # Define async MCP communication
+                async def async_mcp_call():
+                    print("DEBUG: Inside async_mcp_call")
+                    import httpx
+
+                    try:
+                        # Use simple payload format that the Node.js server expects
+                        user_message = messages[-1]["content"] if messages else "test"
+                        payload = {
+                            "message": user_message,
+                            "model": "qwen2.5:14b-instruct-q4_k_m"
+                        }
+
+                        print(f"DEBUG: Sending payload: {payload}")
+
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            print("DEBUG: Making HTTP request")
+                            response = await client.post(
+                                "http://127.0.0.1:3456/chat",
+                                json=payload
+                            )
+
+                            print(f"DEBUG: Response status: {response.status_code}")
+
+                            if response.status_code == 200:
+                                response_data = response.json()
+                                print(f"DEBUG: Response data: {response_data}")
+                                return {"response": "Got successful response"}
+                            else:
+                                response_text = response.text
+                                print(f"DEBUG: Error response: {response_text}")
+                                return {"error": f"MCP server error: {response.status_code} - {response_text}"}
+
+                    except Exception as e:
+                        print(f"DEBUG: Exception in async_mcp_call: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        raise
+
+                print("DEBUG: About to call async bridge")
+
+                # Use async bridge to execute MCP call
+                if orchestrator.async_bridge.is_running():
+                    print("DEBUG: Bridge is running, calling run_async_safely")
+                    result = orchestrator.async_bridge.run_async_safely(
+                        async_mcp_call(),
+                        timeout=30.0,
+                        default={"error": "Bridge communication failed"}
+                    )
+                    print(f"DEBUG: Bridge result: {result}")
+
+                    if debug_logger:
+                        success = "error" not in result
+                        debug_logger.debug(f"Bridge MCP call {'successful' if success else 'failed'}", "ORCHESTRATOR")
+
+                    return result
                 else:
-                    return {"success": False, "error": f"Unknown command: {command}"}
+                    print("DEBUG: Bridge not running")
+                    error_msg = "AsyncSyncBridge not available"
+                    if debug_logger:
+                        debug_logger.error(error_msg, "ORCHESTRATOR")
+                    return {"error": error_msg}
 
             except Exception as e:
-                return {"success": False, "error": str(e)}
+                print(f"DEBUG: Exception in sync_message_processor: {e}")
+                error_msg = f"Message processing failed: {str(e)}"
+                if debug_logger:
+                    debug_logger.error(error_msg, "ORCHESTRATOR")
+                return {"error": error_msg}
+
+        # Create sync command processor that uses live orchestrator
+        def sync_command_processor(command, args):
+            """Process commands synchronously using live orchestrator"""
+            try:
+                if command == "theme":
+                    if not args:
+                        return {"error": "Theme name required"}
+
+                    theme_name = args[0].lower()
+                    valid_themes = ["classic", "cyberpunk", "forest", "ocean", "fire", "minimal"]
+
+                    if theme_name not in valid_themes:
+                        return {"error": f"Invalid theme: {theme_name}. Available: {', '.join(valid_themes)}"}
+
+                    # Use live UI controller for theme changes
+                    if ui_controller and hasattr(ui_controller, '_change_theme'):
+                        try:
+                            ui_controller._change_theme(theme_name)
+                            return {"message": f"Theme changed to {theme_name}"}
+                        except Exception as e:
+                            return {"error": f"Theme change failed: {str(e)}"}
+                    else:
+                        return {"error": "UI controller not available"}
+
+                elif command == "status":
+                    # Use live orchestrator for status
+                    status = orchestrator.get_system_status()
+                    status_message = "=== System Status ===\n"
+                    status_message += f"Orchestrator: {status['orchestrator_state']['phase']}\n"
+                    status_message += f"Running: {status['orchestrator_state']['running']}\n"
+                    status_message += f"Modules: {len(status['modules'])} initialized\n"
+                    status_message += f"Background Tasks: {len([t for t in status['background_tasks'].values() if t['running']])} active\n"
+                    status_message += f"AsyncBridge: {'running' if status['async_bridge']['running'] else 'stopped'}\n"
+                    return {"message": status_message, "detailed_status": status}
+
+                elif command == "clear":
+                    if ui_controller and hasattr(ui_controller, 'clear_display'):
+                        ui_controller.clear_display()
+                        return {"message": "Display cleared"}
+                    else:
+                        return {"error": "Clear not available"}
+                else:
+                    return {"error": f"Unknown command: {command}"}
+
+            except Exception as e:
+                return {"error": str(e)}
 
         # Set processors on UI controller
         ui_controller.set_message_processor(sync_message_processor)
         ui_controller.set_command_processor(sync_command_processor)
 
         if debug_logger:
-            debug_logger.debug("Starting UI run() - entering curses", "ORCHESTRATOR")
+            debug_logger.debug("Phase 2 complete: Sync processors with async bridge configured", "ORCHESTRATOR")
 
-        # Run the UI - this is now completely synchronous
+    except Exception as e:
+        if debug_logger:
+            debug_logger.error(f"Phase 2 failed: {e}", "ORCHESTRATOR")
+        # Try to shutdown cleanly before returning
+        if orchestrator:
+            try:
+                await orchestrator.shutdown_system()
+            except:
+                pass
+        return 1
+
+    # PHASE 3: Run UI with live orchestrator and async bridge
+    try:
+        if debug_logger:
+            debug_logger.debug("Phase 3: Running UI with live orchestrator and async bridge", "ORCHESTRATOR")
+
+        # Run the UI - this blocks until UI exits
         ui_exit_code = ui_controller.run()
 
         if debug_logger:
@@ -1230,15 +1111,28 @@ async def run_orchestrated_application(config: Dict[str, Any], debug_logger=None
         return 1
 
     finally:
-        # PHASE 4: Final cleanup
+        # PHASE 4: Shutdown orchestrator and async bridge AFTER UI completes
         if debug_logger:
-            debug_logger.debug("Phase 4: Final cleanup", "ORCHESTRATOR")
+            debug_logger.debug("Phase 4: Shutting down orchestrator and async bridge", "ORCHESTRATOR")
 
-        # Clean up any remaining references
+        if orchestrator:
+            try:
+                orchestrator.request_shutdown()
+                await orchestrator.shutdown_system()
+                if debug_logger:
+                    debug_logger.debug("Orchestrator and async bridge shutdown complete", "ORCHESTRATOR")
+            except Exception as e:
+                if debug_logger:
+                    debug_logger.error(f"Shutdown error: {e}", "ORCHESTRATOR")
+                print(f"Shutdown error: {e}")
+
+        # Clean up references
         ui_controller = None
         memory_manager = None
         mcp_client = None
         story_engine = None
+        orchestrator = None
+
 
 # Utility functions for testing and diagnostics
 
@@ -1258,8 +1152,8 @@ def test_orchestrator_initialization(config: Dict[str, Any] = None) -> bool:
 def get_orchestrator_info() -> Dict[str, Any]:
     """Get information about orchestrator capabilities"""
     return {
-        "name": "DevName RPG Client Orchestrator",
-        "version": "1.0",
+        "name": "DevName RPG Client Orchestrator with AsyncSyncBridge",
+        "version": "1.1",
         "modules_managed": [
             "semantic_processor",
             "mcp_client", 
@@ -1273,19 +1167,21 @@ def get_orchestrator_info() -> Dict[str, Any]:
             "Inter-module communication",
             "Graceful shutdown sequence",
             "Command processing",
-            "System status monitoring"
+            "System status monitoring",
+            "Async/Sync bridge for UI-backend communication"
         ],
         "integration_points": [
             "main.py configuration processing",
             "Prompt system integration",
             "Background LLM analysis coordination",
-            "Module state persistence"
+            "Module state persistence",
+            "AsyncSyncBridge for curses UI compatibility"
         ]
     }
 
 # Module test functionality
 if __name__ == "__main__":
-    print("DevName RPG Client - Main Orchestrator Module")
+    print("DevName RPG Client - Main Orchestrator Module with AsyncSyncBridge")
     print("Successfully implemented orchestrator with:")
     print("✓ Dependency-aware module initialization")
     print("✓ Background thread coordination")
@@ -1295,6 +1191,7 @@ if __name__ == "__main__":
     print("✓ Command processing coordination")
     print("✓ System status monitoring")
     print("✓ Complete LLM analysis coordination")
+    print("✓ AsyncSyncBridge for sync UI to async backend communication")
     print("\nOrchestrator Info:")
     
     info = get_orchestrator_info()
@@ -1305,4 +1202,4 @@ if __name__ == "__main__":
             print(f"{key}: {value}")
     
     print(f"\nInitialization test: {'✓ PASSED' if test_orchestrator_initialization() else '✗ FAILED'}")
-    print("\nReady for integration with main.py and Phase 3 UI refactoring.")
+    print("\nReady for integration with main.py with async/sync bridge support.")
