@@ -292,16 +292,16 @@ class ColorManager:
         self.BORDER_COLOR = 5
     
     def init_colors(self) -> bool:
-        """Initialize colors based on current theme"""
+        """Initialize colors based on current theme - FIXED: Correct dark theme colors"""
         if not curses.has_colors():
             self.colors_available = False
             return False
-        
+
         try:
             curses.start_color()
             curses.use_default_colors()
-            
-            # Define theme color schemes
+
+            # Define theme color schemes - CORRECTED to match legacyref
             if self.theme == ColorTheme.CLASSIC:
                 # Classic theme - blue/green/yellow/red
                 curses.init_pair(self.USER_COLOR, curses.COLOR_CYAN, -1)
@@ -309,26 +309,26 @@ class ColorManager:
                 curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_YELLOW, -1)
                 curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)
                 curses.init_pair(self.BORDER_COLOR, curses.COLOR_BLUE, -1)
-                
+
             elif self.theme == ColorTheme.DARK:
-                # Dark theme - muted colors
+                # FIXED: Dark theme - actual muted/dark colors from legacyref
                 curses.init_pair(self.USER_COLOR, curses.COLOR_WHITE, -1)
-                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_GREEN, -1)
-                curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_BLUE, -1)
+                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_CYAN, -1)      # Changed from GREEN to CYAN
+                curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_MAGENTA, -1)      # Changed from BLUE to MAGENTA
                 curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)
                 curses.init_pair(self.BORDER_COLOR, curses.COLOR_WHITE, -1)
-                
+
             elif self.theme == ColorTheme.BRIGHT:
-                # Bright theme - vivid colors
-                curses.init_pair(self.USER_COLOR, curses.COLOR_MAGENTA, -1)
-                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_CYAN, -1)
+                # FIXED: Bright theme - corrected to match legacyref
+                curses.init_pair(self.USER_COLOR, curses.COLOR_BLUE, -1)           # Changed from MAGENTA to BLUE
+                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_GREEN, -1)     # Kept GREEN
                 curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_YELLOW, -1)
                 curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)
                 curses.init_pair(self.BORDER_COLOR, curses.COLOR_MAGENTA, -1)
-            
+
             self.colors_available = True
             return True
-            
+
         except curses.error:
             self.colors_available = False
             return False
@@ -587,20 +587,21 @@ class MultiLineInput:
         self.max_lines = 10         # Maximum number of lines allowed
     
     def insert_char(self, char: str) -> bool:
-        """Insert character at cursor position with word wrapping"""
+        """Insert character at cursor position with word wrapping - FIXED: Correct wrap trigger"""
         if len(self.get_content()) >= 4000:  # Reasonable character limit
             return False
-        
+
         # Insert character at current position
         current_line = self.lines[self.cursor_line]
         new_line = current_line[:self.cursor_col] + char + current_line[self.cursor_col:]
         self.lines[self.cursor_line] = new_line
         self.cursor_col += 1
-        
-        # Check if line needs wrapping
-        if len(new_line) >= self.max_width - 5:  # Leave margin for prompt
+
+        # FIXED: Check if line needs wrapping using proper width
+        # Remove the arbitrary "- 5" that was causing premature wrapping
+        if len(new_line) >= self.max_width:
             self._wrap_current_line()
-        
+
         return True
     
     def handle_enter(self) -> Tuple[bool, str]:
@@ -757,35 +758,37 @@ class MultiLineInput:
         return display_lines[start_idx:end_idx]
     
     def _wrap_current_line(self):
-        """Wrap current line if it's too long"""
+        """Wrap current line if it's too long - FIXED: Use proper width calculation"""
         current_line = self.lines[self.cursor_line]
-        
-        if len(current_line) < self.max_width - 5:
+
+        # FIXED: Use actual max_width instead of arbitrary reduction
+        # The issue was subtracting 5 from max_width, causing premature wrapping
+        if len(current_line) < self.max_width:
             return
-        
+
         # Find best break point (space before cursor)
         break_point = self.cursor_col
         for i in range(self.cursor_col - 1, max(0, self.cursor_col - 20), -1):
             if current_line[i] == ' ':
                 break_point = i
                 break
-        
+
         # Split line
         line_before = current_line[:break_point].rstrip()
         line_after = current_line[break_point:].lstrip()
-        
+
         # Update lines
         self.lines[self.cursor_line] = line_before
         if line_after and len(self.lines) < self.max_lines:
             self.lines.insert(self.cursor_line + 1, line_after)
-            
+
             # Adjust cursor position
             if self.cursor_col > break_point:
                 self.cursor_line += 1
                 self.cursor_col = self.cursor_col - break_point - (1 if current_line[break_point] == ' ' else 0)
             else:
                 self.cursor_col = len(line_before)
-        
+
         self._adjust_scroll()
     
     def _adjust_scroll(self):

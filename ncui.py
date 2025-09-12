@@ -112,6 +112,9 @@ class NCursesUIController:
             # Update scroll manager with actual output height
             self.scroll_manager = ScrollManager(self.current_layout.output_box.inner_height)
             self._log_debug("Layout calculated successfully")
+            # Update multi-input with correct maximum width
+            self.multi_input.update_max_width(self.current_layout.input_box.inner_width - 10)  # Account for prompt and margins
+            self._log_debug(f"MultiLineInput width set to: {self.current_layout.input_box.inner_width - 10}")
 
             # Create windows
             if not self._create_windows():
@@ -311,29 +314,27 @@ class NCursesUIController:
             self._log_error(f"Cursor positioning error: {e}")
 
     def _handle_user_input(self, user_input: str):
-        """FIXED: Immediate status update and proper refresh timing"""
+        """Handle submitted user input - FIXED: Proper input clearing for commands"""
         try:
-            # Check for commands first
+            # FIXED: Clear input FIRST for both commands and regular input
+            self.multi_input.clear()
+            self._refresh_input_window()
+            self._ensure_cursor_in_input()
+
+            # Check for commands
             if user_input.startswith('/'):
                 if self._handle_command(user_input):
-                    self._refresh_input_window()
-                    self._ensure_cursor_in_input()
+                    # Command was handled - input already cleared above
                     return
 
             self._log_debug("Submitting user input")
 
-            # FIXED: Set processing state and refresh immediately
+            # Set processing state
             self.processing = True
             self.status_message = "Processing..."
             self._refresh_status_window()
-            curses.doupdate()  # Force immediate display update
 
-            # Clear input after submission
-            self.multi_input.clear()
-            self._refresh_input_window()
-            curses.doupdate()  # Force immediate display update
-
-            # Send to orchestrator
+            # Send to orchestrator (input already cleared above)
             if self.callback_handler:
                 result = self.callback_handler("user_input", {"input": user_input})
 
@@ -349,12 +350,8 @@ class NCursesUIController:
             self._log_error(f"Input submission error: {e}")
             self.status_message = "Error occurred"
         finally:
-            # FIXED: Ensure processing state is cleared and display updated
             self.processing = False
             self._refresh_status_window()
-            self._refresh_input_window()
-            self._ensure_cursor_in_input()
-            curses.doupdate()  # Force final display update
 
     def _handle_scroll(self, key: int):
         """Handle page up/down scrolling - FIXED: Use correct ScrollManager methods"""
@@ -581,14 +578,14 @@ class NCursesUIController:
 # Chunk 5/6 - ncui.py - Window Refresh and Drawing Methods (Comprehensive Fix)
 
     def _refresh_input_window(self):
-        """FIXED: Refresh input window with borders and proper text wrapping"""
+        """Refresh input window with borders and proper positioning"""
         try:
             if not self.input_window or not self.current_layout:
                 return
 
             self.input_window.clear()
 
-            # ADDITION: Draw input window borders
+            # Draw input window borders first
             self._draw_input_borders()
 
             # Choose prompt and color based on processing state
@@ -599,13 +596,16 @@ class NCursesUIController:
                 prompt = "Input> "
                 prompt_color = self.color_manager.get_color('user')
 
-            # FIXED: Use full inner width for text wrapping instead of cutting in half
-            available_width = self.current_layout.input_box.inner_width - len(prompt) - 2  # Full width minus prompt and margins
-            available_height = self.current_layout.input_box.inner_height
+            # Calculate available width accounting for borders
+            available_width = self.current_layout.input_box.inner_width - len(prompt) - 2
+            available_height = self.current_layout.input_box.inner_height - 1
+
+            # Ensure MultiLineInput is using correct width
+            self.multi_input.update_max_width(available_width + len(prompt))
 
             display_lines = self.multi_input.get_display_lines(available_width, available_height)
 
-            # Display prompt and content within borders (y=1 for border offset)
+            # Display prompt and content inside borders (y=1, x=1 for border offset)
             try:
                 if prompt_color and self.color_manager.colors_available:
                     self.input_window.addstr(1, 1, prompt, curses.color_pair(prompt_color))
@@ -621,14 +621,14 @@ class NCursesUIController:
                     self.input_window.addstr(1, 1 + len(prompt), first_line)
 
                     # Display additional lines if multi-line
-                    for i, line in enumerate(display_lines[1:], 2):
-                        if i >= available_height:
+                    for i, line in enumerate(display_lines[1:], 2):  # Start at y=2 for second line
+                        if i >= self.current_layout.input_box.inner_height:
                             break
 
                         if len(line) > available_width:
                             line = line[:available_width]
 
-                        self.input_window.addstr(i, 1, line)
+                        self.input_window.addstr(i, 1, line)  # x=1 for border offset
 
             except curses.error:
                 pass
@@ -719,7 +719,7 @@ class NCursesUIController:
             self._log_error(f"Border drawing error: {e}")
 
     def _draw_input_borders(self):
-        """ADDITION: Draw borders around input window"""
+        """Draw borders around input window matching output window style"""
         try:
             if not self.current_layout or not self.input_window:
                 return
@@ -729,7 +729,7 @@ class NCursesUIController:
             if border_color and self.color_manager.colors_available:
                 self.input_window.attron(curses.color_pair(border_color))
 
-            # Draw border characters for input window
+            # Draw border characters for input window (same as output window)
             try:
                 # Top border
                 self.input_window.hline(0, 0, curses.ACS_HLINE, self.current_layout.input_box.width)
