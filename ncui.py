@@ -367,26 +367,36 @@ class NCursesUIController:
         """Handle terminal resize events"""
         try:
             self._log_debug("Terminal resize detected")
-            
+
             # Get new terminal size
             curses.update_lines_cols()
             height, width = self.stdscr.getmaxyx()
-            
+
             self.terminal_manager.check_resize()
+
+            # Check if terminal is too small BEFORE trying to use layout
+            if self.terminal_manager.is_too_small():
+                self.terminal_manager.show_too_small_message()
+                return
+
             self.current_layout = self.terminal_manager.get_box_layout()
-            
+
+            # Only proceed if we have a valid layout
+            if not self.current_layout:
+                return
+
             # Recreate windows with new layout
             self._create_windows()
-            
+
             # Update scroll manager
             self.scroll_manager = ScrollManager(self.current_layout.output_box.inner_height)
-            
+
             # Force complete refresh
             self.stdscr.clear()
             self.stdscr.refresh()
             self._refresh_all_windows()
             self._ensure_cursor_in_input()
-            
+
         except Exception as e:
             self._log_error(f"Resize handling error: {e}")
 
@@ -575,7 +585,7 @@ class NCursesUIController:
 # Chunk 5/6 - ncui.py - Window Refresh and Drawing Methods (Comprehensive Fix)
 
     def _refresh_input_window(self):
-        """Refresh input window with borders and NO internal prompt (using window header instead)"""
+        """Refresh input window with borders and proper multi-line display"""
         try:
             if not self.input_window or not self.current_layout:
                 return
@@ -585,39 +595,38 @@ class NCursesUIController:
             # Draw input window borders first
             self._draw_input_borders()
 
-            # FIXED: No more "Input>" prompt since window header shows "── Input "
-            # Calculate available width accounting for borders (NO prompt offset needed)
-            available_width = self.current_layout.input_box.inner_width - 2  # Just border offset
-            available_height = self.current_layout.input_box.inner_height - 1
+            # Get current input content and cursor position
+            content = self.multi_input.get_content()
+            cursor_line, cursor_col = self.multi_input.get_cursor_position()
 
-            # FIXED: Update MultiLineInput width without prompt consideration
-            self.multi_input.update_max_width(available_width)
+            # Calculate display boundaries
+            max_display_lines = self.current_layout.input_box.inner_height
 
-            display_lines = self.multi_input.get_display_lines(available_width, available_height)
+            if content:
+                # Split content into lines for display
+                content_lines = content.split('\n')
 
-            # FIXED: Display content directly without prompt inside borders (y=1, x=1 for border offset)
-            try:
-                # Display input content starting at x=1 (no prompt prefix)
-                if display_lines:
-                    first_line = display_lines[0]
-                    if len(first_line) > available_width:
-                        first_line = first_line[:available_width]
+                # Display each line within the available space
+                for line_idx, line_content in enumerate(content_lines):
+                    display_y = line_idx + 1  # +1 for top border
 
-                    # FIXED: Start at x=1 (border offset) with no prompt
-                    self.input_window.addstr(1, 1, first_line)
+                    # Only display if within window bounds
+                    if display_y < self.current_layout.input_box.height - 1:  # -1 for bottom border
+                        try:
+                            # Truncate line if too long for width
+                            max_width = self.current_layout.input_box.inner_width
+                            display_content = line_content[:max_width] if len(line_content) > max_width else line_content
 
-                    # Display additional lines if multi-line
-                    for i, line in enumerate(display_lines[1:], 2):  # Start at y=2 for second line
-                        if i >= self.current_layout.input_box.inner_height:
+                            # Display the line content
+                            if display_content or line_idx == cursor_line:  # Always show cursor line even if empty
+                                self.input_window.addstr(display_y, 1, display_content)
+
+                        except curses.error:
+                            # If we can't write here, stop trying
                             break
-
-                        if len(line) > available_width:
-                            line = line[:available_width]
-
-                        self.input_window.addstr(i, 1, line)  # x=1 for border offset
-
-            except curses.error:
-                pass
+                    else:
+                        # No more room for display
+                        break
 
             self.input_window.noutrefresh()
 

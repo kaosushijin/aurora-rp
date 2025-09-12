@@ -261,12 +261,44 @@ class TerminalManager:
         """Show message when terminal is too small"""
         try:
             self.stdscr.clear()
-            msg = f"Terminal too small! Need at least {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT}, got {self.width}x{self.height}"
-            if self.height > 0 and self.width > len(msg):
-                self.stdscr.addstr(0, 0, msg)
+
+            # Get current terminal dimensions for centering
+            max_y, max_x = self.stdscr.getmaxyx()
+            start_y = max(0, max_y // 2 - 2)
+
+            msg = f"Terminal too small: {self.width}x{self.height}"
+            req = f"Required: {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT}"
+            instruction = "Please resize terminal or press Ctrl+C to quit"
+
+            # Center messages horizontally if space allows
+            if max_x > len(msg):
+                msg_x = (max_x - len(msg)) // 2
+            else:
+                msg_x = 0
+
+            if max_x > len(req):
+                req_x = (max_x - len(req)) // 2
+            else:
+                req_x = 0
+
+            if max_x > len(instruction):
+                inst_x = (max_x - len(instruction)) // 2
+            else:
+                inst_x = 0
+
+            self.stdscr.addstr(start_y, msg_x, msg)
+            self.stdscr.addstr(start_y + 1, req_x, req)
+            self.stdscr.addstr(start_y + 3, inst_x, instruction)
             self.stdscr.refresh()
+
         except curses.error:
-            pass
+            # Fallback for terminals that are extremely small
+            # Try to write at least something
+            try:
+                self.stdscr.addstr(0, 0, "Too small! Resize or Ctrl+C")
+                self.stdscr.refresh()
+            except curses.error:
+                pass
 
 # Chunk 2/4 - uilib.py - Color and Display Management Components
 
