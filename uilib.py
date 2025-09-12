@@ -73,9 +73,11 @@ class LayoutGeometry:
     split_ratio: float = 0.9  # 90% output, 10% input
     border_style: str = "ascii"
 
+# Chunk 1/1 - uilib.py layout calculation fix for status line overflow
+
 def calculate_box_layout(width: int, height: int) -> LayoutGeometry:
     """
-    Calculate dynamic box layout with proper border handling:
+    Calculate dynamic box layout with proper border handling and status line reservation:
 
     1. Validate minimum terminal size
     2. Reserve 1 line for status at bottom
@@ -88,30 +90,28 @@ def calculate_box_layout(width: int, height: int) -> LayoutGeometry:
     if width < MIN_SCREEN_WIDTH or height < MIN_SCREEN_HEIGHT:
         raise ValueError(f"Terminal too small: {width}x{height} (minimum: {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT})")
 
-    # Reserve status line at bottom
+    # FIXED: Reserve status line at bottom FIRST
     status_height = 1
-    content_height = height - status_height
+    available_height = height - status_height  # This is the height available for output+input windows
 
     # Minimum viable content height check
-    if content_height < 6:  # Need at least 3 lines output + 3 lines input
+    if available_height < 6:  # Need at least 3 lines output + 3 lines input
         raise ValueError(f"Insufficient terminal height: {height} (need at least {6 + status_height})")
 
-    # Calculate split with border between output and input
-    # Reserve 1 line for border between output and input
-    usable_content_height = content_height - 1  # -1 for border line
+    # FIXED: Calculate split without double-accounting for borders
+    # Each window will have its own 2-line border (top+bottom), so we don't need extra reservation
 
-    # Apply 90/10 split to usable space
-    output_content_height = max(3, int(usable_content_height * 0.9))
-    input_content_height = max(3, usable_content_height - output_content_height)
+    # Apply 90/10 split to available space (the windows will handle their own borders)
+    output_outer_height = max(4, int(available_height * 0.9))  # min 4 to fit border+content
+    input_outer_height = available_height - output_outer_height
 
-    # Adjust if total doesn't match (due to integer rounding)
-    total_allocated = output_content_height + input_content_height
-    if total_allocated < usable_content_height:
-        input_content_height += usable_content_height - total_allocated
+    # Ensure input gets at least minimum height
+    if input_outer_height < 4:  # min 4 to fit border+content
+        input_outer_height = 4
+        output_outer_height = available_height - input_outer_height
 
     # Calculate output box coordinates (top section)
-    # Output box includes its own border
-    output_outer_height = output_content_height + 2  # +2 for top and bottom borders
+    output_content_height = output_outer_height - 2  # -2 for top and bottom borders
     output_box = BoxCoordinates(
         # Outer boundaries (including borders)
         top=0,
@@ -130,15 +130,14 @@ def calculate_box_layout(width: int, height: int) -> LayoutGeometry:
         inner_height=max(1, output_content_height)  # Ensure positive height
     )
 
-    # Calculate input box coordinates (middle section)
-    # Input box starts after output box
+    # FIXED: Calculate input box coordinates (middle section) - starts right after output
     input_top = output_outer_height
-    input_outer_height = input_content_height + 2  # +2 for top and bottom borders
+    input_content_height = input_outer_height - 2  # -2 for top and bottom borders
     input_box = BoxCoordinates(
         # Outer boundaries (including borders)
         top=input_top,
         left=0,
-        bottom=input_top + input_outer_height - 1,
+        bottom=input_top + input_outer_height - 1,  # FIXED: This was causing overflow
         right=width - 1,
         # Inner boundaries (text area excluding borders)
         inner_top=input_top + 1,
@@ -152,8 +151,8 @@ def calculate_box_layout(width: int, height: int) -> LayoutGeometry:
         inner_height=max(1, input_content_height)  # Ensure positive height
     )
 
-    # Calculate status line coordinates (bottom section)
-    status_top = height - status_height
+    # FIXED: Calculate status line coordinates (bottom section) - must not overlap with input
+    status_top = height - status_height  # This should be height - 1
     status_line = BoxCoordinates(
         # Outer boundaries (status line has no borders)
         top=status_top,
@@ -171,6 +170,10 @@ def calculate_box_layout(width: int, height: int) -> LayoutGeometry:
         inner_width=width,
         inner_height=status_height
     )
+
+    # CRITICAL VALIDATION: Ensure input window doesn't overlap with status line
+    if input_box.bottom >= status_line.top:
+        raise ValueError(f"Layout overflow detected: input bottom ({input_box.bottom}) >= status top ({status_line.top})")
 
     # Final validation - ensure all dimensions are positive
     for box_name, box in [("output", output_box), ("input", input_box), ("status", status_line)]:

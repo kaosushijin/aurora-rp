@@ -276,22 +276,14 @@ class NCursesUIController:
             return 1
 
     def _ensure_cursor_in_input(self):
-        """FIXED: Ensure cursor positioning accounts for input window borders"""
+        """FIXED: Cursor positioning without prompt offset"""
         try:
             if not self.processing and self.input_window and self.current_layout:
                 # Get cursor position from multi-line input
                 cursor_line, cursor_col = self.multi_input.get_cursor_position()
 
-                # Calculate visual position with prompt offset AND border offset
-                if cursor_line == 0:
-                    # First line - add prompt length + border offset
-                    prompt_len = len("Input> ")
-                    visual_x = 1 + prompt_len + cursor_col  # +1 for left border
-                else:
-                    # Subsequent lines - just border offset
-                    visual_x = 1 + cursor_col  # +1 for left border
-
-                # Account for borders in position calculation
+                # FIXED: Calculate visual position with ONLY border offset (no prompt)
+                visual_x = 1 + cursor_col  # +1 for left border only
                 visual_y = 1 + cursor_line  # +1 for top border
 
                 # Clamp to layout boundaries (account for borders)
@@ -314,9 +306,9 @@ class NCursesUIController:
             self._log_error(f"Cursor positioning error: {e}")
 
     def _handle_user_input(self, user_input: str):
-        """Handle submitted user input - FIXED: Proper input clearing for commands"""
+        """FIXED: Handle user input with immediate display update capability"""
         try:
-            # FIXED: Clear input FIRST for both commands and regular input
+            # Clear input FIRST for both commands and regular input
             self.multi_input.clear()
             self._refresh_input_window()
             self._ensure_cursor_in_input()
@@ -334,9 +326,12 @@ class NCursesUIController:
             self.status_message = "Processing..."
             self._refresh_status_window()
 
-            # Send to orchestrator (input already cleared above)
+            # Send to orchestrator
             if self.callback_handler:
                 result = self.callback_handler("user_input", {"input": user_input})
+
+                # FIXED: Force immediate display update after orchestrator processes
+                self._process_display_updates()
 
                 if result and result.get("success", False):
                     self.status_message = "Ready"
@@ -428,26 +423,21 @@ class NCursesUIController:
             self._log_error(f"Message addition error: {e}")
     
     def _process_display_updates(self):
-        """RESTORED: Process display updates with message deduplication"""
+        """FIXED: Process display updates immediately when new messages arrive"""
         try:
-            # Check for new messages periodically (not every keystroke)
-            current_time = time.time()
-            if not hasattr(self, '_last_message_check'):
-                self._last_message_check = 0
-            
-            # Check for new messages every 200ms
-            if current_time - self._last_message_check < 0.2:
-                return
-            
-            self._last_message_check = current_time
-            
+            # FIXED: Check for new messages every cycle (not time-limited)
+            # This ensures immediate display when model responds
+
             # Check for messages from orchestrator
             if self.callback_handler:
                 result = self.callback_handler("get_messages", {"limit": 10})
-                
+
                 if result and result.get("success", False):
                     messages = result.get("messages", [])
-                    
+
+                    # Track if we added any new messages
+                    new_messages_added = False
+
                     # Add any new messages to display with deduplication
                     for msg in messages:
                         # Create unique message ID
@@ -457,7 +447,7 @@ class NCursesUIController:
                             msg_type = msg.get("type", "unknown")
                             timestamp = msg.get("timestamp", time.time())
                             msg_id = f"{msg_type}_{timestamp}_{hash(content) % 10000}"
-                        
+
                         # Only add if we haven't seen this message ID before
                         if msg_id not in self.displayed_message_ids:
                             self._add_message(
@@ -465,10 +455,17 @@ class NCursesUIController:
                                 msg.get("type", "unknown"),
                                 msg_id
                             )
-            
-            # Refresh output if we had activity
-            self._refresh_output_window()
-            
+                            new_messages_added = True
+
+                    # FIXED: Refresh output immediately if new messages were added
+                    if new_messages_added:
+                        self._refresh_output_window()
+                        # Also ensure processing state is cleared
+                        if self.processing:
+                            self.processing = False
+                            self.status_message = "Ready"
+                            self._refresh_status_window()
+
         except Exception as e:
             self._log_error(f"Display update error: {e}")
     
@@ -578,7 +575,7 @@ class NCursesUIController:
 # Chunk 5/6 - ncui.py - Window Refresh and Drawing Methods (Comprehensive Fix)
 
     def _refresh_input_window(self):
-        """Refresh input window with borders and proper positioning"""
+        """Refresh input window with borders and NO internal prompt (using window header instead)"""
         try:
             if not self.input_window or not self.current_layout:
                 return
@@ -588,37 +585,26 @@ class NCursesUIController:
             # Draw input window borders first
             self._draw_input_borders()
 
-            # Choose prompt and color based on processing state
-            if self.processing:
-                prompt = "Processing... "
-                prompt_color = self.color_manager.get_color('system')
-            else:
-                prompt = "Input> "
-                prompt_color = self.color_manager.get_color('user')
-
-            # Calculate available width accounting for borders
-            available_width = self.current_layout.input_box.inner_width - len(prompt) - 2
+            # FIXED: No more "Input>" prompt since window header shows "── Input "
+            # Calculate available width accounting for borders (NO prompt offset needed)
+            available_width = self.current_layout.input_box.inner_width - 2  # Just border offset
             available_height = self.current_layout.input_box.inner_height - 1
 
-            # Ensure MultiLineInput is using correct width
-            self.multi_input.update_max_width(available_width + len(prompt))
+            # FIXED: Update MultiLineInput width without prompt consideration
+            self.multi_input.update_max_width(available_width)
 
             display_lines = self.multi_input.get_display_lines(available_width, available_height)
 
-            # Display prompt and content inside borders (y=1, x=1 for border offset)
+            # FIXED: Display content directly without prompt inside borders (y=1, x=1 for border offset)
             try:
-                if prompt_color and self.color_manager.colors_available:
-                    self.input_window.addstr(1, 1, prompt, curses.color_pair(prompt_color))
-                else:
-                    self.input_window.addstr(1, 1, prompt)
-
-                # Display input content
+                # Display input content starting at x=1 (no prompt prefix)
                 if display_lines:
                     first_line = display_lines[0]
                     if len(first_line) > available_width:
                         first_line = first_line[:available_width]
 
-                    self.input_window.addstr(1, 1 + len(prompt), first_line)
+                    # FIXED: Start at x=1 (border offset) with no prompt
+                    self.input_window.addstr(1, 1, first_line)
 
                     # Display additional lines if multi-line
                     for i, line in enumerate(display_lines[1:], 2):  # Start at y=2 for second line
@@ -639,7 +625,7 @@ class NCursesUIController:
             self._log_error(f"Input window refresh error: {e}")
 
     def _refresh_status_window(self):
-        """RESTORED: Refresh status window with current status message"""
+        """FIXED: Status window with proper alignment to match window borders"""
         try:
             if not self.status_window or not self.current_layout:
                 return
@@ -648,7 +634,7 @@ class NCursesUIController:
 
             # Truncate status message if too long
             max_width = self.current_layout.status_line.inner_width
-            status_text = self.status_message[:max_width-1] if len(self.status_message) > max_width-1 else self.status_message
+            status_text = self.status_message[:max_width-2] if len(self.status_message) > max_width-2 else self.status_message
 
             # Choose status color
             if self.processing:
@@ -659,15 +645,16 @@ class NCursesUIController:
                 status_color = self.color_manager.get_color('user')
 
             try:
+                # FIXED: Start at x=1 to align with window borders instead of x=0
                 if status_color and self.color_manager.colors_available:
-                    self.status_window.addstr(0, 0, status_text, curses.color_pair(status_color))
+                    self.status_window.addstr(0, 1, status_text, curses.color_pair(status_color))
                 else:
-                    self.status_window.addstr(0, 0, status_text)
+                    self.status_window.addstr(0, 1, status_text)
             except curses.error:
                 pass
 
             self.status_window.noutrefresh()
-            
+
             # Always ensure cursor returns to input after status update
             self._ensure_cursor_in_input()
 
@@ -826,6 +813,7 @@ class NCursesUIController:
                 self.scroll_manager = ScrollManager(self.current_layout.output_box.inner_height)
                 self._refresh_output_window()
                 self._add_message("Display cleared", "system")
+                self._refresh_output_window()  # Force immediate display
                 return True
                 
             elif command.startswith("/theme"):
@@ -836,10 +824,13 @@ class NCursesUIController:
                         self.color_manager.change_theme(theme_name)
                         self._refresh_all_windows()
                         self._add_message(f"Theme changed to {theme_name}", "system")
+                        self._refresh_output_window()  # Force immediate display
                     else:
                         self._add_message(f"Unknown theme: {parts[1]}. Available: classic, dark, bright", "error")
+                        self._refresh_output_window()  # Force immediate display
                 else:
                     self._add_message("Usage: /theme <classic|dark|bright>", "system")
+                    self._refresh_output_window()  # Force immediate display
                 return True
                 
             elif command == "/help":
@@ -854,6 +845,7 @@ class NCursesUIController:
                 ]
                 for line in help_text:
                     self._add_message(line, "system")
+                    self._refresh_output_window()  # Force immediate display
                 return True
                 
             elif command == "/stats":
@@ -864,10 +856,13 @@ class NCursesUIController:
                         self._add_message("=== System Statistics ===", "system")
                         for key, value in stats.items():
                             self._add_message(f"{key}: {value}", "system")
+                            self._refresh_output_window()  # Force immediate display
                     else:
                         self._add_message("Failed to get system statistics", "error")
+                        self._refresh_output_window()  # Force immediate display
                 else:
                     self._add_message("No orchestrator connection available", "error")
+                    self._refresh_output_window()  # Force immediate display
                 return True
                 
             elif command == "/analyze":
@@ -875,20 +870,25 @@ class NCursesUIController:
                     result = self.callback_handler("analyze_now", {})
                     if result and result.get("success", False):
                         self._add_message("Analysis triggered successfully", "system")
+                        self._refresh_output_window()  # Force immediate display
                     else:
                         error_msg = result.get("error", "Unknown error") if result else "No response"
                         self._add_message(f"Analysis failed: {error_msg}", "error")
+                        self._refresh_output_window()  # Force immediate display
                 else:
                     self._add_message("No orchestrator connection available", "error")
+                    self._refresh_output_window()  # Force immediate display
                 return True
                 
             else:
                 self._add_message(f"Unknown command: {command}. Type /help for available commands.", "error")
+                self._refresh_output_window()  # Force immediate display
                 return True
                 
         except Exception as e:
             self._log_error(f"Command handling error: {e}")
             self._add_message(f"Error processing command: {e}", "error")
+            self._refresh_output_window()  # Force immediate display
             return True
     
     def _cleanup(self):
