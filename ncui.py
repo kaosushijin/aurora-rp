@@ -480,7 +480,7 @@ class NCursesUIController:
             self._log_error(f"Display update error: {e}")
     
     def _refresh_output_window(self):
-        """RESTORED: Refresh the output window with current message buffer"""
+        """FIXED: Refresh the output window with proper scrollback support"""
         try:
             if not self.output_window or not self.current_layout:
                 return
@@ -493,58 +493,61 @@ class NCursesUIController:
             display_height = self.current_layout.output_box.inner_height
             display_width = self.current_layout.output_box.inner_width
 
-            # Get visible messages based on scroll position
-            start_line = self.scroll_manager.scroll_offset
-            visible_messages = self.display_buffer[start_line:start_line + display_height]
-
-            # Display messages
-            y_pos = 1  # Start after top border
-            for message in visible_messages:
-                if y_pos >= display_height + 1:  # Stop before bottom border
-                    break
-
+            # FIXED: Convert messages to display lines (like legacy code)
+            all_display_lines = []
+            for message in self.display_buffer:
                 # Handle timestamp
                 if hasattr(message, 'timestamp') and message.timestamp:
                     timestamp_str = time.strftime("%H:%M:%S", time.localtime(message.timestamp))
                 else:
                     timestamp_str = time.strftime("%H:%M:%S")
 
-                # Get message type and color
-                message_type = getattr(message, 'msg_type', 'user')
-                color_pair = self.color_manager.get_color(message_type)
-
-                # Wrap long messages
+                # Wrap message content
                 wrapped_lines = self._wrap_text(message.content, display_width - 12)
 
                 for i, line in enumerate(wrapped_lines):
-                    if y_pos >= display_height + 1:
-                        break
+                    if i == 0:
+                        # First line includes timestamp
+                        display_line = f"[{timestamp_str}] {line}"
+                    else:
+                        # Continuation lines are indented
+                        display_line = f"           {line}"
 
-                    try:
-                        if i == 0:
-                            # First line includes timestamp
-                            display_line = f"[{timestamp_str}] {line}"
-                        else:
-                            # Continuation lines are indented
-                            display_line = f"           {line}"
+                    # Truncate if too long
+                    if len(display_line) > display_width:
+                        display_line = display_line[:display_width-3] + "..."
 
-                        # Truncate if too long
-                        if len(display_line) > display_width:
-                            display_line = display_line[:display_width-3] + "..."
+                    all_display_lines.append((display_line, message.msg_type))
 
-                        if color_pair and self.color_manager.colors_available:
-                            self.output_window.addstr(y_pos, 1, display_line, curses.color_pair(color_pair))
-                        else:
-                            self.output_window.addstr(y_pos, 1, display_line)
-                        y_pos += 1
+            # FIXED: Update scroll manager with total lines, not message count
+            self.scroll_manager.update_max_scroll(len(all_display_lines))
 
-                    except curses.error:
-                        # Ignore drawing errors
-                        break
+            # FIXED: Get visible lines based on scroll position
+            start_line = self.scroll_manager.scroll_offset
+            end_line = start_line + display_height
+            visible_lines = all_display_lines[start_line:end_line]
+
+            # Display visible lines
+            y_pos = 1  # Start after top border
+            for display_line, message_type in visible_lines:
+                if y_pos >= display_height + 1:  # Stop before bottom border
+                    break
+
+                try:
+                    color_pair = self.color_manager.get_color(message_type)
+                    if color_pair and self.color_manager.colors_available:
+                        self.output_window.addstr(y_pos, 1, display_line, curses.color_pair(color_pair))
+                    else:
+                        self.output_window.addstr(y_pos, 1, display_line)
+                    y_pos += 1
+
+                except curses.error:
+                    # Ignore drawing errors
+                    break
 
             # Show scroll indicator if needed
-            if len(self.display_buffer) > display_height:
-                scroll_info = f"({self.scroll_manager.scroll_offset + 1}/{len(self.display_buffer)})"
+            if len(all_display_lines) > display_height:
+                scroll_info = f"({start_line + 1}/{len(all_display_lines)})"
                 try:
                     self.output_window.addstr(0, display_width - len(scroll_info) - 1, scroll_info)
                 except curses.error:
