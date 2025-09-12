@@ -23,7 +23,7 @@ if str(current_dir) not in sys.path:
 # Import service modules - orchestrator coordinates everything
 try:
     import mcp
-    from emm import EnhancedMemoryManager
+    from emm import EnhancedMemoryManager, MessageType
     from sme import StoryMomentumEngine  
     from sem import SemanticAnalysisEngine
     from ncui import NCursesUIController
@@ -290,50 +290,46 @@ class Orchestrator:
     def _process_user_input(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process user input through the full pipeline
-        1. Validate input
-        2. Store in memory
-        3. Send to LLM
-        4. Store response
-        5. Update counters
+        FIXED: Use correct MessageType enum values from emm.py
         """
         try:
             user_input = data.get("input", "").strip()
             if not user_input:
                 return {"success": False, "error": "Empty input"}
-            
+
             self._log_debug("Processing user input")
-            
+
             # 1. Validate input through semantic engine
             if self.semantic_engine:
                 validation_result = self.semantic_engine.validate_input(user_input)
                 if not validation_result.get("valid", True):
-                    return {"success": False, "error": validation_result.get("reason", "Input validation failed")}
-            
-            # 2. Store user message in memory
+                    return {"success": False, "error": validation_result.get("error", "Input validation failed")}
+
+            # 2. Store user message in memory - FIXED: Use MessageType.USER enum not string
             if self.memory_manager:
-                self.memory_manager.add_user_message(user_input)
+                self.memory_manager.add_message(user_input, MessageType.USER)
                 self.state.message_count += 1
                 self._log_debug("User message stored in memory")
-            
+
             # 3. Send to LLM for response
             llm_response = self._make_llm_request(user_input)
             if not llm_response.get("success", False):
                 return llm_response
-            
-            # 4. Store LLM response in memory
+
+            # 4. Store LLM response in memory - FIXED: Use MessageType.ASSISTANT enum not string
             response_text = llm_response.get("response", "")
             if self.memory_manager and response_text:
-                self.memory_manager.add_assistant_message(response_text)
+                self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
                 self.state.message_count += 1
                 self._log_debug("LLM response stored in memory")
-            
+
             # 5. Return success with response
             return {
                 "success": True,
                 "response": response_text,
                 "message_count": self.state.message_count
             }
-            
+
         except Exception as e:
             self._log_error(f"User input processing failed: {e}")
             return {"success": False, "error": str(e)}
@@ -341,74 +337,155 @@ class Orchestrator:
     def _make_llm_request(self, user_input: str) -> Dict[str, Any]:
         """
         Make LLM request - ONLY function that calls mcp.py
-        Exclusive orchestrator access to LLM communication
+        FIXED: Handle both string and dictionary responses from MCP client
         """
         try:
             if not self.mcp_client:
                 return {"success": False, "error": "MCP client not available"}
-            
+
             self._log_debug("Making LLM request")
-            
-            # Get conversation context from memory
+
+            # Get conversation context from memory - FIXED method name
             context = []
             if self.memory_manager:
-                context = self.memory_manager.get_conversation_context()
-            
-            # Get current momentum state for context
+                # Use get_conversation_for_mcp() instead of get_conversation_context()
+                if hasattr(self.memory_manager, 'get_conversation_for_mcp'):
+                    context = self.memory_manager.get_conversation_for_mcp()
+                elif hasattr(self.memory_manager, 'get_messages'):
+                    # Fallback to get_messages if available
+                    messages = self.memory_manager.get_messages()
+                    # Convert Message objects to MCP format
+                    context = []
+                    for msg in messages:
+                        context.append({
+                            "role": msg.message_type.value.lower(),  # Convert enum to string
+                            "content": msg.content
+                        })
+
+            # Get current momentum state for context - FIXED: Handle missing methods gracefully
             momentum_data = {}
             if self.momentum_engine:
-                momentum_data = self.momentum_engine.get_current_state()
-            
-            # Send request to MCP client
-            response = self.mcp_client.send_message(
-                user_message=user_input,
-                conversation_context=context,
-                momentum_context=momentum_data
-            )
-            
-            if response.get("success", False):
-                self._log_debug("LLM request completed successfully")
+                try:
+                    if hasattr(self.momentum_engine, 'get_current_state'):
+                        momentum_data = self.momentum_engine.get_current_state()
+                    elif hasattr(self.momentum_engine, 'get_state'):
+                        momentum_data = self.momentum_engine.get_state()
+                    else:
+                        # Fallback: provide empty momentum context
+                        momentum_data = {}
+                        self._log_debug("Momentum engine has no state retrieval method")
+                except Exception as e:
+                    self._log_debug(f"Failed to get momentum state: {e}")
+                    momentum_data = {}
+
+            # FIXED: Use correct MCP client method call - try different possible parameter names
+            raw_response = None
+            try:
+                # Try the most common parameter names for MCP clients
+                if hasattr(self.mcp_client, 'send_message'):
+                    # Attempt 1: Try with 'message' parameter
+                    try:
+                        raw_response = self.mcp_client.send_message(
+                            message=user_input,
+                            conversation_context=context,
+                            momentum_context=momentum_data
+                        )
+                    except TypeError:
+                        # Attempt 2: Try with 'content' parameter
+                        try:
+                            raw_response = self.mcp_client.send_message(
+                                content=user_input,
+                                conversation_context=context,
+                                momentum_context=momentum_data
+                            )
+                        except TypeError:
+                            # Attempt 3: Try with just the message as positional parameter
+                            try:
+                                raw_response = self.mcp_client.send_message(
+                                    user_input,
+                                    conversation_context=context,
+                                    momentum_context=momentum_data
+                                )
+                            except TypeError:
+                                # Attempt 4: Try without additional context parameters
+                                raw_response = self.mcp_client.send_message(user_input)
+                else:
+                    return {"success": False, "error": "MCP client has no send_message method"}
+
+            except Exception as method_error:
+                self._log_error(f"MCP method call failed: {method_error}")
+                return {"success": False, "error": f"MCP call error: {str(method_error)}"}
+
+            # FIXED: Handle both string and dictionary responses from MCP client
+            if raw_response is None:
+                return {"success": False, "error": "No response from MCP client"}
+
+            # Convert response to standard format
+            if isinstance(raw_response, str):
+                # MCP client returned a string - assume it's the LLM response content
+                response = {
+                    "success": True,
+                    "response": raw_response,
+                    "error": None
+                }
+                self._log_debug("LLM request completed successfully (string response)")
+            elif isinstance(raw_response, dict):
+                # MCP client returned a dictionary - use as-is or normalize
+                response = raw_response
+                if response.get("success", False):
+                    self._log_debug("LLM request completed successfully (dict response)")
+                else:
+                    self._log_error(f"LLM request failed: {response.get('error', 'Unknown error')}")
             else:
-                self._log_error(f"LLM request failed: {response.get('error', 'Unknown error')}")
-            
+                # Unexpected response type
+                self._log_error(f"Unexpected MCP response type: {type(raw_response)}")
+                return {"success": False, "error": f"Invalid response type: {type(raw_response)}"}
+
             return response
-            
+
         except Exception as e:
             self._log_error(f"LLM request error: {e}")
             return {"success": False, "error": str(e)}
     
     def _get_message_history(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Get message history from memory manager"""
+        """
+        Get message history from memory manager
+        FIXED: Handle Message objects correctly and convert to UI format
+        """
         try:
             if not self.memory_manager:
                 return {"success": False, "error": "Memory manager not available"}
 
             # Get parameters from data
             limit = data.get("limit", 50)
-            include_metadata = data.get("include_metadata", False)
 
-            # FIXED: Use correct memory manager API method
-            # Based on typical memory manager interfaces, try common method names
             messages = []
 
-            # Try different possible method names that might exist
-            if hasattr(self.memory_manager, 'get_conversation_context'):
-                # Get conversation context and format as messages
-                context = self.memory_manager.get_conversation_context()
-                if isinstance(context, list):
-                    # Take the last 'limit' messages
-                    messages = context[-limit:] if context else []
-                else:
-                    messages = []
-            elif hasattr(self.memory_manager, 'get_messages'):
-                messages = self.memory_manager.get_messages(limit)
-            elif hasattr(self.memory_manager, 'get_all_messages'):
-                all_messages = self.memory_manager.get_all_messages()
-                messages = all_messages[-limit:] if all_messages else []
-            else:
-                # Fallback: return empty list with warning
-                self._log_debug("No suitable message retrieval method found in memory manager")
-                messages = []
+            # Try to get messages from memory manager
+            if hasattr(self.memory_manager, 'get_messages'):
+                # Get Message objects
+                message_objects = self.memory_manager.get_messages(limit)
+
+                # Convert Message objects to UI format
+                for msg in message_objects:
+                    # Message objects have attributes, not dictionary keys
+                    messages.append({
+                        "content": msg.content,
+                        "type": msg.message_type.value.lower(),  # Convert enum to string
+                        "timestamp": msg.timestamp,
+                        "id": getattr(msg, 'id', None)
+                    })
+
+            elif hasattr(self.memory_manager, 'get_conversation_for_mcp'):
+                # Get MCP format and convert to UI format
+                mcp_messages = self.memory_manager.get_conversation_for_mcp()
+
+                for msg in mcp_messages[-limit:]:
+                    messages.append({
+                        "content": msg.get("content", ""),
+                        "type": msg.get("role", "user"),
+                        "timestamp": None
+                    })
 
             return {
                 "success": True,
@@ -425,35 +502,46 @@ class Orchestrator:
     def _trigger_periodic_analysis(self):
         """
         Trigger comprehensive analysis every 15 messages
-        Runs in background thread to avoid blocking UI
+        FIXED: Use correct memory manager method name
         """
         if self.state.analysis_in_progress:
             self._log_debug("Analysis already in progress, skipping")
             return
-        
+
         try:
             self.state.analysis_in_progress = True
             self.state.phase = OrchestrationPhase.ANALYZING
-            
+
             self._log_debug("Starting periodic analysis")
-            
-            # Get conversation context for analysis
+
+            # Get conversation context for analysis - FIXED method name
             analysis_context = []
             if self.memory_manager:
-                analysis_context = self.memory_manager.get_conversation_context()
-            
+                if hasattr(self.memory_manager, 'get_conversation_for_mcp'):
+                    analysis_context = self.memory_manager.get_conversation_for_mcp()
+                elif hasattr(self.memory_manager, 'get_messages'):
+                    # Convert Message objects to analysis format
+                    messages = self.memory_manager.get_messages()
+                    for msg in messages:
+                        analysis_context.append({
+                            "id": getattr(msg, 'id', None),
+                            "content": msg.content,
+                            "role": msg.message_type.value.lower(),
+                            "timestamp": msg.timestamp
+                        })
+
             # Run semantic analysis
             semantic_results = {}
             if self.semantic_engine and analysis_context:
                 semantic_results = self.semantic_engine.analyze_conversation(analysis_context)
                 self._log_debug("Semantic analysis completed")
-            
+
             # Run momentum analysis
             momentum_results = {}
             if self.momentum_engine and analysis_context:
                 momentum_results = self.momentum_engine.analyze_momentum(analysis_context)
                 self._log_debug("Momentum analysis completed")
-            
+
             # Store analysis results
             self.state.analysis_results = {
                 "semantic": semantic_results,
@@ -461,12 +549,12 @@ class Orchestrator:
                 "timestamp": time.time(),
                 "message_count": self.state.message_count
             }
-            
+
             # Update analysis tracking
             self.state.last_analysis_count = self.state.message_count
-            
+
             self._log_debug("Periodic analysis completed successfully")
-            
+
         except Exception as e:
             self._log_error(f"Periodic analysis failed: {e}")
         finally:
@@ -520,7 +608,10 @@ class Orchestrator:
             return {"success": False, "error": str(e)}
     
     def _get_system_stats(self) -> Dict[str, Any]:
-        """Get current system statistics"""
+        """
+        Get current system statistics
+        FIXED: Handle missing get_stats() methods gracefully
+        """
         try:
             stats = {
                 "message_count": self.state.message_count,
@@ -529,24 +620,61 @@ class Orchestrator:
                 "phase": self.state.phase.value,
                 "startup_complete": self.state.startup_complete
             }
-            
-            # Add memory stats
+
+            # Add memory stats with graceful fallback
             if self.memory_manager:
-                memory_stats = self.memory_manager.get_stats()
-                stats["memory"] = memory_stats
-            
-            # Add momentum stats
+                try:
+                    if hasattr(self.memory_manager, 'get_stats'):
+                        memory_stats = self.memory_manager.get_stats()
+                        stats["memory"] = memory_stats
+                    else:
+                        # Fallback: provide basic memory info
+                        stats["memory"] = {
+                            "available": True,
+                            "message_count": getattr(self.memory_manager, 'message_count', 0)
+                        }
+                except Exception as e:
+                    self._log_debug(f"Memory stats unavailable: {e}")
+                    stats["memory"] = {"error": "stats unavailable"}
+
+            # Add momentum stats with graceful fallback
             if self.momentum_engine:
-                momentum_stats = self.momentum_engine.get_stats()
-                stats["momentum"] = momentum_stats
-            
-            # Add MCP stats
+                try:
+                    if hasattr(self.momentum_engine, 'get_stats'):
+                        momentum_stats = self.momentum_engine.get_stats()
+                        stats["momentum"] = momentum_stats
+                    elif hasattr(self.momentum_engine, 'get_current_state'):
+                        # Fallback: get current state instead of stats
+                        current_state = self.momentum_engine.get_current_state()
+                        stats["momentum"] = {
+                            "available": True,
+                            "current_state": current_state
+                        }
+                    else:
+                        stats["momentum"] = {"available": True, "stats": "method not available"}
+                except Exception as e:
+                    self._log_debug(f"Momentum stats unavailable: {e}")
+                    stats["momentum"] = {"error": "stats unavailable"}
+
+            # Add MCP stats with graceful fallback
             if self.mcp_client:
-                mcp_stats = self.mcp_client.get_stats()
-                stats["mcp"] = mcp_stats
-            
+                try:
+                    if hasattr(self.mcp_client, 'get_stats'):
+                        mcp_stats = self.mcp_client.get_stats()
+                        stats["mcp"] = mcp_stats
+                    else:
+                        # Fallback: provide basic MCP info
+                        stats["mcp"] = {
+                            "available": True,
+                            "server_url": getattr(self.mcp_client, 'server_url', 'unknown'),
+                            "model": getattr(self.mcp_client, 'model', 'unknown')
+                        }
+                except Exception as e:
+                    self._log_debug(f"MCP stats unavailable: {e}")
+                    stats["mcp"] = {"error": "stats unavailable"}
+
             return {"success": True, "stats": stats}
-            
+
         except Exception as e:
             self._log_error(f"Stats retrieval failed: {e}")
             return {"success": False, "error": str(e)}

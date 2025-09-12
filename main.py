@@ -108,11 +108,11 @@ class ApplicationConfig:
         self.config_data = self._load_hardcoded_config()
     
     def _load_hardcoded_config(self) -> Dict[str, Any]:
-        """Return hardcoded configuration values"""
+        """Return hardcoded configuration values - FIXED: Correct MCP server port"""
         return {
             "mcp": {
-                "server_url": "http://localhost:3000/v1/chat/completions",
-                "model": "gpt-4o",
+                "server_url": "http://localhost:3456/chat",  # FIXED: Changed from 3000 to 3456
+                "model": "qwen2.5:14b-instruct-q4_k_m",    # FIXED: Use correct model name from logs
                 "timeout": 30,
                 "max_retries": 3,
                 "retry_delay": 2
