@@ -2,9 +2,9 @@
 ================================================================
 
 ## PROJECT SCOPE
-Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Context Protocol). Features modular hub-and-spoke architecture with complete LLM semantic analysis, dynamic coordinate system, and background processing for responsive user experience.
+Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Context Protocol). Features hub-and-spoke orchestration architecture with complete LLM semantic analysis, dynamic coordinate system, and background processing for responsive user experience.
 
-## PROGRAM FLOW ANALYSIS (Current: December 2024 - FULLY OPERATIONAL WITH IDENTIFIED IMPROVEMENTS)
+## PROGRAM FLOW ANALYSIS (Commit: cf19344aba86381de89d4c34e1f5ca4cf20c1f8c - FULLY OPERATIONAL)
 
 ### Application Entry Point (main.py)
 1. **Environment Setup**: Module verification, dependency checks, terminal capability validation
@@ -18,246 +18,231 @@ Terminal-based RPG storytelling client leveraging Large Language Model capabilit
 main() → DevNameRPGClient.run() → Orchestrator.run() → NCursesUIController.run() → UI main loop
 ```
 
-## CURRENT MODULE ARCHITECTURE - FULLY OPERATIONAL END-TO-END
+## CURRENT MODULE ARCHITECTURE - HUB-AND-SPOKE PATTERN
 
-### Primary Modules (Hub-and-Spoke Pattern)
-
-**main.py** - Application coordination, prompt management, lifecycle control
-- `PromptManager`: Automatic prompt loading with token estimation and condensation
-- `DevNameRPGClient`: Main application coordinator with signal handling
-- `ApplicationConfig`: Hardcoded configuration values (MCP server: localhost:3456, model: qwen2.5:14b-instruct-q4_k_m)
-- **Status**: ✅ FULLY OPERATIONAL - All prompt loading, module verification, and orchestrator startup working
-- **Token Budget**: 5,000 tokens allocated for system prompts with auto-condensation
+### Hub Module (Central Coordinator)
 
 **orch.py** - Central orchestrator, hub of hub-and-spoke architecture
 - Manages all module communication and coordination
 - Only module with direct access to mcp.py (exclusive LLM communication channel)
 - Handles UI callbacks and complete input processing pipeline
-- **Status**: ✅ FULLY OPERATIONAL - All UI callbacks, LLM integration, memory coordination working
-- **Key Features**: Complete user input processing, graceful error handling, background analysis coordination
+- Coordinates background analysis threads and semantic processing
+- **Key Features**: 
+  - Complete user input → semantic validation → LLM → response pipeline
+  - Graceful error handling with debug logging
+  - Background analysis coordination (every 15 messages)
+  - Thread management for non-blocking operations
+
+### Primary Spoke Modules
+
+**main.py** - Application coordination, prompt management, lifecycle control
+- `PromptManager`: Automatic prompt loading with token estimation
+- `DevNameRPGClient`: Main application coordinator with signal handling
+- `ApplicationConfig`: Hardcoded configuration (MCP server: localhost:3456, model: qwen2.5:14b-instruct-q4_k_m)
+- **Token Budget**: 5,000 tokens for system prompts
 
 **ncui.py** - NCurses UI Controller, pure display and input management
-- `NCursesUIController`: Main UI coordination class with orchestrator callback integration
 - Terminal management, window creation, input handling, message display
-- **Status**: ✅ FULLY OPERATIONAL - Complete terminal restoration achieved
-- **Key Features**: Multi-line input, real-time message display, color themes, scrolling, command system
-- **Known Issues**: Display buffer accumulation requires cleanup (see UI Improvement Tracking Document)
+- Communicates only through orchestrator callback
+- Multi-line input with cursor navigation and word wrapping
+- Color themes (classic/dark/bright) with dynamic switching
+- Scrolling support with PgUp/PgDn navigation
+- Command system (/help, /clear, /stats, /theme, /quit, /analyze)
 
-**uilib.py** - Consolidated UI library, all UI components in single module
-- `calculate_box_layout()`: Dynamic window dimension calculations with proper border handling
+**uilib.py** - Consolidated UI library, all UI components
+- `calculate_box_layout()`: Dynamic window dimension calculations
 - `TerminalManager`: Terminal size management with resize handling
-- `ColorManager`, `ScrollManager`, `MultiLineInput`: All operational with proper coordinate systems
-- **Status**: ✅ FULLY OPERATIONAL - Complete UI component library working
+- `ColorManager`: Theme management with 3 built-in schemes
+- `ScrollManager`: Navigation state with bounds protection
+- `MultiLineInput`: Advanced text input with word wrapping
+- `DisplayMessage`: Message formatting and type differentiation
 
-### Supporting Modules (Spoke Modules)
+### Supporting Spoke Modules
 
 **emm.py** - Enhanced Memory Manager
-- Message storage and retrieval with auto-save functionality to memory.json
-- **Status**: ✅ FULLY OPERATIONAL
-- **API**: `add_message(content, MessageType)`, `get_conversation_for_mcp()`, background auto-save working
-- **Memory Management**: 25,000 token limit with semantic condensation
-- **Critical Issue**: No token budget coordination with MCP request building
+- Message storage and retrieval with auto-save to memory.json
+- Thread-safe operations with RLock protection
+- Background auto-save to prevent UI blocking
+- **Memory Management**: 25,000 token limit with semantic condensation requests
+- **SME Integration**: Stores and retrieves momentum state
+- **Message Types**: USER, ASSISTANT, SYSTEM, MOMENTUM_STATE
 
-**sme.py** - Story Momentum Engine  
-- Narrative progression and antagonist management using pattern-based analysis
-- **Status**: ✅ FULLY OPERATIONAL with graceful fallbacks
-- **Key Features**: Pressure level tracking, story arc progression, narrative time tracking
-- **Implementation**: Pattern-based analysis with minimal LLM integration for performance
+**sme.py** - Story Momentum Engine
+- Narrative progression tracking with pattern-based analysis
+- Story arc phases: SETUP, RISING, CLIMAX, RESOLUTION
+- Antagonist management with threat level tracking
+- Pressure level system (0.0-10.0 scale) with floor ratcheting
+- Narrative time tracking for story progression
+- State persistence through EMM integration
 
 **sem.py** - Semantic Analysis Engine
-- Input validation and semantic processing for orchestrator pipeline
-- **Status**: ✅ FULLY OPERATIONAL
-- **Critical Fix**: Complete `validate_input()` method implementation restored input pipeline
-- **Semantic Categories**: 6-tier importance system for content preservation
+- Input validation for orchestrator pipeline
+- Semantic categorization with 6-tier importance system:
+  - story_critical (90% preservation)
+  - character_focused (80% preservation)
+  - relationship_dynamics (70% preservation)
+  - emotional_significance (60% preservation)
+  - world_building (50% preservation)
+  - standard (40% preservation)
+- 5-strategy JSON parsing for LLM response reliability
+- Content condensation prompting for memory management
 
 **mcp.py** - MCP Client for LLM communication
-- Model Context Protocol implementation for qwen2.5:14b-instruct-q4_k_m on localhost:3456
-- **Status**: ✅ FULLY OPERATIONAL - Successfully communicating with Node.js ollama MCP server
-- **Critical Issue**: No token counting during request building, potential context overflow
+- Model Context Protocol for qwen2.5:14b-instruct-q4_k_m
+- Server URL: http://127.0.0.1:3456/chat
+- Exclusive access through orchestrator (no direct spoke access)
+- 5-minute timeout for ollama processing
+- Fallback operation without httpx dependency
 
-## TECHNICAL IMPLEMENTATION DETAILS - COMPLETE END-TO-END FUNCTIONALITY
+## CRITICAL INTERCONNECTS - HUB-AND-SPOKE ENFORCEMENT
 
-### UI System Architecture (FULLY RESTORED)
-- **Window Layout**: 90/10 split between Story and Input windows, Status line at bottom
-- **Border System**: ASCII borders with proper inner/outer coordinate separation
-- **Input System**: Multi-line input with cursor navigation, word wrapping, double-enter submission
-- **Display System**: Message display with timestamps, color themes (classic/dark/bright), scrolling
-- **Terminal Management**: Dynamic resize handling, minimum size validation (80x24)
+### Communication Rules
+1. **All modules communicate ONLY through orch.py** - no direct module-to-module communication
+2. **MCP access is exclusive to orchestrator** - spokes cannot call LLM directly
+3. **UI uses orchestrator callback** for all operations beyond display
+4. **Semantic operations go through orchestrator** to coordinate with sem.py
 
-### Input Processing Pipeline (COMPLETE)
+### Data Flow Pipeline
 ```
 User Input → ncui.py → orch.py → sem.py (validation) → emm.py (storage) → mcp.py (LLM) → emm.py (response storage) → ncui.py (display)
 ```
 
-### Hub-and-Spoke Communication Pattern (ENFORCED)
-- **Hub**: orch.py coordinates all module communication
-- **Spokes**: All other modules communicate only through orchestrator
-- **MCP Access**: Exclusive to orchestrator - no direct spoke access to mcp.py
-- **Callback Pattern**: UI uses orchestrator callback for all operations
-
-## CURRENT FUNCTIONALITY - COMPLETE END-TO-END OPERATION
-
-### Fully Working Features
-- **Complete Input Processing Pipeline**: UI → orchestrator → semantic validation → memory storage → LLM → response display
-- **LLM Communication**: Full MCP integration with qwen2.5:14b-instruct-q4_k_m model on localhost:3456
-- **Memory Management**: Auto-save conversation history to memory.json with MessageType enum handling
-- **Real-Time UI Updates**: Immediate display of user input and LLM responses with proper message tracking
-- **Multi-line Input**: Natural text entry with cursor navigation, word wrapping, double-enter submission
-- **Color Themes**: Classic theme (blue/green/yellow/red), dark theme (white/cyan/magenta/red), bright theme (blue/green/yellow/red)
-- **Background Processing**: Analysis worker thread for periodic semantic analysis (every 15 messages)
-- **Hub-and-Spoke Architecture**: Clean module separation with orchestrator coordination
-- **Terminal Management**: Resize handling, minimum size validation, proper window boundaries
-
-### Terminal Interface (COMPLETE RESTORATION)
-- **Story Window**: Displays conversation history with timestamps, color coding, and scroll indicators
-- **Input Window**: Multi-line input with borders, prompt display, and proper cursor positioning  
-- **Status Window**: Real-time system status and processing indicators
-- **Navigation**: Arrow keys for cursor, PgUp/PgDn for scrolling, proper visual feedback
-- **Commands**: /help, /clear, /stats, /theme, /quit, /analyze all fully operational
-
-### Debug Capabilities (COMPREHENSIVE)
-- **Comprehensive Logging**: All operations logged to debug.log with module prefixes (MAIN, ORCHESTRATOR, NCUI, EMM, SME, SEM, MCP)
-- **Performance Monitoring**: MCP request/response timing, token counting
-- **Memory Tracking**: Conversation persistence, auto-save status
-- **Error Handling**: Graceful fallbacks for missing methods and network issues
-- **State Inspection**: Complete system statistics via /stats command
-
-## CRITICAL ISSUES IDENTIFIED (December 2024)
-
-### Token Budget Management - CRITICAL PRIORITY
-- **Context Window**: 32,000 tokens total available
-- **Current Allocation**: System prompts (5K), conversation history (no limit), user input (2K documented but not enforced)
-- **Critical Problem**: MCP request building has no token counting, potential context overflow
-- **Risk Level**: HIGH - System will overflow with longer conversations
-- **Required Fix**: Implement real-time token counting in mcp.py request building
-
-### UI Display Buffer Management - HIGH PRIORITY
-- **Problem**: Display buffer accumulates messages indefinitely, never clears
-- **Current Workaround**: Deduplication system prevents re-display but doesn't solve root cause
-- **Impact**: Memory growth and potential display inconsistencies
-- **Required Fix**: Clear buffer after each render cycle, implement stateless message display
-
-### Input Validation Inconsistency - MEDIUM PRIORITY
-- **Documentation**: Claims 2,000 token max user input
-- **Reality**: 4,000 character limit check, no token enforcement
-- **Risk**: Token-dense input could exceed budget allocation
-- **Required Fix**: Enforce 2K token limit in UI validation layer
-
-### Memory-MCP Coordination Gap - MEDIUM PRIORITY
-- **EMM Limit**: 25,000 tokens stored in memory
-- **MCP Usage**: "Last 10 messages" without token budget consideration
-- **Risk**: Could attempt to send all 25K tokens to LLM
-- **Required Fix**: Token-budget-aware conversation retrieval in get_conversation_for_mcp()
-
-## CURRENT FILE STRUCTURE - REMODULARIZED ARCHITECTURE
-```
-devname-rpg-client/
-├── main.py              # ✅ Operational - Entry point, prompt loading, orchestrator startup
-├── orch.py              # ✅ Operational - Central hub orchestrator 
-├── ncui.py              # ✅ Operational - UI controller with complete restoration
-├── uilib.py             # ✅ Operational - Consolidated UI library
-├── emm.py               # ✅ Operational - Memory manager with auto-save
-├── sme.py               # ✅ Operational - Momentum engine with pattern analysis
-├── sem.py               # ✅ Operational - Semantic engine with input validation
-├── mcp.py               # ✅ Operational - MCP client (localhost:3456)
-├── critrules.prompt     # ✅ Present - Core game rules (667 tokens)
-├── lowrules.prompt      # ✅ Present - World generation rules (324 tokens)
-├── companion.prompt     # ✅ Present - Companion character definitions (201 tokens)
-├── memory.json          # ✅ Auto-generated - Conversation storage
-└── debug.log            # ✅ Auto-generated - Debug logging
-```
-
-## USAGE INSTRUCTIONS - CURRENT OPERATIONAL VERSION
-
-### Basic Operation
-- **Start**: `python main.py --debug` for comprehensive logging
-- **Input**: Type naturally, Enter creates new lines, double-enter submits to LLM
-- **Commands**: All slash commands fully functional (/help for complete list)
-- **Navigation**: Arrow keys for cursor movement, PgUp/PgDn for message history scrolling
-- **Exit**: Escape key or /quit command for clean shutdown with auto-save
-
-### System Requirements (VERIFIED)
-- **Terminal**: Minimum 80x24 characters with color support (dynamic resize handling)
-- **Python**: Standard library + optional httpx for MCP communication
-- **MCP Server**: qwen2.5:14b-instruct-q4_k_m running on localhost:3456
-- **Prompts**: critrules.prompt required (667 tokens), lowrules.prompt (324 tokens) and companion.prompt (201 tokens) optional
-
-### Current Operational Status
-- **Core Functionality**: All planned features operational with end-to-end LLM integration
-- **Known Issues**: Token budget overflow risk, UI buffer accumulation, input validation gaps
-- **Performance**: Responsive UI, background processing working, real-time updates functional
-- **Stability**: Graceful error handling, auto-save working, conversation continuity maintained
-
-## DEVELOPMENT PRIORITIES - IMMEDIATE ACTION REQUIRED
-
-### Phase 1: Critical Fixes (Immediate - within 1 week)
-1. **Token Budget Enforcement**: Add real-time token counting to MCP request building
-2. **User Input Validation**: Enforce 2K token limit in UI layer
-3. **Display Buffer Cleanup**: Implement stateless message rendering with buffer clearing
-
-### Phase 2: System Improvements (Short-term - within 1 month)
-1. **Memory-MCP Coordination**: Token-budget-aware conversation retrieval
-2. **Enhanced UI Flow**: Proper input echo → clear → lock → processing → unlock cycle
-3. **Centralized Token Management**: TokenBudgetManager class for system-wide coordination
-
-### Phase 3: Feature Enhancements (Medium-term - within 3 months)
-1. **Semantic Conversation Truncation**: Importance-based message retention
-2. **Advanced Context Management**: Sliding window with narrative coherence
-3. **Performance Optimizations**: Response time improvements and memory efficiency
+### Module Initialization Order (in orch.py)
+1. EnhancedMemoryManager (storage, no dependencies)
+2. SemanticAnalysisEngine (analysis, no dependencies)
+3. StoryMomentumEngine (state tracking with threading.Lock)
+4. MCPClient (LLM communication, configured with prompts)
+5. NCursesUIController (UI with orchestrator callback)
+6. Background services startup
 
 ## TECHNICAL SPECIFICATIONS
 
 ### Dependencies
 - **Python 3.8+** with curses support
-- **httpx** (REQUIRED for MCP communication and LLM calls)
-- **asyncio** for background LLM operations
-- **threading** for non-blocking auto-save and semantic analysis
-- **json** for state persistence and configuration
+- **httpx** (optional but recommended for MCP communication)
+- **asyncio** for asynchronous operations
+- **threading** for background processing
+- **json** for state persistence
 
 ### Configuration
-- **Context Window**: 32,000 tokens (WITH OVERFLOW RISK - requires fixes)
-- **System Prompt Budget**: 5,000 tokens with automatic condensation
-- **Max User Input**: 2,000 tokens (DOCUMENTED BUT NOT ENFORCED)
-- **EMM Memory Limit**: 25,000 tokens (NO COORDINATION WITH MCP)
+- **Context Window**: 32,000 tokens theoretical limit
+- **Memory Budget**: 25,000 tokens (conservative)
+- **System Prompt Budget**: 5,000 tokens
+- **Max User Input**: 2,000 tokens
 - **Minimum Terminal**: 80x24 characters
-- **Log Retention**: 7 days auto-cleanup
+- **Analysis Interval**: Every 15 messages
+
+### File Structure
+```
+Required Files (all in root directory):
+- main.py          # Application entry point
+- orch.py          # Central orchestrator hub
+- ncui.py          # UI controller
+- uilib.py         # UI component library
+- emm.py           # Memory manager
+- sme.py           # Story momentum engine
+- sem.py           # Semantic analysis engine
+- mcp.py           # MCP client
+- critrules.prompt # Required system prompt
+
+Optional Files:
+- companion.prompt # Character definitions
+- lowrules.prompt  # Narrative guidelines
+- memory.json      # Conversation history
+- debug.log        # Debug output
+```
 
 ## CRITICAL PRESERVATION REQUIREMENTS
 
 ### Architecture Integrity
-1. Hub-and-spoke pattern must be maintained across all modules
-2. Orchestrator-only access to mcp.py must be preserved
-3. Background auto-save threading must maintain non-blocking operation
-4. Semantic categorization system must be preserved during memory management fixes
-5. Terminal management and coordinate system must remain intact
-6. Thread safety in all EMM/SME operations must be preserved
+1. **Hub-and-spoke pattern MUST be preserved** - all communication through orchestrator
+2. **No direct module-to-module communication** except through orchestrator callbacks
+3. **MCP access remains exclusive to orchestrator** - no spoke module should import mcp.py
+4. **Thread safety in all shared operations** - especially EMM and SME
+5. **Background operations must remain non-blocking** - UI responsiveness is critical
+6. **5-strategy JSON parsing** must be preserved for LLM response reliability
+7. **Semantic categorization hierarchy** must be maintained for content preservation
+8. **15-message analysis cycle timing** should be preserved for momentum tracking
 
 ### Development Guidelines
-- All fixes must preserve existing functionality while addressing identified issues
-- Token budget management must be implemented without breaking current LLM integration
-- UI improvements must maintain current user experience while fixing buffer issues
-- Memory management changes must preserve conversation continuity and auto-save
-- Error handling and graceful degradation must be maintained throughout fixes
-- Debug logging and monitoring capabilities must be preserved
+- **Always update through orchestrator** when adding cross-module features
+- **Maintain thread safety** with proper locking in shared resources
+- **Test background operations** after any threading changes
+- **Preserve UI responsiveness** - never block the main UI thread
+- **Update genai.txt** when making architectural changes
+- **Follow hub-and-spoke pattern** - resist temptation for direct module communication
+- **Use orchestrator callbacks** for any module that needs external data
 
-## SUCCESS METRICS TO MAINTAIN
+### Known Issues and Improvements
 
-### Operational Excellence
-- **Zero Breaking Changes**: All current functionality must continue working
-- **End-to-End Integration**: User input → LLM response → display pipeline must remain functional
-- **Real-Time Responsiveness**: UI updates and background processing must maintain current performance
-- **Data Persistence**: Auto-save and conversation continuity must be preserved
-- **Error Resilience**: Graceful handling of missing components and network issues must continue
+**Critical Issues:**
+- **Token Budget Coordination**: EMM and MCP don't coordinate token usage, risking context overflow
+- **Display Buffer Accumulation**: UI display buffer needs periodic cleanup to prevent memory growth
+- **Error Recovery**: Some error paths don't gracefully recover (e.g., MCP timeout handling)
 
-### Quality Assurance
-- **Comprehensive Testing**: All fixes must be validated with both short and long conversations
-- **Performance Monitoring**: Token usage, memory consumption, and response times must be tracked
-- **Backward Compatibility**: Existing memory.json files and prompt files must continue working
-- **Debug Capability**: Current logging and debugging features must be enhanced, not diminished
+**Planned Improvements:**
+1. **Token Management System**: Implement token counting during MCP request building
+2. **Display Buffer Management**: Add periodic cleanup of old display messages
+3. **Enhanced Error Recovery**: Improve fallback behavior for network/LLM failures
+4. **Momentum Analysis Optimization**: Consider caching recent analysis results
+5. **Semantic Category Tuning**: Adjust preservation ratios based on story genre
+6. **Command Extensions**: Add more user commands for story control
+
+## INSTRUCTIONS FOR CLAUDE SONNET 4
+
+When rewriting this document for your own understanding:
+
+1. **Preserve the hub-and-spoke architecture explanation** - This is the most critical design pattern. The orchestrator (orch.py) is the only module that coordinates between other modules. Breaking this pattern will cause integration failures.
+
+2. **Maintain the module dependency order** - The initialization sequence in orch.py is critical. Modules must be initialized in the correct order to avoid circular dependencies.
+
+3. **Keep the token budget warnings** - The lack of coordination between EMM memory usage and MCP request building is a real issue that needs addressing.
+
+4. **Document any new interconnects explicitly** - If you add any module communication, it MUST go through the orchestrator. Document the callback pattern used.
+
+5. **Update the data flow pipeline** - If you modify how data moves through the system, update the pipeline diagram to reflect the new flow.
+
+6. **Note threading considerations** - Background operations are critical for UI responsiveness. Any new background operations should be documented with their threading model.
+
+7. **Preserve the semantic categories** - The 6-tier importance system is calibrated for RPG storytelling. Changes should be justified by testing.
+
+8. **Keep the file structure flat** - All modules in root directory. This simplifies imports and makes the architecture clear.
+
+## USAGE INSTRUCTIONS
+
+### Basic Operation
+```bash
+# Run with default configuration
+python main.py
+
+# Run with debug logging
+python main.py --debug
+
+# Required: critrules.prompt must exist in current directory
+# Optional: companion.prompt and lowrules.prompt for additional context
+```
+
+### Terminal Requirements
+- Minimum size: 80x24 characters
+- Unicode support recommended
+- Color terminal for best experience
+
+### Commands
+- `/help` - Show available commands
+- `/clear` - Clear conversation history
+- `/stats` - Display memory statistics
+- `/theme <n>` - Switch color theme (1=classic, 2=dark, 3=bright)
+- `/analyze` - Force momentum analysis
+- `/quit` - Exit application
+
+### Debug Features
+- Comprehensive logging to debug.log
+- Thread operation visibility
+- Semantic categorization decisions
+- LLM request/response logging
+- Memory management operations
 
 ---
-Last Updated: December 13, 2024
-Project State: FULLY OPERATIONAL with CRITICAL IMPROVEMENTS REQUIRED
-Architecture: Hub-and-Spoke Pattern with Orchestrator Coordination
-Status: Production Ready but Token Budget Overflow Risk Identified
-Priority: Implement token management fixes before extended usage
+Last Updated: Analysis of commit cf19344aba86381de89d4c34e1f5ca4cf20c1f8c
+Project State: Hub-and-spoke architecture with complete LLM integration and responsive interface
+Architecture Pattern: Orchestrator-based coordination with strict module isolation
