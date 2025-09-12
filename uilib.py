@@ -796,3 +796,53 @@ class MultiLineInput:
             self.scroll_offset = self.cursor_line
         elif self.cursor_line >= self.scroll_offset + 5:  # Assume max 5 visible lines
             self.scroll_offset = self.cursor_line - 4
+
+    def get_cursor_position(self) -> Tuple[int, int]:
+        """Get current cursor position as (line, column)"""
+        return (self.cursor_line, self.cursor_col)
+
+    def handle_input(self, key: int) -> 'InputResult':
+        """
+        Handle input key and return result
+        Returns InputResult object with submitted flag and content
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class InputResult:
+            submitted: bool
+            content: str
+
+        try:
+            # Handle special keys first
+            if key == ord('\n') or key == curses.KEY_ENTER or key == 10 or key == 13:
+                # Enter key - check if should submit or add newline
+                should_submit, content = self.handle_enter()
+                if should_submit:
+                    return InputResult(submitted=True, content=content)
+                else:
+                    return InputResult(submitted=False, content=self.get_content())
+
+            elif key == curses.KEY_BACKSPACE or key == 127 or key == 8:
+                # Backspace
+                self.handle_backspace()
+                return InputResult(submitted=False, content=self.get_content())
+
+            elif key in [curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]:
+                # Arrow keys
+                self.handle_arrow_keys(key)
+                return InputResult(submitted=False, content=self.get_content())
+
+            elif 32 <= key <= 126:  # Printable ASCII characters
+                # Regular character input
+                char = chr(key)
+                self.insert_char(char)
+                return InputResult(submitted=False, content=self.get_content())
+
+            else:
+                # Unhandled key
+                return InputResult(submitted=False, content=self.get_content())
+
+        except Exception as e:
+            # Return safe fallback on error
+            return InputResult(submitted=False, content=self.get_content())
