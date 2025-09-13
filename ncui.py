@@ -308,7 +308,7 @@ class NCursesUIController:
             self._log_error(f"Cursor positioning error: {e}")
 
     def _handle_user_input(self, user_input: str):
-        """FIXED: Add timestamp tracking when setting processing state"""
+        """FIXED: Ensure immediate display update after orchestrator stores message"""
         try:
             # 1. Clear input field IMMEDIATELY
             self.multi_input.clear()
@@ -322,54 +322,49 @@ class NCursesUIController:
 
             self._log_debug("Submitting user input")
 
-            # 3. Set processing state BEFORE sending to orchestrator
-            self.processing = True
-            self.processing_started_time = time.time()  # FIXED: Track when processing started
-            self.status_message = "Processing..."
-            self._refresh_status_window()
-
-            # Hide cursor during processing
-            try:
-                curses.curs_set(0)
-            except curses.error:
-                pass
-
-            # Force immediate screen update to show "Processing..."
-            curses.doupdate()
-
-            # 4. Send to orchestrator (which stores user message and starts background LLM processing)
+            # 3. Send to orchestrator FIRST (which stores user message immediately)
             if self.callback_handler:
                 result = self.callback_handler("user_input", {"input": user_input})
 
-                # 5. CRITICAL: Force immediate display update to show user message echo
-                # This will show the user's message immediately, even while "Processing..." is displayed
-                self._process_display_updates()
-
-                # 6. Handle orchestrator response
                 if result and result.get("success", False):
-                    # Success - user message stored, background processing started
-                    # Processing state will be cleared by _process_display_updates() when assistant response arrives
-                    pass
+                    # SUCCESS: User message stored in orchestrator memory
+                    # Now we can set processing state and force immediate display update
+
+                    # 4. Set processing state AFTER orchestrator confirms storage
+                    self.processing = True
+                    self.processing_started_time = time.time()
+                    self.status_message = "Processing..."
+                    self._refresh_status_window()
+
+                    # Hide cursor during processing
+                    try:
+                        curses.curs_set(0)
+                    except curses.error:
+                        pass
+
+                    # 5. CRITICAL: Force immediate display update to show user message echo
+                    # This will now show the user's message because orchestrator has stored it
+                    self._process_display_updates()
+
+                    # Force screen update
+                    curses.doupdate()
+
                 else:
-                    # Orchestrator failed - clear processing immediately and show error
+                    # Orchestrator failed - show error immediately
                     error_msg = result.get("error", "Unknown error") if result else "No response"
-                    self.processing = False
-                    self.processing_started_time = None  # FIXED: Reset timestamp on error
                     self.status_message = f"Error: {error_msg}"
                     self._refresh_status_window()
                     self._ensure_cursor_in_input()
             else:
-                # No orchestrator - clear processing and show error
-                self.processing = False
-                self.processing_started_time = None  # FIXED: Reset timestamp on error
+                # No orchestrator - show error
                 self.status_message = "No orchestrator connection available"
                 self._refresh_status_window()
                 self._ensure_cursor_in_input()
 
         except Exception as e:
-            # Error handling - ensure we reset both processing state and timestamp
+            # Error handling - ensure we don't get stuck in processing state
             self.processing = False
-            self.processing_started_time = None  # FIXED: Reset timestamp on exception
+            self.processing_started_time = None
             self.status_message = f"Input error: {e}"
             self._refresh_status_window()
             self._ensure_cursor_in_input()
@@ -430,21 +425,21 @@ class NCursesUIController:
 # Chunk 4/6 - ncui.py - Display and Message Management (Comprehensive Fix)
 
     def _process_display_updates(self):
-        """FIXED: Simplified processing state detection with timeout protection"""
+        """FIXED: Always refresh display, then manage processing state separately"""
         try:
-            # Get fresh messages from orchestrator
+            # CRITICAL: Always get and display fresh messages first, regardless of processing state
             messages_to_display = []
             if self.callback_handler:
                 result = self.callback_handler("get_messages", {"limit": 20})
                 if result and result.get("success", False):
                     messages_to_display = result.get("messages", [])
 
-            # Always refresh output with latest messages (including immediate user echo)
+            # ALWAYS refresh output with latest messages (including immediate user echo)
             self._refresh_output_with_messages(messages_to_display)
 
-            # Processing state management with timeout protection
+            # THEN manage processing state separately
             if self.processing:
-                # FIXED: Check for timeout (30 seconds max processing time)
+                # Check for timeout (30 seconds max processing time)
                 if (self.processing_started_time and
                     time.time() - self.processing_started_time > 30):
                     # Timeout - force clear processing state and show error
@@ -457,7 +452,7 @@ class NCursesUIController:
                     self._log_debug("Processing timeout - state cleared")
                     return
 
-                # SIMPLIFIED: Check if assistant response arrived (most recent message is assistant)
+                # Check if assistant response arrived (most recent message is assistant)
                 if messages_to_display:
                     latest_message = messages_to_display[-1]
                     if latest_message and latest_message.get("type") == "assistant":

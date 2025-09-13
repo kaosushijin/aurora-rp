@@ -235,26 +235,26 @@ class Orchestrator:
         """
         try:
             self._log_debug("Starting orchestrator run sequence")
-            
+
             # Initialize all modules
             if not self.initialize_modules():
                 self._log_error("Module initialization failed")
                 return 1
-            
+
             # Transfer control to UI controller
             if not self.ui_controller:
                 self._log_error("UI controller not available")
                 return 1
-            
+
             self._log_debug("Transferring control to UI controller")
             exit_code = self.ui_controller.run()
-            
+
             # Cleanup after UI exits
             self._shutdown_modules()
-            
+
             self._log_debug(f"Orchestrator run completed with exit code: {exit_code}")
             return exit_code
-            
+
         except Exception as e:
             self._log_error(f"Orchestrator run failed: {e}")
             return 1
@@ -315,6 +315,11 @@ class Orchestrator:
             if self.memory_manager:
                 self.memory_manager.add_message(content, msg_type_enum)
                 self.state.message_count += 1
+
+                # CRITICAL: Force immediate save to ensure message is available for get_messages
+                if hasattr(self.memory_manager, '_save_to_file'):
+                    self.memory_manager._save_to_file()
+
                 self._log_debug(f"Added {message_type} message: {content[:50]}...")
 
             return {"success": True, "message_count": self.state.message_count}
@@ -349,8 +354,7 @@ class Orchestrator:
     
     def _process_user_input(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        FIXED: Actually use background processing instead of synchronous LLM calls
-        The issue was that _make_llm_request() was being called in main thread
+        FIXED: Ensure user message is immediately available for echo before returning
         """
         try:
             user_input = data.get("input", "").strip()
@@ -365,11 +369,23 @@ class Orchestrator:
                 if not validation_result.get("valid", True):
                     return {"success": False, "error": validation_result.get("error", "Input validation failed")}
 
-            # 2. Store user message in memory IMMEDIATELY
+            # 2. Store user message in memory IMMEDIATELY and ensure it's committed
             if self.memory_manager:
                 self.memory_manager.add_message(user_input, MessageType.USER)
                 self.state.message_count += 1
-                self._log_debug("User message stored in memory")
+
+                # CRITICAL FIX: Force immediate save/commit to ensure message is available for get_messages
+                if hasattr(self.memory_manager, '_save_to_file'):
+                    try:
+                        self.memory_manager._save_to_file()
+                        self._log_debug("User message saved and committed to memory")
+                    except Exception as save_error:
+                        self._log_error(f"Failed to save user message: {save_error}")
+                        # Continue anyway - message is still in memory
+                else:
+                    self._log_debug("Memory manager has no save method - message stored in memory only")
+
+                self._log_debug("User message stored in memory - ready for immediate echo")
 
             # 3. Start background LLM processing (TRULY asynchronous)
             def background_llm_processing():
@@ -385,6 +401,14 @@ class Orchestrator:
                         if self.memory_manager and response_text:
                             self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
                             self.state.message_count += 1
+
+                            # Force save of assistant response too
+                            if hasattr(self.memory_manager, '_save_to_file'):
+                                try:
+                                    self.memory_manager._save_to_file()
+                                except Exception as save_error:
+                                    self._log_error(f"Failed to save assistant response: {save_error}")
+
                             self._log_debug("LLM response stored in memory")
 
                             # Update momentum engine if available
@@ -400,6 +424,11 @@ class Orchestrator:
                         error_msg = f"LLM Error: {llm_response.get('error', 'Unknown error')}"
                         if self.memory_manager:
                             self.memory_manager.add_message(error_msg, MessageType.SYSTEM)
+                            if hasattr(self.memory_manager, '_save_to_file'):
+                                try:
+                                    self.memory_manager._save_to_file()
+                                except Exception:
+                                    pass
 
                     self._log_debug("Background LLM processing completed")
 
@@ -408,13 +437,18 @@ class Orchestrator:
                     # Store error in memory so UI can display it
                     if self.memory_manager:
                         self.memory_manager.add_message(f"Error: {str(e)}", MessageType.SYSTEM)
+                        if hasattr(self.memory_manager, '_save_to_file'):
+                            try:
+                                self.memory_manager._save_to_file()
+                            except Exception:
+                                pass
 
             # 4. Start background processing thread immediately
             llm_thread = threading.Thread(target=background_llm_processing, daemon=True, name="LLMProcessing")
             llm_thread.start()
 
-            # 5. CRITICAL: Return success IMMEDIATELY - DO NOT WAIT FOR LLM
-            # UI can now show user message echo and "Processing..." status
+            # 5. CRITICAL: Return success IMMEDIATELY - user message is now available for echo
+            # UI can now call get_messages and will receive the user's message for immediate display
             return {
                 "success": True,
                 "message": "User input processed",
