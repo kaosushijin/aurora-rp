@@ -48,6 +48,7 @@ class NCursesUIController:
         # Messages now come from orchestrator on-demand
         self.status_message = "Ready"
         self.processing = False
+        self.processing_started_time = None  # ADD: Timestamp tracking for processing timeout
 
         # Configuration
         self.debug_mode = bool(debug_logger)
@@ -268,7 +269,7 @@ class NCursesUIController:
             return 1
 
     def _ensure_cursor_in_input(self):
-        """FIXED: Restore .bak version cursor positioning logic"""
+        """FIXED: More reliable cursor positioning with processing state check"""
         try:
             # CRITICAL: Only position cursor when not processing AND input window exists
             if self.processing or not self.input_window or not self.current_layout:
@@ -291,7 +292,8 @@ class NCursesUIController:
             # Position cursor with error handling
             try:
                 self.input_window.move(visual_y, visual_x)
-                curses.curs_set(1)  # Make cursor visible
+                # Make cursor visible ONLY when not processing
+                curses.curs_set(1)
                 curses.doupdate()   # Force screen update
             except curses.error:
                 # Fallback positioning
@@ -306,7 +308,7 @@ class NCursesUIController:
             self._log_error(f"Cursor positioning error: {e}")
 
     def _handle_user_input(self, user_input: str):
-        """FIXED: Restore proper processing state management from .bak version"""
+        """FIXED: Add timestamp tracking when setting processing state"""
         try:
             # 1. Clear input field IMMEDIATELY
             self.multi_input.clear()
@@ -320,33 +322,54 @@ class NCursesUIController:
 
             self._log_debug("Submitting user input")
 
-            # 3. Set processing state and show "Processing..."
+            # 3. Set processing state BEFORE sending to orchestrator
             self.processing = True
+            self.processing_started_time = time.time()  # FIXED: Track when processing started
             self.status_message = "Processing..."
             self._refresh_status_window()
 
-            # CRITICAL: Hide cursor during processing like .bak version
+            # Hide cursor during processing
             try:
                 curses.curs_set(0)
             except curses.error:
                 pass
 
-            # 4. Send to orchestrator (which handles immediate user echo)
+            # Force immediate screen update to show "Processing..."
+            curses.doupdate()
+
+            # 4. Send to orchestrator (which stores user message and starts background LLM processing)
             if self.callback_handler:
                 result = self.callback_handler("user_input", {"input": user_input})
 
-                # Force immediate display update to show user echo
+                # 5. CRITICAL: Force immediate display update to show user message echo
+                # This will show the user's message immediately, even while "Processing..." is displayed
                 self._process_display_updates()
 
+                # 6. Handle orchestrator response
+                if result and result.get("success", False):
+                    # Success - user message stored, background processing started
+                    # Processing state will be cleared by _process_display_updates() when assistant response arrives
+                    pass
+                else:
+                    # Orchestrator failed - clear processing immediately and show error
+                    error_msg = result.get("error", "Unknown error") if result else "No response"
+                    self.processing = False
+                    self.processing_started_time = None  # FIXED: Reset timestamp on error
+                    self.status_message = f"Error: {error_msg}"
+                    self._refresh_status_window()
+                    self._ensure_cursor_in_input()
             else:
-                self.status_message = "No orchestrator connection available"
+                # No orchestrator - clear processing and show error
                 self.processing = False
+                self.processing_started_time = None  # FIXED: Reset timestamp on error
+                self.status_message = "No orchestrator connection available"
                 self._refresh_status_window()
                 self._ensure_cursor_in_input()
 
         except Exception as e:
-            # Error handling - ensure we reset processing state
+            # Error handling - ensure we reset both processing state and timestamp
             self.processing = False
+            self.processing_started_time = None  # FIXED: Reset timestamp on exception
             self.status_message = f"Input error: {e}"
             self._refresh_status_window()
             self._ensure_cursor_in_input()
@@ -407,103 +430,70 @@ class NCursesUIController:
 # Chunk 4/6 - ncui.py - Display and Message Management (Comprehensive Fix)
 
     def _process_display_updates(self):
-        """FIXED: Simplified display updates that force immediate refresh"""
+        """FIXED: Simplified processing state detection with timeout protection"""
         try:
-            # Force refresh of output window to get latest messages
-            self._refresh_output_window()
-
-            # Check if we need to clear processing state by looking at recent messages
-            if self.processing and self.callback_handler:
-                result = self.callback_handler("get_messages", {"limit": 5})
+            # Get fresh messages from orchestrator
+            messages_to_display = []
+            if self.callback_handler:
+                result = self.callback_handler("get_messages", {"limit": 20})
                 if result and result.get("success", False):
-                    messages = result.get("messages", [])
+                    messages_to_display = result.get("messages", [])
 
-                    # Look for recent assistant message to clear processing
-                    for msg in messages[-3:]:  # Check last 3 messages
-                        if msg.get("type") == "assistant":
-                            self.processing = False
-                            self.status_message = "Ready"
-                            self._refresh_status_window()
-                            self._ensure_cursor_in_input()
-                            break
+            # Always refresh output with latest messages (including immediate user echo)
+            self._refresh_output_with_messages(messages_to_display)
+
+            # Processing state management with timeout protection
+            if self.processing:
+                # FIXED: Check for timeout (30 seconds max processing time)
+                if (self.processing_started_time and
+                    time.time() - self.processing_started_time > 30):
+                    # Timeout - force clear processing state and show error
+                    self._clear_processing_state()
+                    if self.callback_handler:
+                        self.callback_handler("add_system_message", {
+                            "content": "Processing timeout - please try again",
+                            "message_type": "system"
+                        })
+                    self._log_debug("Processing timeout - state cleared")
+                    return
+
+                # SIMPLIFIED: Check if assistant response arrived (most recent message is assistant)
+                if messages_to_display:
+                    latest_message = messages_to_display[-1]
+                    if latest_message and latest_message.get("type") == "assistant":
+                        # Assistant response received - clear processing
+                        self._clear_processing_state()
+
+            # If not processing, ensure cursor is positioned correctly
+            elif not self.processing:
+                self._ensure_cursor_in_input()
 
         except Exception as e:
             self._log_error(f"Display update error: {e}")
 
-    def _refresh_output_with_messages(self, messages: List[Dict]):
-        """STATELESS: Render output window directly from message list"""
+    def _clear_processing_state(self):
+        """FIXED: Clear processing state and reset timestamp"""
         try:
-            if not self.output_window:
-                return
+            # Only clear if we're actually in processing state
+            if self.processing:
+                self.processing = False
+                self.processing_started_time = None  # FIXED: Reset timestamp when clearing
+                self.status_message = "Ready"
+                self._refresh_status_window()
 
-            height, width = self.output_window.getmaxyx()
-            display_height = height - 2
-            display_width = width - 2
+                # CRITICAL: Restore cursor immediately after clearing processing
+                self._ensure_cursor_in_input()
 
-            self.output_window.clear()
-            self._draw_borders()
-
-            # Convert messages to display lines
-            all_display_lines = []
-            for message in messages:
-                # Convert orchestrator message format to display format
-                timestamp = time.strftime("%H:%M:%S", time.localtime(message.get("timestamp", time.time())))
-                content = message.get("content", "")
-                msg_type = message.get("type", "unknown")
-
-                content_width = display_width - 12
-                if content_width < 20:
-                    content_width = 20
-
-                wrapped_lines = self._wrap_text(content, content_width)
-
-                for i, line in enumerate(wrapped_lines):
-                    if i == 0:
-                        display_line = f"[{timestamp}] {line}"
-                    else:
-                        display_line = f"           {line}"
-                    all_display_lines.append((display_line, msg_type))
-
-            # Update scroll manager with current message count
-            self.scroll_manager.update_max_scroll(len(all_display_lines))
-            self.scroll_manager.update_window_height(display_height)
-
-            # Auto-scroll to bottom unless user is in scrollback
-            if not self.scroll_manager.in_scrollback:
-                self.scroll_manager.auto_scroll_to_bottom()
-
-            # Display visible lines based on scroll position
-            start_line = self.scroll_manager.scroll_offset
-            visible_lines = all_display_lines[start_line:start_line + display_height]
-
-            for row, (display_line, msg_type) in enumerate(visible_lines):
-                if row >= display_height:
-                    break
-
-                color_pair = self._get_color_for_message_type(msg_type)
-
-                if len(display_line) > display_width:
-                    display_line = display_line[:display_width-3] + "..."
-
+                # Force screen update to show cursor
                 try:
-                    self.output_window.addstr(row + 1, 1, display_line, color_pair)
+                    curses.doupdate()
                 except curses.error:
                     pass
 
-            # Show scroll indicators if in scrollback
-            if self.scroll_manager.in_scrollback:
-                scroll_info = self.scroll_manager.get_scroll_info()
-                if scroll_info.get("scroll_needed", False):
-                    indicator = f"({scroll_info['offset'] + 1}/{len(all_display_lines)})"
-                    try:
-                        self.output_window.addstr(0, width - len(indicator) - 1, indicator)
-                    except curses.error:
-                        pass
-
-            self.output_window.refresh()
+                self._log_debug("Processing state cleared - UI ready for input")
 
         except Exception as e:
-            self._log_error(f"Error in _refresh_output_with_messages: {e}")
+            self._log_error(f"Processing state clear error: {e}")
     
     def _wrap_text(self, text: str, width: int) -> List[str]:
         """Wrap text to specified width, preserving word boundaries"""
@@ -704,18 +694,18 @@ class NCursesUIController:
             self._log_error(f"Input border drawing error: {e}")
 
     def _refresh_all_windows(self):
-        """RESTORED: Refresh all windows with proper sequence and cursor positioning"""
+        """FIXED: Ensure proper cursor positioning after all window refreshes"""
         try:
             self._refresh_output_window()
             self._refresh_input_window()
             self._refresh_status_window()
-            
+
             # Use noutrefresh for all windows, then single doupdate for efficiency
             curses.doupdate()
-            
-            # Always end with proper cursor positioning
+
+            # CRITICAL: Always end with proper cursor positioning
             self._ensure_cursor_in_input()
-            
+
         except Exception as e:
             self._log_error(f"Window refresh error: {e}")
 
@@ -1007,7 +997,7 @@ class NCursesUIController:
             return 0  # Safe fallback
 
     def _refresh_output_window(self):
-        """FIXED: Use working .bak version display logic with stateless message fetching"""
+        """FIXED: Don't leave cursor in output window after refresh"""
         try:
             if not self.output_window:
                 return
@@ -1029,7 +1019,23 @@ class NCursesUIController:
             # Convert messages to display lines (like .bak version)
             all_display_lines = []
             for message in messages:
-                timestamp = time.strftime("%H:%M:%S", time.localtime(message.get("timestamp", time.time())))
+                # FIXED: Handle both ISO string timestamps and float timestamps
+                raw_timestamp = message.get("timestamp", time.time())
+                try:
+                    if isinstance(raw_timestamp, str):
+                        # Parse ISO format timestamp from orchestrator
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(raw_timestamp.replace('Z', '+00:00'))
+                        timestamp_float = dt.timestamp()
+                    else:
+                        # Already a float timestamp
+                        timestamp_float = float(raw_timestamp)
+
+                    timestamp = time.strftime("%H:%M:%S", time.localtime(timestamp_float))
+                except (ValueError, OSError):
+                    # Fallback to current time if parsing fails
+                    timestamp = time.strftime("%H:%M:%S")
+
                 content = message.get("content", "")
                 msg_type = message.get("type", "unknown")
 
@@ -1082,8 +1088,96 @@ class NCursesUIController:
                     except curses.error:
                         pass
 
-            self.output_window.refresh()
+            # CRITICAL: Use noutrefresh instead of refresh to not change cursor position
+            self.output_window.noutrefresh()
 
         except Exception as e:
             self._log_error(f"Error in _refresh_output_window: {e}")
+
+    def _refresh_output_with_messages(self, messages: List[Dict]):
+        """STATELESS: Render output window directly from message list without local buffer"""
+        try:
+            if not self.output_window:
+                return
+
+            height, width = self.output_window.getmaxyx()
+            display_height = height - 2
+            display_width = width - 2
+
+            self.output_window.clear()
+            self._draw_borders()
+
+            # Convert messages to display lines
+            all_display_lines = []
+            for message in messages:
+                # Handle timestamp conversion
+                raw_timestamp = message.get("timestamp", time.time())
+                try:
+                    if isinstance(raw_timestamp, str):
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(raw_timestamp.replace('Z', '+00:00'))
+                        timestamp_float = dt.timestamp()
+                    else:
+                        timestamp_float = float(raw_timestamp)
+                    timestamp = time.strftime("%H:%M:%S", time.localtime(timestamp_float))
+                except (ValueError, OSError):
+                    timestamp = time.strftime("%H:%M:%S")
+
+                content = message.get("content", "")
+                msg_type = message.get("type", "unknown")
+
+                content_width = display_width - 12
+                if content_width < 20:
+                    content_width = 20
+
+                wrapped_lines = self._wrap_text(content, content_width)
+
+                for i, line in enumerate(wrapped_lines):
+                    if i == 0:
+                        display_line = f"[{timestamp}] {line}"
+                    else:
+                        display_line = f"           {line}"
+                    all_display_lines.append((display_line, msg_type))
+
+            # Update scroll manager
+            self.scroll_manager.update_max_scroll(len(all_display_lines))
+            self.scroll_manager.update_window_height(display_height)
+
+            # Auto-scroll to bottom unless user is in scrollback
+            if not self.scroll_manager.in_scrollback:
+                self.scroll_manager.auto_scroll_to_bottom()
+
+            # Display visible lines
+            start_line = self.scroll_manager.scroll_offset
+            visible_lines = all_display_lines[start_line:start_line + display_height]
+
+            for row, (display_line, msg_type) in enumerate(visible_lines):
+                if row >= display_height:
+                    break
+
+                color_pair = self._get_color_for_message_type(msg_type)
+
+                if len(display_line) > display_width:
+                    display_line = display_line[:display_width-3] + "..."
+
+                try:
+                    self.output_window.addstr(row + 1, 1, display_line, color_pair)
+                except curses.error:
+                    pass
+
+            # Show scroll indicators if in scrollback
+            if self.scroll_manager.in_scrollback:
+                scroll_info = self.scroll_manager.get_scroll_info()
+                if scroll_info.get("scroll_needed", False):
+                    indicator = f"({scroll_info['offset'] + 1}/{len(all_display_lines)})"
+                    try:
+                        self.output_window.addstr(0, width - len(indicator) - 1, indicator)
+                    except curses.error:
+                        pass
+
+            # Use noutrefresh to avoid cursor position changes
+            self.output_window.noutrefresh()
+
+        except Exception as e:
+            self._log_error(f"Error in _refresh_output_with_messages: {e}")
 
