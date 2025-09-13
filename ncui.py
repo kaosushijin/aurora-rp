@@ -200,7 +200,7 @@ class NCursesUIController:
 # Chunk 3/6 - ncui.py - Main Loop and Input Handling (Comprehensive Fix)
 
     def run(self) -> int:
-        """Run interface using curses wrapper - RESTORED: Complete main loop"""
+        """Run interface using curses wrapper - FIXED: Handle too-small terminal state"""
         def _curses_main(stdscr):
             try:
                 # Initialize the interface
@@ -213,37 +213,57 @@ class NCursesUIController:
 
                 while self.running:
                     try:
-                        # RESTORED: Process display updates periodically
-                        self._process_display_updates()
+                        # FIXED: Check if terminal is too small before processing display updates
+                        if self.terminal_manager and self.terminal_manager.is_too_small():
+                            # Terminal is too small - skip normal display updates
+                            # Just handle resize events and quit commands
+                            pass
+                        else:
+                            # Terminal is big enough - process normal display updates
+                            self._process_display_updates()
 
                         # Get user input with timeout
-                        self.input_window.timeout(100)  # 100ms timeout
-                        key = self.input_window.getch()
+                        self.input_window.timeout(100) if self.input_window else None
+
+                        # FIXED: Handle input differently based on terminal size
+                        if self.terminal_manager and self.terminal_manager.is_too_small():
+                            # Terminal too small - only listen for resize and quit
+                            try:
+                                key = stdscr.getch()  # Use stdscr instead of input_window
+                                stdscr.timeout(100)
+                            except (curses.error, AttributeError):
+                                key = -1
+                        else:
+                            # Normal input handling
+                            key = self.input_window.getch() if self.input_window else -1
 
                         if key == -1:  # Timeout, no input
                             continue
 
-                        # Handle special keys
+                        # Handle special keys (these work regardless of terminal size)
                         if key == 27:  # Escape key
                             self._handle_quit()
                             break
                         elif key == curses.KEY_RESIZE:
                             self._handle_resize()
                             continue
-                        elif key in [curses.KEY_PPAGE, curses.KEY_NPAGE]:  # Page Up/Down
-                            self._handle_scroll(key)
-                            continue
 
-                        # Process input through multi-input handler
-                        input_result = self.multi_input.handle_input(key)
+                        # FIXED: Only handle normal input if terminal is big enough
+                        if self.terminal_manager and not self.terminal_manager.is_too_small():
+                            if key in [curses.KEY_PPAGE, curses.KEY_NPAGE]:  # Page Up/Down
+                                self._handle_scroll(key)
+                                continue
 
-                        if input_result.submitted:
-                            # User submitted input
-                            self._handle_user_input(input_result.content)
-                        else:
-                            # Just update input display and cursor
-                            self._refresh_input_window()
-                            self._ensure_cursor_in_input()
+                            # Process input through multi-input handler
+                            input_result = self.multi_input.handle_input(key)
+
+                            if input_result.submitted:
+                                # User submitted input
+                                self._handle_user_input(input_result.content)
+                            else:
+                                # Just update input display and cursor
+                                self._refresh_input_window()
+                                self._ensure_cursor_in_input()
 
                     except curses.error as e:
                         self._log_error(f"Curses error in main loop: {e}")
@@ -386,7 +406,7 @@ class NCursesUIController:
             self._log_error(f"Scroll handling error: {e}")
 
     def _handle_resize(self):
-        """Handle terminal resize events"""
+        """Handle terminal resize events - FIXED: Stateless too-small message handling"""
         try:
             self._log_debug("Terminal resize detected")
 
@@ -398,9 +418,11 @@ class NCursesUIController:
 
             # Check if terminal is too small BEFORE trying to use layout
             if self.terminal_manager.is_too_small():
-                self.terminal_manager.show_too_small_message()
+                # FIXED: Handle "too small" message through orchestrator instead of terminal_manager
+                self._show_terminal_too_small_message(width, height)
                 return
 
+            # Terminal is big enough - proceed with normal layout
             self.current_layout = self.terminal_manager.get_box_layout()
 
             # Only proceed if we have a valid layout
@@ -412,6 +434,9 @@ class NCursesUIController:
 
             # Update scroll manager
             self.scroll_manager = ScrollManager(self.current_layout.output_box.inner_height)
+
+            # Update multi-input width
+            self.multi_input.update_max_width(self.current_layout.input_box.inner_width - 10)
 
             # Force complete refresh
             self.stdscr.clear()
@@ -1176,3 +1201,48 @@ class NCursesUIController:
         except Exception as e:
             self._log_error(f"Error in _refresh_output_with_messages: {e}")
 
+    def _show_terminal_too_small_message(self, current_width: int, current_height: int):
+        """FIXED: Display terminal too small message using stateless approach"""
+        try:
+            # Clear the screen and show a simple message directly
+            self.stdscr.clear()
+
+            # Create the message
+            msg = f"Terminal needs {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT}, got {current_width}x{current_height}"
+            help_msg = "Resize your terminal or press Ctrl+C to quit."
+
+            # Calculate position to center the message
+            try:
+                # Position main message
+                msg_y = max(0, current_height // 2)
+                msg_x = max(0, (current_width - len(msg)) // 2)
+
+                # Position help message
+                help_y = msg_y + 1
+                help_x = max(0, (current_width - len(help_msg)) // 2)
+
+                # Display messages directly on stdscr
+                self.stdscr.addstr(msg_y, msg_x, msg)
+                if help_y < current_height:
+                    self.stdscr.addstr(help_y, help_x, help_msg)
+
+            except curses.error:
+                # If we can't position it nicely, just put it at 0,0
+                try:
+                    self.stdscr.addstr(0, 0, msg[:current_width-1])
+                except curses.error:
+                    pass
+
+            # Refresh to show the message
+            self.stdscr.refresh()
+
+            # Hide cursor since we're in an error state
+            try:
+                curses.curs_set(0)
+            except curses.error:
+                pass
+
+            self._log_debug(f"Displayed terminal too small message: {current_width}x{current_height}")
+
+        except Exception as e:
+            self._log_error(f"Failed to show terminal too small message: {e}")
