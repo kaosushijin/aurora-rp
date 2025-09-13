@@ -290,7 +290,7 @@ class Orchestrator:
     def _process_user_input(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process user input through the full pipeline
-        FIXED: Use correct MessageType enum values from emm.py
+        CORRECTED: Provide immediate user message echo for UI
         """
         try:
             user_input = data.get("input", "").strip()
@@ -305,28 +305,56 @@ class Orchestrator:
                 if not validation_result.get("valid", True):
                     return {"success": False, "error": validation_result.get("error", "Input validation failed")}
 
-            # 2. Store user message in memory - FIXED: Use MessageType.USER enum not string
+            # 2. Store user message in memory FIRST - IMMEDIATE echo available
             if self.memory_manager:
                 self.memory_manager.add_message(user_input, MessageType.USER)
                 self.state.message_count += 1
                 self._log_debug("User message stored in memory")
 
-            # 3. Send to LLM for response
-            llm_response = self._make_llm_request(user_input)
-            if not llm_response.get("success", False):
-                return llm_response
+            # CRITICAL: Return success immediately so UI can get the user message via get_messages
+            # The LLM processing happens asynchronously in a separate thread
 
-            # 4. Store LLM response in memory - FIXED: Use MessageType.ASSISTANT enum not string
-            response_text = llm_response.get("response", "")
-            if self.memory_manager and response_text:
-                self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
-                self.state.message_count += 1
-                self._log_debug("LLM response stored in memory")
+            # 3. Start LLM processing in background thread
+            def background_llm_processing():
+                try:
+                    # Send to LLM for response
+                    llm_response = self._make_llm_request(user_input)
 
-            # 5. Return success with response
+                    if llm_response.get("success", False):
+                        # Store LLM response in memory
+                        response_text = llm_response.get("response", "")
+                        if self.memory_manager and response_text:
+                            self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
+                            self.state.message_count += 1
+                            self._log_debug("LLM response stored in memory")
+
+                        # Update momentum engine if available
+                        if self.momentum_engine:
+                            try:
+                                self.momentum_engine.process_exchange(user_input, response_text)
+                            except Exception as e:
+                                self._log_error(f"Momentum engine processing failed: {e}")
+
+                    else:
+                        # Store error message if LLM failed
+                        error_msg = f"LLM Error: {llm_response.get('error', 'Unknown error')}"
+                        if self.memory_manager:
+                            self.memory_manager.add_message(error_msg, MessageType.SYSTEM)
+
+                except Exception as e:
+                    self._log_error(f"Background LLM processing failed: {e}")
+                    # Store error in memory so UI can display it
+                    if self.memory_manager:
+                        self.memory_manager.add_message(f"Error: {str(e)}", MessageType.SYSTEM)
+
+            # Start background processing
+            llm_thread = threading.Thread(target=background_llm_processing, daemon=True)
+            llm_thread.start()
+
+            # Return success IMMEDIATELY - user message is already stored and available
             return {
                 "success": True,
-                "response": response_text,
+                "message": "User input processed",
                 "message_count": self.state.message_count
             }
 

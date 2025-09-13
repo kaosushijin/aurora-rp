@@ -309,25 +309,28 @@ class TerminalManager:
 class ColorTheme(Enum):
     """Available color themes"""
     CLASSIC = "classic"
-    DARK = "dark" 
+    DARK = "dark"
     BRIGHT = "bright"
+    NORD = "nord"           # Arctic-inspired theme
+    SOLARIZED = "solarized" # Warm earth tones
+    MONOKAI = "monokai"     # High-contrast vibrant
 
 class ColorManager:
     """Color management with theme switching"""
-    
+
     def __init__(self, theme: ColorTheme = ColorTheme.CLASSIC):
         self.theme = theme
         self.colors_available = False
-        
+
         # Color pair constants
         self.USER_COLOR = 1
         self.ASSISTANT_COLOR = 2
         self.SYSTEM_COLOR = 3
         self.ERROR_COLOR = 4
         self.BORDER_COLOR = 5
-    
+
     def init_colors(self) -> bool:
-        """Initialize colors based on current theme - FIXED: Correct dark theme colors"""
+        """Initialize colors based on current theme - EXPANDED: All 6 themes supported"""
         if not curses.has_colors():
             self.colors_available = False
             return False
@@ -336,9 +339,8 @@ class ColorManager:
             curses.start_color()
             curses.use_default_colors()
 
-            # Define theme color schemes - CORRECTED to match legacyref
+            # Original 3 themes
             if self.theme == ColorTheme.CLASSIC:
-                # Classic theme - blue/green/yellow/red
                 curses.init_pair(self.USER_COLOR, curses.COLOR_CYAN, -1)
                 curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_GREEN, -1)
                 curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_YELLOW, -1)
@@ -346,20 +348,43 @@ class ColorManager:
                 curses.init_pair(self.BORDER_COLOR, curses.COLOR_BLUE, -1)
 
             elif self.theme == ColorTheme.DARK:
-                # FIXED: Dark theme - actual muted/dark colors from legacyref
                 curses.init_pair(self.USER_COLOR, curses.COLOR_WHITE, -1)
-                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_CYAN, -1)      # Changed from GREEN to CYAN
-                curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_MAGENTA, -1)      # Changed from BLUE to MAGENTA
+                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_CYAN, -1)
+                curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_MAGENTA, -1)
                 curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)
                 curses.init_pair(self.BORDER_COLOR, curses.COLOR_WHITE, -1)
 
             elif self.theme == ColorTheme.BRIGHT:
-                # FIXED: Bright theme - corrected to match legacyref
-                curses.init_pair(self.USER_COLOR, curses.COLOR_BLUE, -1)           # Changed from MAGENTA to BLUE
-                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_GREEN, -1)     # Kept GREEN
+                curses.init_pair(self.USER_COLOR, curses.COLOR_BLUE, -1)
+                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_GREEN, -1)
                 curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_YELLOW, -1)
                 curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)
                 curses.init_pair(self.BORDER_COLOR, curses.COLOR_MAGENTA, -1)
+
+            # NEW: 3 additional popular themes
+            elif self.theme == ColorTheme.NORD:
+                # Arctic-inspired cool tones
+                curses.init_pair(self.USER_COLOR, curses.COLOR_WHITE, -1)        # Snow storm white
+                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_CYAN, -1)    # Frost cyan
+                curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_BLUE, -1)       # Polar night blue
+                curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)         # Aurora red
+                curses.init_pair(self.BORDER_COLOR, curses.COLOR_CYAN, -1)       # Frost cyan borders
+
+            elif self.theme == ColorTheme.SOLARIZED:
+                # Solarized warm earth tones with excellent contrast
+                curses.init_pair(self.USER_COLOR, curses.COLOR_YELLOW, -1)       # Base01 (content tone)
+                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_GREEN, -1)   # Green accent
+                curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_MAGENTA, -1)    # Violet accent
+                curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)         # Red accent
+                curses.init_pair(self.BORDER_COLOR, curses.COLOR_BLUE, -1)       # Blue accent
+
+            elif self.theme == ColorTheme.MONOKAI:
+                # Monokai high contrast vibrant colors
+                curses.init_pair(self.USER_COLOR, curses.COLOR_WHITE, -1)        # Foreground white
+                curses.init_pair(self.ASSISTANT_COLOR, curses.COLOR_GREEN, -1)   # String green
+                curses.init_pair(self.SYSTEM_COLOR, curses.COLOR_YELLOW, -1)     # Keyword yellow
+                curses.init_pair(self.ERROR_COLOR, curses.COLOR_RED, -1)         # Error red
+                curses.init_pair(self.BORDER_COLOR, curses.COLOR_MAGENTA, -1)    # Function magenta
 
             self.colors_available = True
             return True
@@ -367,12 +392,12 @@ class ColorManager:
         except curses.error:
             self.colors_available = False
             return False
-    
+
     def get_color(self, color_type: str) -> int:
         """Get color pair for message type"""
         if not self.colors_available:
             return 0
-        
+
         color_map = {
             'user': self.USER_COLOR,
             'assistant': self.ASSISTANT_COLOR,
@@ -381,18 +406,18 @@ class ColorManager:
             'border': self.BORDER_COLOR
         }
         return color_map.get(color_type, 0)
-    
+
     def change_theme(self, theme_name: str) -> bool:
-        """Change color theme and reinitialize colors"""
+        """Change color theme and reinitialize colors - UPDATED: Support all 6 themes"""
         try:
             new_theme = ColorTheme(theme_name)
             self.theme = new_theme
             return self.init_colors()
         except ValueError:
             return False
-    
+
     def get_available_themes(self) -> List[str]:
-        """Get list of available theme names"""
+        """Get list of available theme names - UPDATED: All 6 themes"""
         return [theme.value for theme in ColorTheme]
 
 # =============================================================================

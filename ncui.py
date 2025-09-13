@@ -276,77 +276,83 @@ class NCursesUIController:
             return 1
 
     def _ensure_cursor_in_input(self):
-        """FIXED: Cursor positioning without prompt offset"""
+        """CORRECTED: Robust cursor positioning with processing state check"""
         try:
-            if not self.processing and self.input_window and self.current_layout:
-                # Get cursor position from multi-line input
-                cursor_line, cursor_col = self.multi_input.get_cursor_position()
+            # CRITICAL: Only position cursor when not processing AND input window exists
+            if self.processing or not self.input_window or not self.current_layout:
+                return
 
-                # FIXED: Calculate visual position with ONLY border offset (no prompt)
-                visual_x = 1 + cursor_col  # +1 for left border only
-                visual_y = 1 + cursor_line  # +1 for top border
+            # Get cursor position from multi-line input
+            cursor_line, cursor_col = self.multi_input.get_cursor_position()
 
-                # Clamp to layout boundaries (account for borders)
-                max_width = self.current_layout.input_box.inner_width
-                max_height = self.current_layout.input_box.inner_height
+            # Calculate visual position with border offset
+            visual_x = 1 + cursor_col  # +1 for left border
+            visual_y = 1 + cursor_line  # +1 for top border
 
-                visual_x = min(visual_x, max_width)
-                visual_y = min(visual_y, max_height)
+            # Clamp to layout boundaries
+            max_width = self.current_layout.input_box.inner_width
+            max_height = self.current_layout.input_box.inner_height
 
-                # Set cursor position
+            visual_x = min(visual_x, max_width)
+            visual_y = min(visual_y, max_height)
+
+            # Position cursor with error handling
+            try:
                 self.input_window.move(visual_y, visual_x)
-                self.input_window.noutrefresh()
-                curses.doupdate()
                 curses.curs_set(1)  # Make cursor visible
+                curses.doupdate()   # Force screen update
+            except curses.error:
+                # Fallback positioning
+                try:
+                    self.input_window.move(1, 1)
+                    curses.curs_set(1)
+                    curses.doupdate()
+                except curses.error:
+                    pass
 
-        except curses.error:
-            # Ignore cursor positioning errors
-            pass
         except Exception as e:
             self._log_error(f"Cursor positioning error: {e}")
 
     def _handle_user_input(self, user_input: str):
-        """FIXED: Handle user input with immediate display update capability"""
+        """CORRECTED: Simplified user input handling with proper flow"""
         try:
-            # Clear input FIRST for both commands and regular input
+            # 1. Clear input field IMMEDIATELY
             self.multi_input.clear()
             self._refresh_input_window()
-            self._ensure_cursor_in_input()
 
-            # Check for commands
+            # 2. Handle commands locally (these don't go to orchestrator)
             if user_input.startswith('/'):
                 if self._handle_command(user_input):
-                    # Command was handled - input already cleared above
+                    self._ensure_cursor_in_input()
                     return
 
             self._log_debug("Submitting user input")
 
-            # Set processing state
+            # 3. Set processing state and show "Processing..."
             self.processing = True
             self.status_message = "Processing..."
             self._refresh_status_window()
 
-            # Send to orchestrator
+            # 4. Send to orchestrator (which now handles immediate user echo)
             if self.callback_handler:
                 result = self.callback_handler("user_input", {"input": user_input})
 
-                # FIXED: Force immediate display update after orchestrator processes
-                self._process_display_updates()
+                # Don't need to handle response here - the background processing
+                # in orchestrator will make messages available via get_messages
 
-                if result and result.get("success", False):
-                    self.status_message = "Ready"
-                else:
-                    error_msg = result.get("error", "Unknown error") if result else "No response"
-                    self.status_message = f"Error: {error_msg}"
             else:
-                self.status_message = "No orchestrator connection"
+                self.status_message = "No orchestrator connection available"
+                self.processing = False
+                self._refresh_status_window()
+                self._ensure_cursor_in_input()
 
         except Exception as e:
-            self._log_error(f"Input submission error: {e}")
-            self.status_message = "Error occurred"
-        finally:
+            # Error handling - ensure we reset processing state
             self.processing = False
+            self.status_message = f"Input error: {e}"
             self._refresh_status_window()
+            self._ensure_cursor_in_input()
+            self._log_error(f"Input handling error: {e}")
 
     def _handle_scroll(self, key: int):
         """Handle page up/down scrolling - FIXED: Use correct ScrollManager methods"""
@@ -403,41 +409,42 @@ class NCursesUIController:
 # Chunk 4/6 - ncui.py - Display and Message Management (Comprehensive Fix)
 
     def _add_message(self, content: str, message_type: str, message_id: str = None):
-        """Add message to display buffer with deduplication"""
+        """FINAL: Add message with enhanced deduplication to prevent double echo"""
         try:
             # Generate message ID if not provided
             if not message_id:
-                message_id = f"{message_type}_{time.time()}_{len(content)}"
-            
-            # RESTORED: Check if message already displayed
-            if message_id in self.displayed_message_ids:
-                return  # Skip duplicate messages
-            
-            # Create DisplayMessage object
-            message = DisplayMessage(
-                content=content,
-                msg_type=message_type
-            )
+                timestamp = time.time()
+                message_id = f"{message_type}_{int(timestamp * 1000000)}_{len(content)}"
+
+            # Enhanced deduplication: check both ID and content hash
+            content_hash = f"{message_type}_{hash(content) % 100000}"
+
+            # Skip if already displayed by ID or content
+            if message_id in self.displayed_message_ids or content_hash in self.displayed_message_ids:
+                return
+
+            # Create and add message
+            message = DisplayMessage(content=content, msg_type=message_type)
             message.timestamp = time.time()
 
             self.display_buffer.append(message)
             self.displayed_message_ids.add(message_id)
+            self.displayed_message_ids.add(content_hash)
 
-            # Update scroll manager with new content
+            # Update scroll and refresh
             self.scroll_manager.update_max_scroll(len(self.display_buffer))
-            self.scroll_manager.scroll_to_bottom()
+            if not self.scroll_manager.in_scrollback:
+                self.scroll_manager.auto_scroll_to_bottom()
 
+            self._refresh_output_window()
             self._log_debug(f"Added {message_type} message (ID: {message_id})")
 
         except Exception as e:
             self._log_error(f"Message addition error: {e}")
     
     def _process_display_updates(self):
-        """FIXED: Process display updates immediately when new messages arrive"""
+        """CORRECTED: Properly handle processing state transitions"""
         try:
-            # FIXED: Check for new messages every cycle (not time-limited)
-            # This ensures immediate display when model responds
-
             # Check for messages from orchestrator
             if self.callback_handler:
                 result = self.callback_handler("get_messages", {"limit": 10})
@@ -447,6 +454,7 @@ class NCursesUIController:
 
                     # Track if we added any new messages
                     new_messages_added = False
+                    assistant_message_received = False
 
                     # Add any new messages to display with deduplication
                     for msg in messages:
@@ -467,128 +475,122 @@ class NCursesUIController:
                             )
                             new_messages_added = True
 
-                    # FIXED: Refresh output immediately if new messages were added
-                    if new_messages_added:
-                        self._refresh_output_window()
-                        # Also ensure processing state is cleared
-                        if self.processing:
-                            self.processing = False
-                            self.status_message = "Ready"
-                            self._refresh_status_window()
+                            # Check if this is an assistant message (LLM response)
+                            if msg.get("type") == "assistant":
+                                assistant_message_received = True
+
+                    # CRITICAL: Clear processing state ONLY when assistant message received
+                    if new_messages_added and assistant_message_received and self.processing:
+                        self.processing = False
+                        self.status_message = "Ready"
+                        self._refresh_status_window()
+                        self._ensure_cursor_in_input()
 
         except Exception as e:
             self._log_error(f"Display update error: {e}")
     
     def _refresh_output_window(self):
-        """FIXED: Refresh the output window with proper scrollback support"""
+        """FINAL: Refresh output window with proper scrolling and auto-scroll"""
         try:
-            if not self.output_window or not self.current_layout:
+            if not self.output_window:
                 return
 
-            # Clear the window
+            height, width = self.output_window.getmaxyx()
+            display_height = height - 2
+            display_width = width - 2
+
             self.output_window.clear()
-            self._draw_borders()
+            self._draw_borders()  # Use custom themed borders
 
-            # Calculate display area (account for borders)
-            display_height = self.current_layout.output_box.inner_height
-            display_width = self.current_layout.output_box.inner_width
-
-            # FIXED: Convert messages to display lines (like legacy code)
+            # Convert messages to display lines
             all_display_lines = []
             for message in self.display_buffer:
-                # Handle timestamp
-                if hasattr(message, 'timestamp') and message.timestamp:
-                    timestamp_str = time.strftime("%H:%M:%S", time.localtime(message.timestamp))
-                else:
-                    timestamp_str = time.strftime("%H:%M:%S")
+                timestamp = time.strftime("%H:%M:%S", time.localtime(message.timestamp))
+                content_width = display_width - 12
+                if content_width < 20:
+                    content_width = 20
 
-                # Wrap message content
-                wrapped_lines = self._wrap_text(message.content, display_width - 12)
+                wrapped_lines = self._wrap_text(message.content, content_width)
 
                 for i, line in enumerate(wrapped_lines):
                     if i == 0:
-                        # First line includes timestamp
-                        display_line = f"[{timestamp_str}] {line}"
+                        display_line = f"[{timestamp}] {line}"
                     else:
-                        # Continuation lines are indented
                         display_line = f"           {line}"
-
-                    # Truncate if too long
-                    if len(display_line) > display_width:
-                        display_line = display_line[:display_width-3] + "..."
-
                     all_display_lines.append((display_line, message.msg_type))
 
-            # FIXED: Update scroll manager with total lines, not message count
+            # Update scroll manager and ensure auto-scroll works
             self.scroll_manager.update_max_scroll(len(all_display_lines))
+            self.scroll_manager.update_window_height(display_height)
 
-            # FIXED: Get visible lines based on scroll position
-            start_line = self.scroll_manager.scroll_offset
-            end_line = start_line + display_height
-            visible_lines = all_display_lines[start_line:end_line]
+            if not self.scroll_manager.in_scrollback:
+                self.scroll_manager.auto_scroll_to_bottom()
 
             # Display visible lines
-            y_pos = 1  # Start after top border
-            for display_line, message_type in visible_lines:
-                if y_pos >= display_height + 1:  # Stop before bottom border
+            start_line = self.scroll_manager.scroll_offset
+            visible_lines = all_display_lines[start_line:start_line + display_height]
+
+            for row, (display_line, msg_type) in enumerate(visible_lines):
+                if row >= display_height:
                     break
 
-                try:
-                    color_pair = self.color_manager.get_color(message_type)
-                    if color_pair and self.color_manager.colors_available:
-                        self.output_window.addstr(y_pos, 1, display_line, curses.color_pair(color_pair))
-                    else:
-                        self.output_window.addstr(y_pos, 1, display_line)
-                    y_pos += 1
+                color_pair = self._get_color_for_message_type(msg_type)
 
-                except curses.error:
-                    # Ignore drawing errors
-                    break
+                if len(display_line) > display_width:
+                    display_line = display_line[:display_width-3] + "..."
 
-            # Show scroll indicator if needed
-            if len(all_display_lines) > display_height:
-                scroll_info = f"({start_line + 1}/{len(all_display_lines)})"
                 try:
-                    self.output_window.addstr(0, display_width - len(scroll_info) - 1, scroll_info)
+                    self.output_window.addstr(row + 1, 1, display_line, color_pair)
                 except curses.error:
                     pass
 
-            self.output_window.noutrefresh()
+            # Show scroll indicators if in scrollback
+            if self.scroll_manager.in_scrollback:
+                scroll_info = self.scroll_manager.get_scroll_info()
+                if scroll_info.get("scroll_needed", False):
+                    indicator = f"({scroll_info['offset'] + 1}/{len(all_display_lines)})"
+                    try:
+                        self.output_window.addstr(0, width - len(indicator) - 1, indicator)
+                    except curses.error:
+                        pass
+
+            self.output_window.refresh()
 
         except Exception as e:
-            self._log_error(f"Output window refresh error: {e}")
+            if hasattr(self, '_log_error'):
+                self._log_error(f"Error in _refresh_output_window: {e}")
 
     def _wrap_text(self, text: str, width: int) -> List[str]:
-        """Wrap text to fit within specified width"""
+        """Wrap text to specified width, preserving word boundaries"""
         if not text:
             return [""]
-        
-        lines = []
-        for line in text.split('\n'):
-            if len(line) <= width:
-                lines.append(line)
+
+        import textwrap
+
+        # Split by existing newlines first to preserve paragraph structure
+        paragraphs = text.split('\n')
+        wrapped_lines = []
+
+        for paragraph in paragraphs:
+            if not paragraph.strip():
+                wrapped_lines.append("")  # Preserve empty lines
             else:
-                # Simple word wrapping
-                words = line.split(' ')
-                current_line = ""
-                
-                for word in words:
-                    if len(current_line + word + " ") <= width:
-                        current_line += word + " "
-                    else:
-                        if current_line:
-                            lines.append(current_line.rstrip())
-                        current_line = word + " "
-                
-                if current_line:
-                    lines.append(current_line.rstrip())
-        
-        return lines if lines else [""]
+                # Wrap each paragraph
+                paragraph_lines = textwrap.wrap(
+                    paragraph,
+                    width=width,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                    expand_tabs=False
+                )
+                wrapped_lines.extend(paragraph_lines if paragraph_lines else [""])
+
+        return wrapped_lines
 
 # Chunk 5/6 - ncui.py - Window Refresh and Drawing Methods (Comprehensive Fix)
 
     def _refresh_input_window(self):
-        """Refresh input window with borders and proper multi-line display"""
+        """CORRECTED: Input window refresh to show typed text"""
         try:
             if not self.input_window or not self.current_layout:
                 return
@@ -602,9 +604,7 @@ class NCursesUIController:
             content = self.multi_input.get_content()
             cursor_line, cursor_col = self.multi_input.get_cursor_position()
 
-            # Calculate display boundaries
-            max_display_lines = self.current_layout.input_box.inner_height
-
+            # Display content if any exists
             if content:
                 # Split content into lines for display
                 content_lines = content.split('\n')
@@ -637,7 +637,7 @@ class NCursesUIController:
             self._log_error(f"Input window refresh error: {e}")
 
     def _refresh_status_window(self):
-        """FIXED: Status window with proper alignment to match window borders"""
+        """CORRECTED: Status window without automatic cursor positioning"""
         try:
             if not self.status_window or not self.current_layout:
                 return
@@ -657,7 +657,6 @@ class NCursesUIController:
                 status_color = self.color_manager.get_color('user')
 
             try:
-                # FIXED: Start at x=1 to align with window borders instead of x=0
                 if status_color and self.color_manager.colors_available:
                     self.status_window.addstr(0, 1, status_text, curses.color_pair(status_color))
                 else:
@@ -667,8 +666,7 @@ class NCursesUIController:
 
             self.status_window.noutrefresh()
 
-            # Always ensure cursor returns to input after status update
-            self._ensure_cursor_in_input()
+            # REMOVED: Automatic cursor positioning call that was causing conflicts
 
         except Exception as e:
             self._log_error(f"Status window refresh error: {e}")
@@ -811,14 +809,14 @@ class NCursesUIController:
 # Chunk 6/6 - ncui.py - Command Handling and Cleanup Methods (Comprehensive Fix)
 
     def _handle_command(self, command: str) -> bool:
-        """RESTORED: Handle slash commands with complete functionality"""
+        """Handle slash commands with complete functionality - UPDATED: Support all 6 themes"""
         try:
             command = command.lower().strip()
-            
+
             if command == "/quit" or command == "/exit":
                 self._handle_quit()
                 return True
-                
+
             elif command == "/clear":
                 self.display_buffer.clear()
                 self.displayed_message_ids.clear()
@@ -827,31 +825,40 @@ class NCursesUIController:
                 self._add_message("Display cleared", "system")
                 self._refresh_output_window()  # Force immediate display
                 return True
-                
+
             elif command.startswith("/theme"):
                 parts = command.split()
                 if len(parts) > 1:
                     theme_name = parts[1].lower()
-                    if theme_name in ["classic", "dark", "bright"]:
-                        self.color_manager.change_theme(theme_name)
-                        self._refresh_all_windows()
-                        self._add_message(f"Theme changed to {theme_name}", "system")
-                        self._refresh_output_window()  # Force immediate display
+                    # UPDATED: Support all 6 themes instead of hardcoded 3
+                    available_themes = self.color_manager.get_available_themes()
+                    if theme_name in available_themes:
+                        if self.color_manager.change_theme(theme_name):
+                            self._refresh_all_windows()
+                            self._add_message(f"Theme changed to {theme_name}", "system")
+                            self._refresh_output_window()  # Force immediate display
+                        else:
+                            self._add_message(f"Failed to initialize {theme_name} theme", "error")
+                            self._refresh_output_window()  # Force immediate display
                     else:
-                        self._add_message(f"Unknown theme: {parts[1]}. Available: classic, dark, bright", "error")
+                        available_list = ", ".join(available_themes)
+                        self._add_message(f"Unknown theme: {parts[1]}. Available: {available_list}", "error")
                         self._refresh_output_window()  # Force immediate display
                 else:
-                    self._add_message("Usage: /theme <classic|dark|bright>", "system")
+                    available_themes = self.color_manager.get_available_themes()
+                    available_list = ", ".join(available_themes)
+                    self._add_message(f"Usage: /theme <{available_list}>", "system")
                     self._refresh_output_window()  # Force immediate display
                 return True
-                
+
             elif command == "/help":
                 help_text = [
                     "Available commands:",
                     "/help - Show this help",
-                    "/quit - Exit the application", 
+                    "/quit - Exit the application",
                     "/clear - Clear message history",
-                    "/theme <name> - Change color theme (classic/dark/bright)",
+                    "/theme <name> - Change color theme",
+                    "  Available themes: classic, dark, bright, nord, solarized, monokai",
                     "/stats - Show system statistics",
                     "/analyze - Trigger immediate analysis"
                 ]
@@ -859,7 +866,7 @@ class NCursesUIController:
                     self._add_message(line, "system")
                     self._refresh_output_window()  # Force immediate display
                 return True
-                
+
             elif command == "/stats":
                 if self.callback_handler:
                     result = self.callback_handler("get_stats", {})
@@ -876,31 +883,27 @@ class NCursesUIController:
                     self._add_message("No orchestrator connection available", "error")
                     self._refresh_output_window()  # Force immediate display
                 return True
-                
+
             elif command == "/analyze":
                 if self.callback_handler:
-                    result = self.callback_handler("analyze_now", {})
+                    result = self.callback_handler("force_analysis", {})
                     if result and result.get("success", False):
-                        self._add_message("Analysis triggered successfully", "system")
+                        self._add_message("Analysis triggered", "system")
                         self._refresh_output_window()  # Force immediate display
                     else:
-                        error_msg = result.get("error", "Unknown error") if result else "No response"
-                        self._add_message(f"Analysis failed: {error_msg}", "error")
+                        self._add_message("Failed to trigger analysis", "error")
                         self._refresh_output_window()  # Force immediate display
                 else:
                     self._add_message("No orchestrator connection available", "error")
                     self._refresh_output_window()  # Force immediate display
                 return True
-                
-            else:
-                self._add_message(f"Unknown command: {command}. Type /help for available commands.", "error")
-                self._refresh_output_window()  # Force immediate display
-                return True
-                
+
+            return False
+
         except Exception as e:
             self._log_error(f"Command handling error: {e}")
-            self._add_message(f"Error processing command: {e}", "error")
-            self._refresh_output_window()  # Force immediate display
+            self._add_message(f"Command error: {e}", "error")
+            self._refresh_output_window()
             return True
     
     def _cleanup(self):
@@ -989,6 +992,18 @@ class NCursesUIController:
             self._refresh_all_windows()
         except Exception as e:
             self._log_error(f"Force refresh error: {e}")
+
+    def _get_color_for_message_type(self, msg_type: str) -> int:
+        """Get color pair for message type"""
+        # This method should return appropriate color pairs based on your color manager
+        # Placeholder implementation - adjust based on your ColorManager setup
+        color_map = {
+            'user': curses.color_pair(1),      # User messages
+            'assistant': curses.color_pair(2), # LLM responses
+            'system': curses.color_pair(3),    # System messages
+            'error': curses.color_pair(4),     # Error messages
+        }
+        return color_map.get(msg_type, curses.color_pair(0))
 
 # RESTORED: Complete NCursesUIController class with full functionality
 # - Message display with deduplication
