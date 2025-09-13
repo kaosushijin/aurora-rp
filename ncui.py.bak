@@ -40,12 +40,13 @@ class NCursesUIController:
         self.status_window = None
         self.current_layout = None
 
-        # UI components
+        # UI components - RESTORED: Complete initialization
         self.multi_input = MultiLineInput()
         self.scroll_manager = ScrollManager(0)  # Updated after layout calculation
 
-        # REMOVED: display_buffer and displayed_message_ids
-        # Messages now come from orchestrator on-demand
+        # Display state - RESTORED: Complete message tracking system
+        self.display_buffer = []
+        self.displayed_message_ids = set()  # CRITICAL: Track displayed messages for deduplication
         self.status_message = "Ready"
         self.processing = False
 
@@ -178,21 +179,29 @@ class NCursesUIController:
             return False
 
     def _populate_welcome_content(self):
-        """FIXED: Welcome message goes through orchestrator like .bak version"""
+        """RESTORED: Add initial welcome message to prevent blank screen"""
         try:
-            # Instead of adding to local buffer, add to orchestrator memory
-            if self.callback_handler:
-                # Send welcome message as system message through orchestrator
-                result = self.callback_handler("add_system_message", {
-                    "content": "Welcome to DevName RPG Client",
-                    "message_type": "system"
-                })
-
-                # Force initial display refresh to show welcome message
-                self._process_display_updates()
-
+            welcome_time = time.strftime("%H:%M:%S")
+            welcome_msg = f"[{welcome_time}] Welcome to DevName RPG Client"
+            
+            # Create welcome message object
+            welcome_display_msg = DisplayMessage(
+                content="Welcome to DevName RPG Client",
+                msg_type="system"
+            )
+            welcome_display_msg.timestamp = time.time()
+            
+            # Add to display buffer with unique ID tracking
+            message_id = f"welcome_{welcome_display_msg.timestamp}"
+            self.display_buffer.append(welcome_display_msg)
+            self.displayed_message_ids.add(message_id)
+            
+            # Update scroll manager
+            self.scroll_manager.update_max_scroll(len(self.display_buffer))
+            self.scroll_manager.scroll_to_bottom()
+            
             self._log_debug("Welcome content populated")
-
+            
         except Exception as e:
             self._log_error(f"Welcome content population error: {e}")
 
@@ -268,7 +277,7 @@ class NCursesUIController:
             return 1
 
     def _ensure_cursor_in_input(self):
-        """FIXED: Restore .bak version cursor positioning logic"""
+        """CORRECTED: Robust cursor positioning with processing state check"""
         try:
             # CRITICAL: Only position cursor when not processing AND input window exists
             if self.processing or not self.input_window or not self.current_layout:
@@ -306,7 +315,7 @@ class NCursesUIController:
             self._log_error(f"Cursor positioning error: {e}")
 
     def _handle_user_input(self, user_input: str):
-        """FIXED: Restore proper processing state management from .bak version"""
+        """CORRECTED: Simplified user input handling with proper flow"""
         try:
             # 1. Clear input field IMMEDIATELY
             self.multi_input.clear()
@@ -325,18 +334,12 @@ class NCursesUIController:
             self.status_message = "Processing..."
             self._refresh_status_window()
 
-            # CRITICAL: Hide cursor during processing like .bak version
-            try:
-                curses.curs_set(0)
-            except curses.error:
-                pass
-
-            # 4. Send to orchestrator (which handles immediate user echo)
+            # 4. Send to orchestrator (which now handles immediate user echo)
             if self.callback_handler:
                 result = self.callback_handler("user_input", {"input": user_input})
 
-                # Force immediate display update to show user echo
-                self._process_display_updates()
+                # Don't need to handle response here - the background processing
+                # in orchestrator will make messages available via get_messages
 
             else:
                 self.status_message = "No orchestrator connection available"
@@ -406,32 +409,89 @@ class NCursesUIController:
 
 # Chunk 4/6 - ncui.py - Display and Message Management (Comprehensive Fix)
 
-    def _process_display_updates(self):
-        """FIXED: Simplified display updates that force immediate refresh"""
+    def _add_message(self, content: str, message_type: str, message_id: str = None):
+        """FINAL: Add message with enhanced deduplication to prevent double echo"""
         try:
-            # Force refresh of output window to get latest messages
-            self._refresh_output_window()
+            # Generate message ID if not provided
+            if not message_id:
+                timestamp = time.time()
+                message_id = f"{message_type}_{int(timestamp * 1000000)}_{len(content)}"
 
-            # Check if we need to clear processing state by looking at recent messages
-            if self.processing and self.callback_handler:
-                result = self.callback_handler("get_messages", {"limit": 5})
+            # Enhanced deduplication: check both ID and content hash
+            content_hash = f"{message_type}_{hash(content) % 100000}"
+
+            # Skip if already displayed by ID or content
+            if message_id in self.displayed_message_ids or content_hash in self.displayed_message_ids:
+                return
+
+            # Create and add message
+            message = DisplayMessage(content=content, msg_type=message_type)
+            message.timestamp = time.time()
+
+            self.display_buffer.append(message)
+            self.displayed_message_ids.add(message_id)
+            self.displayed_message_ids.add(content_hash)
+
+            # Update scroll and refresh
+            self.scroll_manager.update_max_scroll(len(self.display_buffer))
+            if not self.scroll_manager.in_scrollback:
+                self.scroll_manager.auto_scroll_to_bottom()
+
+            self._refresh_output_window()
+            self._log_debug(f"Added {message_type} message (ID: {message_id})")
+
+        except Exception as e:
+            self._log_error(f"Message addition error: {e}")
+    
+    def _process_display_updates(self):
+        """CORRECTED: Properly handle processing state transitions"""
+        try:
+            # Check for messages from orchestrator
+            if self.callback_handler:
+                result = self.callback_handler("get_messages", {"limit": 10})
+
                 if result and result.get("success", False):
                     messages = result.get("messages", [])
 
-                    # Look for recent assistant message to clear processing
-                    for msg in messages[-3:]:  # Check last 3 messages
-                        if msg.get("type") == "assistant":
-                            self.processing = False
-                            self.status_message = "Ready"
-                            self._refresh_status_window()
-                            self._ensure_cursor_in_input()
-                            break
+                    # Track if we added any new messages
+                    new_messages_added = False
+                    assistant_message_received = False
+
+                    # Add any new messages to display with deduplication
+                    for msg in messages:
+                        # Create unique message ID
+                        msg_id = msg.get("id")
+                        if not msg_id:
+                            content = msg.get("content", "")
+                            msg_type = msg.get("type", "unknown")
+                            timestamp = msg.get("timestamp", time.time())
+                            msg_id = f"{msg_type}_{timestamp}_{hash(content) % 10000}"
+
+                        # Only add if we haven't seen this message ID before
+                        if msg_id not in self.displayed_message_ids:
+                            self._add_message(
+                                msg.get("content", ""),
+                                msg.get("type", "unknown"),
+                                msg_id
+                            )
+                            new_messages_added = True
+
+                            # Check if this is an assistant message (LLM response)
+                            if msg.get("type") == "assistant":
+                                assistant_message_received = True
+
+                    # CRITICAL: Clear processing state ONLY when assistant message received
+                    if new_messages_added and assistant_message_received and self.processing:
+                        self.processing = False
+                        self.status_message = "Ready"
+                        self._refresh_status_window()
+                        self._ensure_cursor_in_input()
 
         except Exception as e:
             self._log_error(f"Display update error: {e}")
-
-    def _refresh_output_with_messages(self, messages: List[Dict]):
-        """STATELESS: Render output window directly from message list"""
+    
+    def _refresh_output_window(self):
+        """FINAL: Refresh output window with proper scrolling and auto-scroll"""
         try:
             if not self.output_window:
                 return
@@ -441,38 +501,33 @@ class NCursesUIController:
             display_width = width - 2
 
             self.output_window.clear()
-            self._draw_borders()
+            self._draw_borders()  # Use custom themed borders
 
             # Convert messages to display lines
             all_display_lines = []
-            for message in messages:
-                # Convert orchestrator message format to display format
-                timestamp = time.strftime("%H:%M:%S", time.localtime(message.get("timestamp", time.time())))
-                content = message.get("content", "")
-                msg_type = message.get("type", "unknown")
-
+            for message in self.display_buffer:
+                timestamp = time.strftime("%H:%M:%S", time.localtime(message.timestamp))
                 content_width = display_width - 12
                 if content_width < 20:
                     content_width = 20
 
-                wrapped_lines = self._wrap_text(content, content_width)
+                wrapped_lines = self._wrap_text(message.content, content_width)
 
                 for i, line in enumerate(wrapped_lines):
                     if i == 0:
                         display_line = f"[{timestamp}] {line}"
                     else:
                         display_line = f"           {line}"
-                    all_display_lines.append((display_line, msg_type))
+                    all_display_lines.append((display_line, message.msg_type))
 
-            # Update scroll manager with current message count
+            # Update scroll manager and ensure auto-scroll works
             self.scroll_manager.update_max_scroll(len(all_display_lines))
             self.scroll_manager.update_window_height(display_height)
 
-            # Auto-scroll to bottom unless user is in scrollback
             if not self.scroll_manager.in_scrollback:
                 self.scroll_manager.auto_scroll_to_bottom()
 
-            # Display visible lines based on scroll position
+            # Display visible lines
             start_line = self.scroll_manager.scroll_offset
             visible_lines = all_display_lines[start_line:start_line + display_height]
 
@@ -503,8 +558,9 @@ class NCursesUIController:
             self.output_window.refresh()
 
         except Exception as e:
-            self._log_error(f"Error in _refresh_output_with_messages: {e}")
-    
+            if hasattr(self, '_log_error'):
+                self._log_error(f"Error in _refresh_output_window: {e}")
+
     def _wrap_text(self, text: str, width: int) -> List[str]:
         """Wrap text to specified width, preserving word boundaries"""
         if not text:
@@ -754,7 +810,7 @@ class NCursesUIController:
 # Chunk 6/6 - ncui.py - Command Handling and Cleanup Methods (Comprehensive Fix)
 
     def _handle_command(self, command: str) -> bool:
-        """FIXED: Use stateless approach but force immediate display updates"""
+        """Handle slash commands with complete functionality - UPDATED: Support all 6 themes"""
         try:
             command = command.lower().strip()
 
@@ -763,54 +819,37 @@ class NCursesUIController:
                 return True
 
             elif command == "/clear":
-                # Clear through orchestrator instead of local buffer
-                if self.callback_handler:
-                    result = self.callback_handler("clear_memory", {})
-                    if result and result.get("success", False):
-                        # Reset scroll manager and force refresh
-                        self.scroll_manager = ScrollManager(self.current_layout.output_box.inner_height)
-                        self._process_display_updates()  # Force immediate refresh
+                self.display_buffer.clear()
+                self.displayed_message_ids.clear()
+                self.scroll_manager = ScrollManager(self.current_layout.output_box.inner_height)
+                self._refresh_output_window()
+                self._add_message("Display cleared", "system")
+                self._refresh_output_window()  # Force immediate display
                 return True
 
             elif command.startswith("/theme"):
                 parts = command.split()
                 if len(parts) > 1:
                     theme_name = parts[1].lower()
+                    # UPDATED: Support all 6 themes instead of hardcoded 3
                     available_themes = self.color_manager.get_available_themes()
                     if theme_name in available_themes:
                         if self.color_manager.change_theme(theme_name):
                             self._refresh_all_windows()
-                            # Add system message through orchestrator
-                            if self.callback_handler:
-                                self.callback_handler("add_system_message", {
-                                    "content": f"Theme changed to {theme_name}",
-                                    "message_type": "system"
-                                })
-                                self._process_display_updates()
+                            self._add_message(f"Theme changed to {theme_name}", "system")
+                            self._refresh_output_window()  # Force immediate display
                         else:
-                            if self.callback_handler:
-                                self.callback_handler("add_system_message", {
-                                    "content": f"Failed to initialize {theme_name} theme",
-                                    "message_type": "system"
-                                })
-                                self._process_display_updates()
+                            self._add_message(f"Failed to initialize {theme_name} theme", "error")
+                            self._refresh_output_window()  # Force immediate display
                     else:
                         available_list = ", ".join(available_themes)
-                        if self.callback_handler:
-                            self.callback_handler("add_system_message", {
-                                "content": f"Unknown theme: {parts[1]}. Available: {available_list}",
-                                "message_type": "system"
-                            })
-                            self._process_display_updates()
+                        self._add_message(f"Unknown theme: {parts[1]}. Available: {available_list}", "error")
+                        self._refresh_output_window()  # Force immediate display
                 else:
                     available_themes = self.color_manager.get_available_themes()
                     available_list = ", ".join(available_themes)
-                    if self.callback_handler:
-                        self.callback_handler("add_system_message", {
-                            "content": f"Usage: /theme <{available_list}>",
-                            "message_type": "system"
-                        })
-                        self._process_display_updates()
+                    self._add_message(f"Usage: /theme <{available_list}>", "system")
+                    self._refresh_output_window()  # Force immediate display
                 return True
 
             elif command == "/help":
@@ -825,12 +864,8 @@ class NCursesUIController:
                     "/analyze - Trigger immediate analysis"
                 ]
                 for line in help_text:
-                    if self.callback_handler:
-                        self.callback_handler("add_system_message", {
-                            "content": line,
-                            "message_type": "system"
-                        })
-                self._process_display_updates()  # Show all help text
+                    self._add_message(line, "system")
+                    self._refresh_output_window()  # Force immediate display
                 return True
 
             elif command == "/stats":
@@ -838,53 +873,38 @@ class NCursesUIController:
                     result = self.callback_handler("get_stats", {})
                     if result and result.get("success", False):
                         stats = result.get("stats", {})
-                        self.callback_handler("add_system_message", {
-                            "content": "=== System Statistics ===",
-                            "message_type": "system"
-                        })
+                        self._add_message("=== System Statistics ===", "system")
                         for key, value in stats.items():
-                            self.callback_handler("add_system_message", {
-                                "content": f"{key}: {value}",
-                                "message_type": "system"
-                            })
-                        self._process_display_updates()
+                            self._add_message(f"{key}: {value}", "system")
+                            self._refresh_output_window()  # Force immediate display
                     else:
-                        self.callback_handler("add_system_message", {
-                            "content": "Failed to get system statistics",
-                            "message_type": "system"
-                        })
-                        self._process_display_updates()
+                        self._add_message("Failed to get system statistics", "error")
+                        self._refresh_output_window()  # Force immediate display
                 else:
-                    # Fallback when no orchestrator
-                    pass
+                    self._add_message("No orchestrator connection available", "error")
+                    self._refresh_output_window()  # Force immediate display
                 return True
 
             elif command == "/analyze":
                 if self.callback_handler:
                     result = self.callback_handler("force_analysis", {})
                     if result and result.get("success", False):
-                        self.callback_handler("add_system_message", {
-                            "content": "Analysis triggered",
-                            "message_type": "system"
-                        })
+                        self._add_message("Analysis triggered", "system")
+                        self._refresh_output_window()  # Force immediate display
                     else:
-                        self.callback_handler("add_system_message", {
-                            "content": "Failed to trigger analysis",
-                            "message_type": "system"
-                        })
-                    self._process_display_updates()
+                        self._add_message("Failed to trigger analysis", "error")
+                        self._refresh_output_window()  # Force immediate display
+                else:
+                    self._add_message("No orchestrator connection available", "error")
+                    self._refresh_output_window()  # Force immediate display
                 return True
 
             return False
 
         except Exception as e:
             self._log_error(f"Command handling error: {e}")
-            if self.callback_handler:
-                self.callback_handler("add_system_message", {
-                    "content": f"Command error: {e}",
-                    "message_type": "system"
-                })
-                self._process_display_updates()
+            self._add_message(f"Command error: {e}", "error")
+            self._refresh_output_window()
             return True
     
     def _cleanup(self):
@@ -921,13 +941,11 @@ class NCursesUIController:
             self._log_error(f"Shutdown error: {e}")
     
     def display_message(self, content: str, message_type: str = "system"):
-        """SIMPLIFIED: Display message through orchestrator"""
+        """External method to display a message"""
         try:
-            if self.callback_handler:
-                self.callback_handler("add_system_message", {
-                    "content": content,
-                    "message_type": message_type
-                })
+            self._add_message(content, message_type)
+            self._refresh_all_windows()
+            
         except Exception as e:
             self._log_error(f"External message display error: {e}")
 
@@ -962,13 +980,10 @@ class NCursesUIController:
             self._log_error(f"Clear input error: {e}")
 
     def add_system_message(self, message: str):
-        """SIMPLIFIED: Add system message through orchestrator"""
+        """Add a system message to display"""
         try:
-            if self.callback_handler:
-                self.callback_handler("add_system_message", {
-                    "content": message,
-                    "message_type": "system"
-                })
+            self._add_message(message, "system")
+            self._refresh_output_window()
         except Exception as e:
             self._log_error(f"Add system message error: {e}")
 
@@ -980,110 +995,23 @@ class NCursesUIController:
             self._log_error(f"Force refresh error: {e}")
 
     def _get_color_for_message_type(self, msg_type: str) -> int:
-        """FIXED: Return curses color pairs instead of color manager strings"""
-        try:
-            if not self.color_manager or not self.color_manager.colors_available:
-                return 0  # Default no-color
+        """Get color pair for message type"""
+        # This method should return appropriate color pairs based on your color manager
+        # Placeholder implementation - adjust based on your ColorManager setup
+        color_map = {
+            'user': curses.color_pair(1),      # User messages
+            'assistant': curses.color_pair(2), # LLM responses
+            'system': curses.color_pair(3),    # System messages
+            'error': curses.color_pair(4),     # Error messages
+        }
+        return color_map.get(msg_type, curses.color_pair(0))
 
-            # Map message types to color manager color names
-            color_name_map = {
-                'user': 'user',
-                'assistant': 'assistant',
-                'system': 'system',
-                'error': 'error'
-            }
-
-            # Get color name and convert to curses color pair
-            color_name = color_name_map.get(msg_type, 'user')
-            color_id = self.color_manager.get_color(color_name)
-
-            if color_id and isinstance(color_id, int):
-                return curses.color_pair(color_id)
-            else:
-                return 0  # Safe fallback - no color
-
-        except Exception as e:
-            self._log_error(f"Color lookup error for {msg_type}: {e}")
-            return 0  # Safe fallback
-
-    def _refresh_output_window(self):
-        """FIXED: Use working .bak version display logic with stateless message fetching"""
-        try:
-            if not self.output_window:
-                return
-
-            height, width = self.output_window.getmaxyx()
-            display_height = height - 2
-            display_width = width - 2
-
-            self.output_window.clear()
-            self._draw_borders()
-
-            # Get current messages from orchestrator instead of local buffer
-            messages = []
-            if self.callback_handler:
-                result = self.callback_handler("get_messages", {"limit": 50})
-                if result and result.get("success", False):
-                    messages = result.get("messages", [])
-
-            # Convert messages to display lines (like .bak version)
-            all_display_lines = []
-            for message in messages:
-                timestamp = time.strftime("%H:%M:%S", time.localtime(message.get("timestamp", time.time())))
-                content = message.get("content", "")
-                msg_type = message.get("type", "unknown")
-
-                content_width = display_width - 12
-                if content_width < 20:
-                    content_width = 20
-
-                wrapped_lines = self._wrap_text(content, content_width)
-
-                for i, line in enumerate(wrapped_lines):
-                    if i == 0:
-                        display_line = f"[{timestamp}] {line}"
-                    else:
-                        display_line = f"           {line}"
-                    all_display_lines.append((display_line, msg_type))
-
-            # Update scroll manager with current line count
-            self.scroll_manager.update_max_scroll(len(all_display_lines))
-            self.scroll_manager.update_window_height(display_height)
-
-            # Auto-scroll to bottom unless user is in scrollback
-            if not self.scroll_manager.in_scrollback:
-                self.scroll_manager.auto_scroll_to_bottom()
-
-            # Display visible lines based on scroll position
-            start_line = self.scroll_manager.scroll_offset
-            visible_lines = all_display_lines[start_line:start_line + display_height]
-
-            for row, (display_line, msg_type) in enumerate(visible_lines):
-                if row >= display_height:
-                    break
-
-                color_pair = self._get_color_for_message_type(msg_type)
-
-                if len(display_line) > display_width:
-                    display_line = display_line[:display_width-3] + "..."
-
-                try:
-                    self.output_window.addstr(row + 1, 1, display_line, color_pair)
-                except curses.error:
-                    pass
-
-            # Show scroll indicators if in scrollback
-            if self.scroll_manager.in_scrollback:
-                scroll_info = self.scroll_manager.get_scroll_info()
-                if scroll_info.get("scroll_needed", False):
-                    indicator = f"({scroll_info['offset'] + 1}/{len(all_display_lines)})"
-                    try:
-                        self.output_window.addstr(0, width - len(indicator) - 1, indicator)
-                    except curses.error:
-                        pass
-
-            self.output_window.refresh()
-
-        except Exception as e:
-            self._log_error(f"Error in _refresh_output_window: {e}")
-
+# RESTORED: Complete NCursesUIController class with full functionality
+# - Message display with deduplication
+# - Proper cursor positioning
+# - Complete input handling
+# - Color theme support
+# - Command system
+# - Terminal resize handling
+# - Error handling and logging
+# - External interface methods

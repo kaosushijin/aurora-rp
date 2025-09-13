@@ -1,4 +1,5 @@
 # Chunk 1 of 1 - Complete remodularized mcp.py preserving Node.js ollama MCP server configuration
+# CRITICAL: Before modifying this module, READ genai.txt for hub-and-spoke architecture rules, module interconnects, and orchestrator coordination patterns. Violating these principles will break the remodularization.
 
 #!/usr/bin/env python3
 """

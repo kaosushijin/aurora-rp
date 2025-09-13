@@ -262,89 +262,29 @@ class Orchestrator:
     def _handle_ui_callback(self, action: str, data: Dict[str, Any]) -> Any:
         """
         Handle callbacks from UI controller
-        UPDATED: Added support for stateless UI operations
+        This is the main coordination point for user actions
         """
         try:
             self._log_debug(f"Processing UI callback: {action}")
-
+            
             if action == "user_input":
                 return self._process_user_input(data)
             elif action == "get_messages":
                 return self._get_message_history(data)
-            elif action == "add_system_message":  # NEW
-                return self._add_system_message(data)
             elif action == "clear_memory":
                 return self._clear_memory()
             elif action == "get_stats":
                 return self._get_system_stats()
-            elif action == "analyze_now" or action == "force_analysis":
+            elif action == "analyze_now":
                 return self._trigger_immediate_analysis()
             elif action == "shutdown":
                 return self._handle_shutdown()
             else:
                 self._log_error(f"Unknown UI callback action: {action}")
                 return {"success": False, "error": f"Unknown action: {action}"}
-
+                
         except Exception as e:
             self._log_error(f"UI callback handling failed for {action}: {e}")
-            return {"success": False, "error": str(e)}
-
-    def _add_system_message(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Add system message to memory
-        NEW: Support for stateless UI to add messages through orchestrator
-        """
-        try:
-            content = data.get("content", "")
-            message_type = data.get("message_type", "system")
-
-            if not content:
-                return {"success": False, "error": "Empty message content"}
-
-            # Convert message type string to enum
-            if message_type == "system":
-                msg_type_enum = MessageType.SYSTEM
-            elif message_type == "user":
-                msg_type_enum = MessageType.USER
-            elif message_type == "assistant":
-                msg_type_enum = MessageType.ASSISTANT
-            else:
-                msg_type_enum = MessageType.SYSTEM  # Default fallback
-
-            # Store message in memory
-            if self.memory_manager:
-                self.memory_manager.add_message(content, msg_type_enum)
-                self.state.message_count += 1
-                self._log_debug(f"Added {message_type} message: {content[:50]}...")
-
-            return {"success": True, "message_count": self.state.message_count}
-
-        except Exception as e:
-            self._log_error(f"Add system message failed: {e}")
-            return {"success": False, "error": str(e)}
-
-    def _clear_memory(self) -> Dict[str, Any]:
-        """
-        Clear conversation memory
-        UPDATED: Support for stateless UI
-        """
-        try:
-            if self.memory_manager:
-                # Clear all messages
-                self.memory_manager.messages.clear()
-                self.state.message_count = 0
-
-                # Save empty state
-                self.memory_manager._save_to_file()
-
-                self._log_debug("Memory cleared")
-
-                return {"success": True, "message": "Memory cleared"}
-            else:
-                return {"success": False, "error": "Memory manager not available"}
-
-        except Exception as e:
-            self._log_error(f"Clear memory failed: {e}")
             return {"success": False, "error": str(e)}
     
     def _process_user_input(self, data: Dict[str, Any]) -> Dict[str, Any]:
