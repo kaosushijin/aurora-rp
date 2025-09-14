@@ -287,8 +287,8 @@ class Orchestrator:
         """
         try:
             # Only log non-routine callbacks to reduce spam
-            if callback_type not in ["get_messages", "get_display_status"]:
-                self._log_debug(f"Processing UI callback: {callback_type}")
+            if action not in ["get_messages", "get_display_status"]:
+                self._log_debug(f"Processing UI callback: {action}")
 
             if action == "user_input":
                 return self._process_user_input(data)
@@ -340,8 +340,8 @@ class Orchestrator:
                 self.state.message_count += 1
 
                 # CRITICAL: Force immediate save to ensure message is available for get_messages
-                if hasattr(self.memory_manager, '_save_to_file'):
-                    self.memory_manager._save_to_file()
+                if hasattr(self.memory_manager, '_auto_save'):
+                    self.memory_manager._auto_save()
 
                 self._log_debug(f"Added {message_type} message: {content[:50]}...")
 
@@ -363,7 +363,7 @@ class Orchestrator:
                 self.state.message_count = 0
 
                 # Save empty state
-                self.memory_manager._save_to_file()
+                self.memory_manager._auto_save()
 
                 self._log_debug("Memory cleared")
 
@@ -398,9 +398,9 @@ class Orchestrator:
                 self.state.message_count += 1
 
                 # CRITICAL FIX: Force immediate save/commit to ensure message is available for get_messages
-                if hasattr(self.memory_manager, '_save_to_file'):
+                if hasattr(self.memory_manager, '_auto_save'):
                     try:
-                        self.memory_manager._save_to_file()
+                        self.memory_manager._auto_save()
                         self._log_debug("User message saved and committed to memory")
                     except Exception as save_error:
                         self._log_error(f"Failed to save user message: {save_error}")
@@ -426,9 +426,9 @@ class Orchestrator:
                             self.state.message_count += 1
 
                             # Force save of assistant response too
-                            if hasattr(self.memory_manager, '_save_to_file'):
+                            if hasattr(self.memory_manager, '_auto_save'):
                                 try:
-                                    self.memory_manager._save_to_file()
+                                    self.memory_manager._auto_save()
                                 except Exception as save_error:
                                     self._log_error(f"Failed to save assistant response: {save_error}")
 
@@ -447,9 +447,9 @@ class Orchestrator:
                         error_msg = f"LLM Error: {llm_response.get('error', 'Unknown error')}"
                         if self.memory_manager:
                             self.memory_manager.add_message(error_msg, MessageType.SYSTEM)
-                            if hasattr(self.memory_manager, '_save_to_file'):
+                            if hasattr(self.memory_manager, '_auto_save'):
                                 try:
-                                    self.memory_manager._save_to_file()
+                                    self.memory_manager._auto_save()
                                 except Exception:
                                     pass
 
@@ -460,9 +460,9 @@ class Orchestrator:
                     # Store error in memory so UI can display it
                     if self.memory_manager:
                         self.memory_manager.add_message(f"Error: {str(e)}", MessageType.SYSTEM)
-                        if hasattr(self.memory_manager, '_save_to_file'):
+                        if hasattr(self.memory_manager, '_auto_save'):
                             try:
-                                self.memory_manager._save_to_file()
+                                self.memory_manager._auto_save()
                             except Exception:
                                 pass
 
@@ -739,7 +739,7 @@ class Orchestrator:
             self._log_debug("Clearing conversation memory")
             
             # Clear memory and reset counters
-            self.memory_manager.clear_conversation()
+            self.memory_manager.clear_memory()
             self.state.message_count = 0
             self.state.last_analysis_count = 0
             self.state.analysis_results = {}
