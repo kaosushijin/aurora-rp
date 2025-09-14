@@ -806,7 +806,7 @@ class MultiLineInput:
                 return True
 
         # FIXED: HOME key with your terminal's actual code
-        elif key == 262:  # Your terminal's HOME key
+        elif key == curses.KEY_HOME:  # Your terminal's HOME key
             print(f"DEBUG: HOME key detected (code {key})", file=sys.stderr)
             # Move to beginning of input buffer
             self.cursor_line = 0
@@ -816,7 +816,7 @@ class MultiLineInput:
             return True
 
         # FIXED: END key with your terminal's actual code
-        elif key == 360:  # Your terminal's END key
+        elif key == curses.KEY_END:  # Your terminal's END key
             print(f"DEBUG: END key detected (code {key})", file=sys.stderr)
             # Move to end of input buffer
             self.cursor_line = len(self.lines) - 1
@@ -826,13 +826,13 @@ class MultiLineInput:
             return True
 
         # FIXED: Ctrl+Left Arrow with your terminal's actual code
-        elif key == 554:  # Your terminal's Ctrl+Left
+        elif key == curses.KEY_SLEFT:  # Your terminal's Ctrl+Left
             print(f"DEBUG: Ctrl+Left detected (code {key})", file=sys.stderr)
             self._jump_word_left()
             return True
 
         # FIXED: Ctrl+Right Arrow with your terminal's actual code
-        elif key == 569:  # Your terminal's Ctrl+Right
+        elif key == curses.KEY_SRIGHT:  # Your terminal's Ctrl+Right
             print(f"DEBUG: Ctrl+Right detected (code {key})", file=sys.stderr)
             self._jump_word_right()
             return True

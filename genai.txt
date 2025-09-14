@@ -1,330 +1,320 @@
 # GENAI.TXT - AI ANALYSIS REFERENCE FOR DEVNAME RPG CLIENT
 ================================================================
 
-## PROJECT SCOPE
-Terminal-based RPG storytelling client leveraging Large Language Model capabilities through MCP (Model Context Protocol). Features hub-and-spoke orchestration architecture with stateless UI controller, comprehensive semantic analysis, and responsive multi-threaded processing.
+## PROJECT OVERVIEW
+Terminal-based RPG storytelling client leveraging Large Language Models through MCP (Model Context Protocol). Features hub-and-spoke orchestration architecture, comprehensive semantic analysis pipeline, and responsive multi-threaded processing with stateless UI design.
 
-## PROGRAM FLOW ANALYSIS (Latest Update: December 2024)
+## CRITICAL ARCHITECTURE: HUB-AND-SPOKE PATTERN
 
-### Application Entry Point (main.py)
-1. **Module Verification**: Validate all remodularized components present in root directory
-2. **Prompt Management**: Load prompt files (critrules.prompt required, companion/lowrules optional)
-3. **Configuration**: Hardcoded values (MCP server: localhost:3456, model: qwen2.5:14b-instruct-q4_k_m)
-4. **Orchestrator Initialization**: Create hub controller with all service modules
-5. **UI Launch**: Transfer control to stateless NCursesUIController
+The system implements strict hub-and-spoke architecture where:
+- **ALL inter-module communication flows through orch.py**
+- **NO direct module-to-module calls allowed**
+- **MCP access is orchestrator-exclusive**
+- **UI maintains zero message state**
 
-### Core Execution Flow
+## PROGRAM EXECUTION FLOW
+
+### Startup Sequence
 ```
-main() → DevNameRPGClient.run() → Orchestrator.run() → NCursesUIController.run() → UI event loop
+main.py → Orchestrator.__init__() → Module initialization → UI.run() → Event loop
 ```
 
-## REMODULARIZED ARCHITECTURE - STATELESS UI WITH HUB-AND-SPOKE PATTERN
+1. **Module Verification**: Validate all `.py` files present in root
+2. **Prompt Loading**: Load and concatenate prompt files (5000 token budget)
+3. **Configuration**: Hardcoded MCP server at localhost:3456
+4. **Orchestrator Creation**: Initialize hub with all service modules
+5. **UI Launch**: Transfer control to NCursesUIController
 
-### Hub Module (Central Coordinator)
+### Module Initialization Order (Critical)
+1. **EnhancedMemoryManager** - Storage layer, no dependencies
+2. **SemanticAnalysisEngine** - Analysis engine, no dependencies  
+3. **StoryMomentumEngine** - State tracking with threading.Lock
+4. **MCPClient** - LLM interface, orchestrator-exclusive
+5. **NCursesUIController** - Stateless display, orchestrator callback
+6. **Background Services** - Auto-save and analysis threads
 
-**orch.py** - Central orchestrator hub for all module coordination
-- Exclusive access to MCP client for LLM communication
-- Manages complete input → semantic → storage → LLM → display pipeline
-- Coordinates background analysis threads (15-message momentum cycles)
-- Handles all cross-module communication through callbacks
-- Thread management for background services
-- **Stateless UI Support**: Provides message retrieval and state queries for UI
-- **Key Methods**:
-  - `_handle_ui_callback()`: Processes all UI requests from ncui.py
-  - `get_messages()`: Returns display-ready messages for stateless UI
-  - `get_display_status()`: Provides current system state
-  - `_trigger_background_analysis()`: Manages async LLM operations
-  - `_setup_module_callbacks()`: Configures inter-module communication
+## MODULE ARCHITECTURE
 
-### Primary Spoke Modules
+### Hub Module: orch.py (Orchestrator)
 
-**main.py** - Application lifecycle and environment management
-- `PromptManager`: Token-aware prompt loading with automatic condensation
-- `DevNameRPGClient`: Application coordinator with signal handling
-- `ApplicationConfig`: Hardcoded configuration management
-- Module verification and dependency checking
-- **Token Budget**: 5,000 tokens for system prompts with auto-optimization
+**Core Responsibilities:**
+- Central coordination for all module communication
+- Exclusive MCP client access for LLM requests
+- Background thread management (analysis, auto-save)
+- State synchronization across modules
+- Input validation pipeline coordination
 
-**ncui.py** - STATELESS NCurses UI Controller
-- **No message storage** - retrieves all content from orchestrator on-demand
-- Terminal management with dynamic window creation and layout
-- Multi-line input with intelligent submission detection
-- Color themes (classic/dark/bright) with dynamic switching
-- Scrolling with PgUp/PgDn, Home/End navigation
-- Command system (/help, /stats, /theme, /analyze, /quit, /clearmemory)
-- Processing state management with timeout detection
-- **Stateless Operations**:
-  - `_process_display_updates()`: Fetches fresh messages each cycle
-  - `_handle_user_input()`: Passes input directly to orchestrator
-  - `_ensure_cursor_in_input()`: Maintains cursor visibility
-  - No display_buffer or message_ids tracking
+**Key Methods:**
+- `_handle_ui_callback()`: Process all UI requests
+- `_process_user_input()`: Complete input→storage→LLM pipeline
+- `_make_llm_request()`: ONLY function calling MCP
+- `_trigger_periodic_analysis()`: 15-message momentum analysis
+- `_get_message_history()`: Provide messages to stateless UI
 
-**uilib.py** - Consolidated UI component library (merged from nci_*.py modules)
-- `calculate_box_layout()`: Dynamic terminal geometry with border calculations
-- `TerminalManager`: Size validation and resize handling
-- `ColorManager`: Three built-in color schemes with hot-swapping
-- `ScrollManager`: Protected scroll state with bounds checking
-- `MultiLineInput`: Advanced text input with word wrapping and navigation
-  - Viewport-based scrolling for long input
-  - Word-boundary wrapping with space preservation
-  - Ctrl+arrow word jumping
-  - Backspace/Delete with content flow
-  - **Known Issues** (documented in multiline-input-fixes.md):
-    - Non-cascading content flow between lines
-    - Space deletion during word wrap
-    - Missing Home/End key navigation to buffer start/end
-- `DisplayMessage`: Type-aware message formatting with paragraph preservation
-- `InputValidator`: Token estimation and length validation
-- **Constants**: MIN_SCREEN_WIDTH=80, MIN_SCREEN_HEIGHT=24
+**Critical Implementation:**
+- User message stored IMMEDIATELY before LLM processing
+- Background LLM thread allows instant UI echo
+- Force auto-save after message storage for persistence
 
-### Backend Service Modules
+### Spoke Modules
 
-**emm.py** - Enhanced Memory Manager (storage spoke)
-- Thread-safe message storage with RLock protection
-- Background auto-save to memory.json (non-blocking, atomic writes)
-- 25,000 token memory budget with multi-pass condensation
-- Message types: USER, ASSISTANT, SYSTEM, MOMENTUM_STATE
-- Semantic categorization integration via orchestrator callbacks
-- State persistence for SME momentum tracking
-- **Key Features**:
-  - Background save thread with 1-second intervals
-  - Atomic file operations (temp file → rename)
-  - Message UUID tracking
-  - Conversation restoration on startup
+#### main.py - Application Lifecycle
+- `PromptManager`: Token-aware prompt concatenation
+- `DevNameRPGClient`: Signal handling and orchestrator launch
+- `ApplicationConfig`: Hardcoded configuration values
+- Module presence verification
+- Debug logger initialization
 
-**sme.py** - Story Momentum Engine (narrative spoke)
-- Pattern-based momentum analysis with LLM enhancement
-- Story arc tracking: SETUP→RISING→CLIMAX→RESOLUTION
+#### ncui.py - Stateless UI Controller
+**CRITICAL: Zero message storage - all content from orchestrator**
+
+**Key Features:**
+- Dynamic terminal layout with 90/10 split
+- Multi-line input with viewport scrolling
+- PgUp/PgDn scrollback navigation
+- Color themes: classic, dark, bright, nord, solarized, monokai
+- Command system: /help, /stats, /analyze, /theme, /clear, /quit
+
+**Stateless Operations:**
+- `_process_display_updates()`: Fetch messages every cycle
+- `_handle_user_input()`: Pass to orchestrator immediately
+- No display_buffer or message_ids tracking
+- Fresh data retrieval on every refresh
+
+**Known Issues:**
+- Home/End keys not working (codes 262/360 detected but not handled)
+- Ctrl+Left/Right not working (codes 554/569 detected but not handled)
+
+#### uilib.py - Consolidated UI Components
+
+**Layout System:**
+- `calculate_box_layout()`: Dynamic geometry with status line fix
+- `TerminalManager`: Resize detection and validation
+- MIN_SCREEN_WIDTH=80, MIN_SCREEN_HEIGHT=24
+
+**Multi-line Input:**
+- Viewport-based scrolling for long input
+- Word-boundary wrapping with space preservation
+- Cascading content flow on deletion (Phase 2 implementation)
+- Arrow key navigation with scroll boundaries
+- Double-enter or punctuation submission logic
+
+**Fixed Issues:**
+- Layout overflow preventing status line visibility
+- Premature word wrapping at max_width-5
+- Cascading deletion flow through multiple lines
+
+**Remaining Issues:**
+- Home/End key navigation to buffer start/end
+- Ctrl+arrow word jumping inconsistent
+
+#### emm.py - Enhanced Memory Manager
+
+**Core Features:**
+- Thread-safe storage with RLock protection
+- Atomic file operations (temp→rename pattern)
+- 25,000 token budget with overflow protection
+- MessageType enum: USER, ASSISTANT, SYSTEM, MOMENTUM_STATE
+- Background auto-save thread (1-second intervals)
+
+**Integration Points:**
+- Stores semantic categories from sem.py
+- Maintains momentum state for sme.py
+- Provides conversation context to MCP
+- Handles condensation requests from orchestrator
+
+**Message Structure:**
+```python
+Message:
+  - id: UUID
+  - content: str
+  - message_type: MessageType
+  - timestamp: ISO format
+  - token_estimate: chars/4
+  - content_category: semantic category
+  - condensed: bool
+```
+
+#### sem.py - Semantic Analysis Engine
+
+**Input Validation (`validate_input()`):**
+- Length check (≤4000 chars)
+- Category detection: command, narrative, meta, query
+- Confidence scoring (0.0-1.0)
+- Token estimation
+
+**Semantic Categorization:**
+```
+story_critical:        90% preservation
+character_focused:     80% preservation
+relationship_dynamics: 70% preservation
+emotional_significance: 60% preservation
+world_building:        50% preservation
+standard:             40% preservation
+```
+
+**LLM Analysis Pipeline:**
+1. Build semantic prompt
+2. Request through orchestrator callback
+3. 5-strategy response parsing
+4. Pattern-based fallback
+5. Category injection
+
+**CRITICAL FIX**: Added missing `validate_input()` method blocking input pipeline
+
+#### sme.py - Story Momentum Engine
+
+**Simplified Implementation:**
+- Pattern-based momentum detection (no direct LLM)
+- Narrative time tracking with duration patterns
 - Pressure system (0.0-1.0) with floor ratcheting
-- Narrative time tracking with duration pattern detection
-- Antagonist management with threat assessment
-- 15-message analysis cycle triggers
-- **Pattern Detection**:
-  - exploration_patterns
-  - tension_patterns
-  - conflict_patterns
-  - resolution_patterns
-- **Simplified Implementation**: Basic threshold detection (LLM generation planned)
+- Story arc progression: SETUP→RISING→CLIMAX→RESOLUTION
+- Basic antagonist threshold detection
 
-**sem.py** - Semantic Analysis Engine (analysis spoke)
-- Input validation with token counting (chars/4 estimation)
-- 6-tier semantic categorization hierarchy:
-  - story_critical (90% preservation)
-  - character_focused (80% preservation)
-  - relationship_dynamics (70% preservation)
-  - emotional_significance (60% preservation)
-  - world_building (50% preservation)
-  - standard (40% preservation)
-- 5-strategy JSON parsing for LLM response reliability:
-  1. Direct JSON parse
-  2. Regex extraction
-  3. Binary preserve/discard
-  4. Keyword pattern matching
-  5. Default fallback
-- Content condensation prompt generation
-- **Background Processing**: 30-second cooldown between analyses
+**Pattern Detection:**
+- exploration_patterns
+- tension_patterns (increase pressure)
+- conflict_patterns (increase pressure)
+- resolution_patterns (decrease pressure)
 
-**mcp.py** - MCP Client (LLM communication spoke)
-- HTTP-based Model Context Protocol client
-- **Exclusive orchestrator access** - no direct spoke usage allowed
-- 32,000 token context window management
-- 5-minute timeout for ollama processing
-- Graceful fallback without httpx dependency
+**Narrative Time:**
+- Activity-based duration estimates
+- Cumulative narrative seconds tracking
+- Exchange counting for analysis triggers
+
+#### mcp.py - MCP Client
+
+**Configuration:**
+- Server: http://localhost:3456/chat
+- Model: qwen3:8b-q4_K_M
+- Timeout: 300 seconds (5 minutes)
+- Exclusive orchestrator access
+
+**Key Features:**
+- HTTP-based ollama MCP server communication
 - System prompt concatenation from multiple files
-- **Key Methods**:
-  - `send_message()`: Primary LLM interaction
-  - `_build_context()`: Message history formatting
-  - `_parse_response()`: 5-strategy JSON extraction
+- 32,000 token context window
+- Graceful httpx fallback
+- Think block removal from responses
 
-## CRITICAL ARCHITECTURAL RULES
+## DATA FLOW PIPELINES
 
-### Hub-and-Spoke Communication Pattern
-1. **ALL modules communicate through orch.py** - no direct module-to-module calls
-2. **MCP access is orchestrator-exclusive** - spokes never call LLM directly
-3. **UI is purely stateless** - fetches everything from orchestrator on-demand
-4. **Semantic operations are coordinated** - sem.py works via orchestrator callbacks
-5. **Thread safety is mandatory** - proper locking for all shared state
-
-### Data Flow Pipeline
+### User Input Pipeline
 ```
-User Input → ncui.py → orch.py → sem.py (validation)
-                         ↓
-                      emm.py (storage)
-                         ↓
-                      mcp.py (LLM call)
-                         ↓
-                      emm.py (response storage)
-                         ↓
-                      ncui.py (display)
-                         
-Parallel: sme.py (momentum analysis every 15 messages)
+User Input → ncui.py → Orchestrator → sem.validate_input()
+                ↓
+            emm.add_message() [IMMEDIATE]
+                ↓
+            Background LLM Thread → mcp.send_message()
+                ↓
+            emm.add_message() [Assistant response]
+                ↓
+            ncui.py display update
 ```
 
-### Module Initialization Order (in orch.py)
-1. EnhancedMemoryManager (independent storage)
-2. SemanticAnalysisEngine (independent analysis)
-3. StoryMomentumEngine (requires threading.Lock)
-4. MCPClient (configured with concatenated prompts)
-5. NCursesUIController (requires orchestrator callback)
-6. Background services startup (auto-save, analysis threads)
+### Analysis Pipeline (Every 15 messages)
+```
+Orchestrator timer → sem.analyze_conversation()
+                ↓
+            sme.analyze_momentum()
+                ↓
+            Update message categories
+                ↓
+            Check condensation threshold
+```
 
-## TECHNICAL SPECIFICATIONS
+## TOKEN BUDGET MANAGEMENT
 
-### Core Requirements
-- **Python 3.8+** with curses support
-- **httpx** (optional but recommended for MCP)
-- **asyncio** for async operations
-- **threading** for background processing
-- **json** for persistence
-- **uuid** for message identification
-- **textwrap** for display formatting
-
-### Token Management
-- **Context Window**: 32,000 tokens (theoretical maximum)
-- **Safe Budget**: 25,000 tokens (conservative operational limit)
-- **System Prompts**: 5,000 tokens (auto-condensed if exceeded)
-- **User Input Max**: 2,000 tokens (500 chars typical)
+### Current Allocations
+- **Context Window**: 32,000 tokens total
+- **System Prompts**: 5,000 tokens (auto-condensed)
 - **Memory Budget**: 25,000 tokens (triggers condensation)
+- **User Input Max**: 2,000 tokens (500 chars typical)
 - **LLM Response Reserve**: 5,000 tokens
 
-### Performance Constraints
-- **Minimum Terminal**: 80x24 characters
-- **Analysis Interval**: Every 15 USER/ASSISTANT messages
-- **Auto-save Frequency**: 1 second intervals (background thread)
-- **Semantic Cooldown**: 30 seconds between analyses
-- **Processing Timeout**: 30 seconds before timeout warning
-- **MCP Timeout**: 300 seconds (5 minutes) for LLM responses
+### Condensation Strategy
+1. Check token count > 25,000
+2. Get condensation candidates (exclude recent 5)
+3. Group by semantic category
+4. Preserve high-importance verbatim
+5. Summarize low-importance groups
+6. Replace with condensed messages
 
-### File Structure
-```
-Required Files (root directory):
-- main.py            # Entry point with module verification
-- orch.py            # Orchestrator hub (all coordination)
-- ncui.py            # Stateless UI controller
-- uilib.py           # Consolidated UI components
-- emm.py             # Memory manager with persistence
-- sme.py             # Story momentum engine
-- sem.py             # Semantic analysis engine
-- mcp.py             # MCP/LLM client
-- critrules.prompt   # Required system prompt
+## CRITICAL FIXES IMPLEMENTED
 
-Optional Files:
-- companion.prompt   # Character definitions
-- lowrules.prompt    # Narrative guidelines
-- memory.json        # Conversation persistence
-- debug.log          # Debug output (when --debug)
-- devname_config.json # Configuration (unused, hardcoded values)
-```
+1. **User Echo Fix**: Store user message BEFORE LLM processing
+2. **Semantic Validation**: Added missing `validate_input()` method
+3. **Layout Overflow**: Fixed status line positioning calculation
+4. **Word Wrap**: Removed premature max_width-5 trigger
+5. **Cascading Flow**: Implemented proper multi-line content reflow
+6. **Debug Logger**: Fixed method call pattern with null safety
+7. **MCP Prompts**: Concatenate all prompts with /no_think prefix
 
-## IMPLEMENTATION HIGHLIGHTS
+## KNOWN ISSUES
 
-### Stateless UI Architecture
-The ncui.py module maintains **zero message state**, achieving:
-- On-demand message fetching via orchestrator callbacks
-- No memory growth from accumulated display buffers
-- Fresh data every display cycle (100ms timeout)
-- Clean separation of UI state from application state
-- Simplified debugging with no stale data issues
+### Multi-line Input
+- Home/End keys detected (262/360) but not navigating
+- Ctrl+Left/Right detected (554/569) but not working
+- Contrast with working PgUp/PgDn implementation
 
-### Thread Safety Patterns
-- **EMM**: RLock protection for all message operations
-- **SME**: Lock for momentum state modifications
-- **Orchestrator**: Thread pool management for background tasks
-- **UI**: Single-threaded with async callbacks
-- **Auto-save**: Dedicated thread with atomic file operations
+### Token Coordination
+- EMM and MCP maintain separate budgets
+- No centralized token manager
+- Risk of context overflow
 
-### Error Recovery Mechanisms
-- **Terminal resize**: Dynamic recalculation with validation
-- **Too-small terminal**: Graceful degradation with clear messaging
-- **MCP timeout**: User notification with error details
-- **JSON parsing**: 5-strategy progressive fallback chain
-- **File operations**: Atomic writes prevent corruption
-- **Processing timeout**: Automatic state recovery after 30s
+### Antagonist System
+- Simplified pattern-based detection only
+- Full LLM generation disabled
+- Basic threshold triggers at pressure > 0.5
 
-### Multi-Line Input System Features
-- **Viewport scrolling**: Navigate long input beyond visible area
-- **Word wrapping**: Intelligent break points at word boundaries
-- **Content flow**: Pull words from next line when space available
-- **Cursor tracking**: Maintain position through wraps and scrolls
-- **Navigation**: Arrow keys, Ctrl+arrows for word jump
-- **Submission logic**: Double-enter or punctuation triggers
+## TESTING CONSIDERATIONS
 
-## KNOWN ISSUES AND PLANNED IMPROVEMENTS
+### Critical Test Points
+1. **Immediate Echo**: User message appears before LLM response
+2. **Semantic Categories**: Verify preservation ratios
+3. **Condensation**: Maintain narrative continuity
+4. **Momentum Tracking**: Pressure increases with conflict
+5. **Antagonist Generation**: Appears at pressure > 0.5
+6. **Thread Safety**: No deadlocks or race conditions
 
-### Current Limitations
-1. **Multi-line Input Issues** (see multiline-input-fixes.md):
-   - Content doesn't cascade through multiple lines during deletion
-   - Spaces incorrectly removed during word wrap
-   - Home/End keys not implemented for buffer navigation
-
-2. **Token Coordination**: 
-   - EMM and MCP maintain separate token budgets
-   - No centralized token management system
-
-3. **Antagonist System**: 
-   - Simplified threshold-based generation
-   - Full LLM-powered generation disabled
-
-4. **Command Coverage**: 
-   - Limited command set implemented
-   - Missing: /save, /load, /export, /story commands
-
-### Planned Enhancements
-1. **Input System Fixes**:
-   - Implement `_cascade_content_flow()` for proper multi-line reflow
-   - Fix space handling in `_wrap_current_line()`
-   - Add Home/End key support for buffer navigation
-
-2. **Token Manager**: 
-   - Centralized budget tracking across all modules
-   - Predictive token usage warnings
-
-3. **Enhanced Commands**: 
-   - Story control commands
-   - Save/load with versioning
-   - Export to various formats
-
-4. **Antagonist AI**: 
-   - Restore full LLM-powered generation
-   - Context-aware threat escalation
-
-5. **Performance Metrics**: 
-   - Response time tracking
-   - Token usage analytics
-   - Memory efficiency monitoring
+### Debug Monitoring
+Enable with `--debug` flag:
+- Watch "SEM:" entries for categorization
+- Watch "SME:" entries for momentum
+- Watch "EMM:" entries for storage
+- Watch "MCP:" entries for LLM calls
+- Watch "ORCHESTRATOR:" for coordination
 
 ## DEVELOPMENT GUIDELINES
 
-### Architecture Preservation
-- **Maintain hub-and-spoke pattern** - all communication through orch.py
-- **Keep UI stateless** - no message storage in ncui.py
-- **Preserve thread safety** - use proper locking for shared state
-- **Update genai.txt** - document all architectural changes
-- **Test module isolation** - ensure no direct module dependencies
+### Architecture Rules
+1. **NO direct module communication** - use orchestrator
+2. **NO MCP access from spokes** - orchestrator exclusive
+3. **NO message storage in UI** - keep stateless
+4. **NO blocking operations** - use threads
+5. **ALWAYS update genai.txt** for architectural changes
 
-### Code Quality Standards
-- **Clear separation of concerns** between modules
-- **Comprehensive error handling** with logging
-- **Defensive programming** for external dependencies
-- **Null safety checks** for all object access
-- **Documentation** of architectural decisions
+### File Structure
+```
+Required (root directory):
+├── main.py             # Entry point
+├── orch.py             # Orchestrator hub
+├── ncui.py             # Stateless UI
+├── uilib.py            # UI components
+├── emm.py              # Memory manager
+├── sem.py              # Semantic analysis
+├── sme.py              # Momentum engine
+├── mcp.py              # LLM client
+└── critrules.prompt    # Core rules (required)
 
-### Testing Priorities
-1. **Stateless UI**: Verify no message accumulation
-2. **Thread Safety**: Test concurrent operations
-3. **Token Limits**: Validate context window management
-4. **Error Paths**: Test graceful degradation
-5. **Terminal Resize**: Verify layout recalculation
-6. **Input System**: Test multi-line editing scenarios
-
-### Debugging Best Practices
-- Use `--debug` flag for comprehensive logging
-- Check debug.log for detailed execution traces
-- Monitor memory.json for persistence issues
-- Verify module initialization order in logs
-- Test with minimum terminal size (80x24)
+Optional:
+├── companion.prompt    # Character definitions
+├── lowrules.prompt     # Narrative guidelines
+├── memory.json         # Conversation persistence
+└── debug.log           # Debug output
+```
 
 ---
 *Last Updated: December 2024*
-*Project State: Stateless UI architecture with complete hub-and-spoke orchestration*
-*Known Issues: Multi-line input cascading, space preservation, Home/End navigation*
+*Architecture: Hub-and-spoke with stateless UI*
+*Status: Production-ready with known input key issues*
