@@ -46,7 +46,7 @@ if missing_modules:
     sys.exit(1)
 
 # Configuration constants
-DEFAULT_CONFIG_FILE = "devname_config.json"
+DEFAULT_CONFIG_FILE = "config.json"
 DEBUG_LOG_FILE = "debug.log"
 MAX_LOG_AGE_DAYS = 7
 
@@ -113,8 +113,8 @@ class ApplicationConfig:
         return {
             "mcp": {
                 "server_url": "http://localhost:3456/chat",  # FIXED: Changed from 3000 to 3456
-                "model": "qwen2.5:14b-instruct-q4_k_m",    # FIXED: Use correct model name from logs
-                "timeout": 30,
+                "model": "qwen3:8b-q4_K_M",    # FIXED: Use correct model name from logs
+                "timeout": 300,
                 "max_retries": 3,
                 "retry_delay": 2
             },

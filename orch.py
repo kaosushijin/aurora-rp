@@ -168,7 +168,7 @@ class Orchestrator:
 
             # Concatenate with two newlines between each prompt section
             if system_prompt_parts:
-                concatenated_prompt = '\n\n'.join(system_prompt_parts)
+                concatenated_prompt = '/no_think\n\n' + '\n\n'.join(system_prompt_parts)
                 self.mcp_client.system_prompt = concatenated_prompt
                 self._log_debug(f"System prompt configured: {len(concatenated_prompt)} chars from {len(system_prompt_parts)} sections")
             else:
@@ -183,7 +183,11 @@ class Orchestrator:
             if 'timeout' in mcp_config:
                 self.mcp_client.timeout = mcp_config['timeout']
 
-            self._log_debug("MCP client configured with concatenated prompts and settings")
+            # Add debug logging for what we're actually configuring
+            self._log_debug(f"MCP client configured:")
+            self._log_debug(f"  server_url: {self.mcp_client.server_url}")
+            self._log_debug(f"  model: {self.mcp_client.model}")
+            self._log_debug(f"  timeout: {getattr(self.mcp_client, 'timeout', 'not set')}")
 
         except Exception as e:
             self._log_error(f"MCP client configuration failed: {e}")

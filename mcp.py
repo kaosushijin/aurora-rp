@@ -29,7 +29,7 @@ except ImportError:
 
 # MCP Configuration Constants - PRESERVED from original Node.js ollama setup
 MCP_SERVER_URL = "http://127.0.0.1:3456/chat"
-MCP_MODEL = "qwen2.5:14b-instruct-q4_k_m"
+MCP_MODEL = "qwen3:8b-q4_K_M"
 MCP_TIMEOUT = 300.0  # 5 minutes for ollama processing
 MCP_MAX_RETRIES = 2
 
@@ -222,8 +222,10 @@ class MCPClient:
                     response_time = time.time() - start_time
                     if self.debug_logger:
                         self.debug_logger.debug(f"Response received: {response_time:.2f}s", "MCP")
-                    
-                    return response_data["message"]["content"]
+
+                    raw_content = response_data["message"]["content"]
+                    cleaned_content = self._remove_think_blocks(raw_content)
+                    return cleaned_content
                 else:
                     raise Exception("Invalid response format from Node.js ollama server")
                     
@@ -266,6 +268,25 @@ class MCPClient:
         self.system_prompt = new_prompt
         if self.debug_logger:
             self.debug_logger.debug("System prompt updated", "MCP")
+
+    def _remove_think_blocks(self, content: str) -> str:
+        """Remove <think></think> blocks from model output"""
+        import re
+
+        # Remove think blocks and their content
+        # This regex matches <think> opening tag, any content (including newlines), and </think> closing tag
+        cleaned = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+
+        # Clean up extra whitespace that might be left behind
+        # Remove leading/trailing whitespace and collapse multiple newlines
+        cleaned = cleaned.strip()
+        cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)  # Max 2 consecutive newlines
+
+        if self.debug_logger:
+            if '<think>' in content:
+                self.debug_logger.debug(f"Removed think blocks from response", "MCP")
+
+        return cleaned
 
 # Utility functions for external validation
 def validate_mcp_request(payload: Dict[str, Any]) -> bool:

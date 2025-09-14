@@ -237,11 +237,27 @@ class EnhancedMemoryManager:
             
             # Write to temporary file first, then move to prevent corruption
             temp_filename = f"{filename}.tmp"
-            with open(temp_filename, "w", encoding="utf-8") as f:
-                json.dump(conversation_data, f, indent=2, ensure_ascii=False)
-            
-            # Atomic move
-            shutil.move(temp_filename, filename)
+            try:
+                with open(temp_filename, "w", encoding="utf-8") as f:
+                    json.dump(conversation_data, f, indent=2, ensure_ascii=False)
+
+                # Atomic move
+                shutil.move(temp_filename, filename)
+            except Exception as temp_error:
+                # Fallback: direct write if atomic operation fails
+                if self.debug_logger:
+                    self.debug_logger.debug(f"Atomic save failed, using direct write: {temp_error}")
+
+                # Clean up failed temp file
+                try:
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+                except:
+                    pass
+
+                # Direct write as fallback
+                with open(filename, "w", encoding="utf-8") as f:
+                    json.dump(conversation_data, f, indent=2, ensure_ascii=False)
             
             if self.debug_logger:
                 self.debug_logger.debug(f"Conversation saved to {filename}")
@@ -430,6 +446,13 @@ class EnhancedMemoryManager:
     def _auto_load(self) -> None:
         """Auto-load memory from file if it exists"""
         try:
+            # Ensure current directory is writable
+            current_dir = Path('.').resolve()
+            if not os.access(current_dir, os.W_OK):
+                if self.debug_logger:
+                    self.debug_logger.error(f"Directory not writable: {current_dir}")
+                return
+
             if os.path.exists(self.memory_file):
                 success = self.load_conversation(self.memory_file)
                 if success and self.debug_logger:

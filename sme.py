@@ -11,6 +11,7 @@ import json
 import threading
 import time
 import sys
+import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from datetime import datetime
@@ -116,6 +117,30 @@ class NarrativeTimeTracker:
                 self.sequence_history = self.sequence_history[-50:]
             
             return duration
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get narrative time statistics"""
+        with self.lock:
+            # Format total time for display
+            total_seconds = self.total_narrative_seconds
+            hours = int(total_seconds // 3600)
+            minutes = int((total_seconds % 3600) // 60)
+            seconds = int(total_seconds % 60)
+
+            if hours > 0:
+                time_formatted = f"{hours}h {minutes}m {seconds}s"
+            elif minutes > 0:
+                time_formatted = f"{minutes}m {seconds}s"
+            else:
+                time_formatted = f"{seconds}s"
+
+            return {
+                "total_narrative_seconds": self.total_narrative_seconds,
+                "narrative_time_formatted": time_formatted,
+                "exchange_count": self.exchange_count,
+                "recent_sequences": len(self.sequence_history),
+                "average_duration": (self.total_narrative_seconds / max(1, self.exchange_count))
+            }
 
 # Chunk 2/3 - sme.py - Core StoryMomentumEngine Class
 class StoryMomentumEngine:
