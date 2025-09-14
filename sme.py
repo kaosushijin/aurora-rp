@@ -449,6 +449,311 @@ class StoryMomentumEngine:
         if self.debug_logger:
             self.debug_logger.debug(f"SME: {message}")
 
+    def analyze_momentum(self, analysis_context) -> Dict[str, Any]:
+        """
+        Analyze story momentum using basic pattern detection.
+        Called periodically by orchestrator every 15 messages.
+
+        Args:
+            analysis_context: Either Dict containing messages and metadata, or List of messages directly
+
+        Returns:
+            Dictionary with momentum analysis results
+        """
+        try:
+            with self.lock:
+                self._log_debug("Starting momentum analysis")
+
+                # HOTFIX: Handle both dict and list input formats
+                if isinstance(analysis_context, dict):
+                    messages = analysis_context.get("messages", [])
+                    self._log_debug(f"Received dict context with {len(messages)} messages")
+                elif isinstance(analysis_context, list):
+                    messages = analysis_context
+                    self._log_debug(f"Received list context with {len(messages)} messages")
+                else:
+                    self._log_debug(f"Unexpected context type: {type(analysis_context)}")
+                    return self._get_error_momentum_results(f"Invalid context type: {type(analysis_context)}")
+                if not messages:
+                    self._log_debug("No messages provided for momentum analysis")
+                    return self._get_empty_momentum_results()
+
+                # Analyze recent message batch for momentum patterns
+                momentum_patterns = self._analyze_message_momentum_patterns(messages)
+
+                # Update pressure based on pattern analysis
+                pressure_updates = self._calculate_momentum_pressure_updates(momentum_patterns)
+
+                # Apply pressure changes with ratcheting
+                self._apply_momentum_pressure_changes(pressure_updates)
+
+                # Update story arc based on current pressure and patterns
+                self._update_story_arc_from_momentum()
+
+                # Check for antagonist threshold triggers
+                antagonist_updates = self._check_antagonist_momentum_triggers(momentum_patterns)
+
+                # Prepare analysis results
+                results = {
+                    "success": True,
+                    "momentum_patterns": momentum_patterns,
+                    "pressure_updates": pressure_updates,
+                    "current_pressure": self.pressure_level,
+                    "story_arc": self.story_arc.value,
+                    "antagonist_updates": antagonist_updates,
+                    "narrative_stats": self.narrative_tracker.get_stats(),
+                    "analysis_timestamp": time.time(),
+                    "message_count_analyzed": len(messages)
+                }
+
+                # Store in pressure history for tracking
+                self.pressure_history.append({
+                    "analysis_type": "momentum_batch",
+                    "pressure": self.pressure_level,
+                    "message_count": len(messages),
+                    "timestamp": time.time(),
+                    "patterns_detected": len(momentum_patterns)
+                })
+
+                # Limit history size
+                if len(self.pressure_history) > 100:
+                    self.pressure_history = self.pressure_history[-100:]
+
+                self._log_debug(f"Momentum analysis completed: pressure={self.pressure_level:.3f}, patterns={len(momentum_patterns)}")
+
+                return results
+
+        except Exception as e:
+            self._log_debug(f"Momentum analysis failed: {e}")
+            return self._get_error_momentum_results(str(e))
+
+    def _analyze_message_momentum_patterns(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Analyze messages for momentum-affecting patterns"""
+        patterns = []
+
+        for msg in messages:
+            content = msg.get("content", "").lower()
+            msg_type = msg.get("type", "")
+
+            # Skip system messages for momentum analysis
+            if msg_type == "system":
+                continue
+
+            # Detect tension patterns
+            tension_matches = self._detect_tension_patterns(content)
+            if tension_matches:
+                patterns.extend(tension_matches)
+
+            # Detect conflict patterns
+            conflict_matches = self._detect_conflict_patterns(content)
+            if conflict_matches:
+                patterns.extend(conflict_matches)
+
+            # Detect resolution patterns
+            resolution_matches = self._detect_resolution_patterns(content)
+            if resolution_matches:
+                patterns.extend(resolution_matches)
+
+        return patterns
+
+    def _detect_tension_patterns(self, content: str) -> List[Dict[str, Any]]:
+        """Detect tension-building patterns in content"""
+        patterns = []
+
+        tension_indicators = [
+            (r'\b(dangerous|threatening|ominous|sinister)\b', 0.10, "environmental_threat"),
+            (r'\b(suspicious|watching|stalking|following)\b', 0.08, "surveillance"),
+            (r'\b(trap|ambush|surprise|unexpected)\b', 0.12, "tactical_threat"),
+            (r'\b(growing|increasing|building|rising)\s+\w*\s*(tension|pressure|danger)\b', 0.15, "escalating_tension"),
+            (r'\b(whisper|shadow|darkness|mysterious)\b', 0.06, "atmospheric_tension")
+        ]
+
+        for pattern, weight, pattern_type in tension_indicators:
+            if re.search(pattern, content):
+                patterns.append({
+                    "type": "tension",
+                    "subtype": pattern_type,
+                    "weight": weight,
+                    "description": f"Detected {pattern_type} pattern"
+                })
+
+        return patterns
+
+    def _detect_conflict_patterns(self, content: str) -> List[Dict[str, Any]]:
+        """Detect direct conflict patterns in content"""
+        patterns = []
+
+        conflict_indicators = [
+            (r'\b(attack|strike|hit|wound|damage)\b', 0.20, "direct_combat"),
+            (r'\b(fight|battle|combat|struggle)\b', 0.18, "active_conflict"),
+            (r'\b(enemy|foe|opponent|adversary)\b', 0.15, "antagonist_presence"),
+            (r'\b(weapon|sword|blade|gun|magic)\b', 0.12, "combat_readiness"),
+            (r'\b(pain|hurt|injury|blood)\b', 0.14, "violence_consequence")
+        ]
+
+        for pattern, weight, pattern_type in conflict_indicators:
+            if re.search(pattern, content):
+                patterns.append({
+                    "type": "conflict",
+                    "subtype": pattern_type,
+                    "weight": weight,
+                    "description": f"Detected {pattern_type} pattern"
+                })
+
+        return patterns
+
+    def _detect_resolution_patterns(self, content: str) -> List[Dict[str, Any]]:
+        """Detect resolution/de-escalation patterns in content"""
+        patterns = []
+
+        resolution_indicators = [
+            (r'\b(peace|calm|quiet|serene|tranquil)\b', -0.08, "peaceful_resolution"),
+            (r'\b(rest|sleep|relax|recover)\b', -0.06, "recovery_period"),
+            (r'\b(safe|secure|protected|sanctuary)\b', -0.10, "safety_achieved"),
+            (r'\b(victory|triumph|success|defeated)\b', -0.12, "conflict_resolved"),
+            (r'\b(journey|travel|continue|proceed)\b', -0.04, "narrative_transition")
+        ]
+
+        for pattern, weight, pattern_type in resolution_indicators:
+            if re.search(pattern, content):
+                patterns.append({
+                    "type": "resolution",
+                    "subtype": pattern_type,
+                    "weight": weight,  # Negative weight reduces pressure
+                    "description": f"Detected {pattern_type} pattern"
+                })
+
+        return patterns
+
+    def _calculate_momentum_pressure_updates(self, patterns: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate pressure changes from detected patterns"""
+        total_pressure_change = 0.0
+        pattern_summary = {"tension": 0, "conflict": 0, "resolution": 0}
+
+        for pattern in patterns:
+            pattern_type = pattern.get("type", "")
+            weight = pattern.get("weight", 0.0)
+
+            total_pressure_change += weight
+            if pattern_type in pattern_summary:
+                pattern_summary[pattern_type] += 1
+
+        return {
+            "total_change": total_pressure_change,
+            "pattern_counts": pattern_summary,
+            "significant_change": abs(total_pressure_change) > 0.05,
+            "pressure_direction": "increasing" if total_pressure_change > 0 else "decreasing" if total_pressure_change < 0 else "stable"
+        }
+
+    def _apply_momentum_pressure_changes(self, pressure_updates: Dict[str, Any]) -> None:
+        """Apply pressure changes with ratcheting behavior"""
+        change = pressure_updates.get("total_change", 0.0)
+
+        if change != 0.0:
+            # Apply the change
+            new_pressure = self.pressure_level + change
+
+            # Enforce bounds [0.0, 1.0]
+            new_pressure = max(0.0, min(1.0, new_pressure))
+
+            # Implement ratcheting: pressure floor only increases, never decreases
+            if new_pressure > self.base_pressure_floor:
+                self.base_pressure_floor = new_pressure
+
+            # Set actual pressure, but never below the floor
+            self.pressure_level = max(new_pressure, self.base_pressure_floor)
+
+            self._log_debug(f"Applied pressure change: {change:+.3f} -> {self.pressure_level:.3f} (floor: {self.base_pressure_floor:.3f})")
+
+    def _update_story_arc_from_momentum(self) -> None:
+        """Update story arc based on current pressure and momentum trends"""
+        # Simple pressure-based arc progression
+        if self.pressure_level < 0.2 and self.story_arc != StoryArc.SETUP:
+            # Low pressure suggests setup phase
+            if self.story_arc != StoryArc.RESOLUTION:  # Don't go backwards from resolution
+                self.story_arc = StoryArc.SETUP
+                self._log_debug("Story arc updated to SETUP (low pressure)")
+
+        elif 0.2 <= self.pressure_level < 0.6 and self.story_arc == StoryArc.SETUP:
+            # Medium pressure progression to rising action
+            self.story_arc = StoryArc.RISING
+            self._log_debug("Story arc updated to RISING (medium pressure)")
+
+        elif self.pressure_level >= 0.6 and self.story_arc in [StoryArc.SETUP, StoryArc.RISING]:
+            # High pressure suggests climax
+            self.story_arc = StoryArc.CLIMAX
+            self._log_debug("Story arc updated to CLIMAX (high pressure)")
+
+    def _check_antagonist_momentum_triggers(self, patterns: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Check if momentum patterns suggest antagonist involvement"""
+        antagonist_updates = {"triggered": False, "reason": "", "action": ""}
+
+        # Check pressure threshold for antagonist activation
+        if self.pressure_level > 0.5 and (not self.current_antagonist or not self.current_antagonist.active):
+            antagonist_updates = {
+                "triggered": True,
+                "reason": f"High pressure level ({self.pressure_level:.2f}) above antagonist threshold",
+                "action": "activate_antagonist"
+            }
+
+            # Create or activate antagonist
+            if not self.current_antagonist:
+                self.current_antagonist = Antagonist(
+                    name="Unknown Threat",
+                    threat_level=self.pressure_level,
+                    active=True,
+                    last_mention="Created by momentum analysis"
+                )
+            else:
+                self.current_antagonist.active = True
+                self.current_antagonist.threat_level = self.pressure_level
+
+            self._log_debug(f"Antagonist activated due to high pressure: {self.pressure_level:.3f}")
+
+        # Check for de-escalation patterns
+        resolution_patterns = [p for p in patterns if p.get("type") == "resolution"]
+        if resolution_patterns and self.current_antagonist and self.current_antagonist.active:
+            if self.pressure_level < 0.3:
+                antagonist_updates = {
+                    "triggered": True,
+                    "reason": f"Resolution patterns detected with low pressure ({self.pressure_level:.2f})",
+                    "action": "deactivate_antagonist"
+                }
+                self.current_antagonist.active = False
+                self._log_debug("Antagonist deactivated due to resolution patterns")
+
+        return antagonist_updates
+
+    def _get_empty_momentum_results(self) -> Dict[str, Any]:
+        """Return empty results structure when no analysis possible"""
+        return {
+            "success": False,
+            "error": "No messages available for analysis",
+            "momentum_patterns": [],
+            "pressure_updates": {"total_change": 0.0, "pattern_counts": {}},
+            "current_pressure": self.pressure_level,
+            "story_arc": self.story_arc.value,
+            "antagonist_updates": {"triggered": False},
+            "narrative_stats": self.narrative_tracker.get_stats(),
+            "analysis_timestamp": time.time(),
+            "message_count_analyzed": 0
+        }
+
+    def _get_error_momentum_results(self, error_message: str) -> Dict[str, Any]:
+        """Return error results structure when analysis fails"""
+        return {
+            "success": False,
+            "error": error_message,
+            "momentum_patterns": [],
+            "pressure_updates": {"total_change": 0.0, "pattern_counts": {}},
+            "current_pressure": self.pressure_level,
+            "story_arc": self.story_arc.value,
+            "antagonist_updates": {"triggered": False},
+            "narrative_stats": self.narrative_tracker.get_stats(),
+            "analysis_timestamp": time.time(),
+            "message_count_analyzed": 0
+        }
+
 # =============================================================================
 # MODULE TEST
 # =============================================================================

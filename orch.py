@@ -531,37 +531,24 @@ class Orchestrator:
                     self._log_debug(f"Failed to get momentum state: {e}")
                     momentum_data = {}
 
-            # FIXED: Use correct MCP client method call - try different possible parameter names
+            # FIXED: Use correct MCP client parameter names from mcp.py
             raw_response = None
             try:
-                # Try the most common parameter names for MCP clients
                 if hasattr(self.mcp_client, 'send_message'):
-                    # Attempt 1: Try with 'message' parameter
-                    try:
-                        raw_response = self.mcp_client.send_message(
-                            message=user_input,
-                            conversation_context=context,
-                            momentum_context=momentum_data
-                        )
-                    except TypeError:
-                        # Attempt 2: Try with 'content' parameter
-                        try:
-                            raw_response = self.mcp_client.send_message(
-                                content=user_input,
-                                conversation_context=context,
-                                momentum_context=momentum_data
-                            )
-                        except TypeError:
-                            # Attempt 3: Try with just the message as positional parameter
-                            try:
-                                raw_response = self.mcp_client.send_message(
-                                    user_input,
-                                    conversation_context=context,
-                                    momentum_context=momentum_data
-                                )
-                            except TypeError:
-                                # Attempt 4: Try without additional context parameters
-                                raw_response = self.mcp_client.send_message(user_input)
+                    # Get story context from momentum engine
+                    story_context = None
+                    if momentum_data:
+                        # Convert momentum data to story context string
+                        story_context = f"Current pressure: {momentum_data.get('narrative_pressure', 0.0)}, "
+                        story_context += f"Story arc: {momentum_data.get('story_arc', 'unknown')}, "
+                        story_context += f"Manifestation: {momentum_data.get('manifestation_type', 'exploration')}"
+
+                    # Call with correct parameter names matching mcp.py
+                    raw_response = self.mcp_client.send_message(
+                        user_input=user_input,
+                        conversation_history=context,  # ✅ Correct parameter name
+                        story_context=story_context    # ✅ Correct parameter name
+                    )
                 else:
                     return {"success": False, "error": "MCP client has no send_message method"}
 
