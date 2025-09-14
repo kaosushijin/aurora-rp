@@ -714,7 +714,7 @@ class MultiLineInput:
             self.scroll_offset = self.cursor_line - self.viewport_height + 1
     
     def handle_backspace(self) -> bool:
-        """Handle backspace with line merging"""
+        """Handle backspace with cascading content flow - PHASE 2 UPDATE"""
         if self.cursor_col > 0:
             # Delete character in current line
             current_line = self.lines[self.cursor_line]
@@ -722,19 +722,19 @@ class MultiLineInput:
             self.lines[self.cursor_line] = new_line
             self.cursor_col -= 1
 
-            # PHASE 3: Try to flow content after character deletion
-            self._smart_content_flow()
+            # Use cascading flow instead of smart flow
+            self._cascade_content_flow()
             return True
-        
+
         elif self.cursor_line > 0:
             # Merge with previous line
             prev_line = self.lines[self.cursor_line - 1]
             current_line = self.lines[self.cursor_line]
-            
+
             # Move cursor to end of previous line
             self.cursor_col = len(prev_line)
-            
-            # PHASE 3: Smart line merge with overflow check
+
+            # Smart line merge with overflow check
             merged_line = prev_line + current_line
             self.lines[self.cursor_line - 1] = merged_line
             del self.lines[self.cursor_line]
@@ -745,42 +745,44 @@ class MultiLineInput:
                 self._wrap_current_line()
             else:
                 self._adjust_scroll()
-            # PHASE 3: Try to flow content after backspace
-            self._smart_content_flow()
+
+            # Use cascading flow after merge
+            self._cascade_content_flow()
             return True
-        
+
         return False
     
     def handle_arrow_keys(self, key: int) -> bool:
-        """Handle arrow key navigation"""
-        # DEBUG: Log all key codes to find Ctrl combinations
+        """Handle arrow key and Home/End navigation - FIXED: Correct terminal key codes"""
+
+        # Optional debug logging (can be removed after testing)
         if key < 32 or key > 126:  # Non-printable keys
-            print(f"DEBUG: Special key pressed: {key}", file=sys.stderr)
+            print(f"DEBUG: Special key pressed: {key} (hex: 0x{key:x})", file=sys.stderr)
 
         if key == curses.KEY_UP:
-            # NEW: Check if we should scroll instead of moving cursor
+            # Check if we should scroll instead of moving cursor
             if self._is_at_viewport_top() and self._can_scroll_up():
                 self._scroll_up_one_line()
                 return True
             elif self.cursor_line > 0:
-                # EXISTING: Normal cursor movement (unchanged)
+                # Normal cursor movement
                 self.cursor_line -= 1
                 self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
                 self._adjust_scroll()
                 return True
-        
+
         elif key == curses.KEY_DOWN:
-            # NEW: Check if we should scroll instead of moving cursor
+            # Check if we should scroll instead of moving cursor
             if self._is_at_viewport_bottom() and self._can_scroll_down():
                 self._scroll_down_one_line()
                 return True
             elif self.cursor_line < len(self.lines) - 1:
-                # EXISTING: Normal cursor movement (unchanged)
+                # Normal cursor movement
                 self.cursor_line += 1
                 self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
                 self._adjust_scroll()
                 return True
-        
+
         elif key == curses.KEY_LEFT:
             if self.cursor_col > 0:
                 self.cursor_col -= 1
@@ -791,7 +793,7 @@ class MultiLineInput:
                 self.cursor_col = len(self.lines[self.cursor_line])
                 self._adjust_scroll()
                 return True
-        
+
         elif key == curses.KEY_RIGHT:
             if self.cursor_col < len(self.lines[self.cursor_line]):
                 self.cursor_col += 1
@@ -803,14 +805,38 @@ class MultiLineInput:
                 self._adjust_scroll()
                 return True
 
-        elif key == 543:  # Ctrl+Left - jump word left
+        # FIXED: HOME key with your terminal's actual code
+        elif key == 262:  # Your terminal's HOME key
+            print(f"DEBUG: HOME key detected (code {key})", file=sys.stderr)
+            # Move to beginning of input buffer
+            self.cursor_line = 0
+            self.cursor_col = 0
+            self.scroll_offset = 0
+            self._adjust_scroll()
+            return True
+
+        # FIXED: END key with your terminal's actual code
+        elif key == 360:  # Your terminal's END key
+            print(f"DEBUG: END key detected (code {key})", file=sys.stderr)
+            # Move to end of input buffer
+            self.cursor_line = len(self.lines) - 1
+            self.cursor_col = len(self.lines[self.cursor_line])
+            # Scroll to make cursor visible
+            self._adjust_scroll()
+            return True
+
+        # FIXED: Ctrl+Left Arrow with your terminal's actual code
+        elif key == 554:  # Your terminal's Ctrl+Left
+            print(f"DEBUG: Ctrl+Left detected (code {key})", file=sys.stderr)
             self._jump_word_left()
             return True
 
-        elif key == 558:  # Ctrl+Right - jump word right
+        # FIXED: Ctrl+Right Arrow with your terminal's actual code
+        elif key == 569:  # Your terminal's Ctrl+Right
+            print(f"DEBUG: Ctrl+Right detected (code {key})", file=sys.stderr)
             self._jump_word_right()
             return True
-        
+
         return False
     
     def get_content(self) -> str:
@@ -858,40 +884,46 @@ class MultiLineInput:
         return display_lines[start_idx:end_idx]
     
     def _wrap_current_line(self):
-        """Wrap current line if it's too long - FIXED: Use proper width calculation"""
+        """Wrap current line if it's too long - FIXED: Proper space handling"""
         current_line = self.lines[self.cursor_line]
 
-        # FIXED: Use actual max_width instead of arbitrary reduction
-        # The issue was subtracting 5 from max_width, causing premature wrapping
+        # Use actual max_width (remove the arbitrary -5 that was causing premature wrapping)
         if len(current_line) <= self.max_width:
             return
 
-        # PHASE 2: Intelligent word boundary detection
+        # Find intelligent break point using existing method
         break_point = self._find_wrap_point(current_line, self.max_width)
 
-        # PHASE 2: Smart line splitting with space handling
+        # Split the line
         line_before = current_line[:break_point]
         line_after = current_line[break_point:]
 
-        # Only strip spaces if we broke at a space
+        # FIXED: Only handle spaces when we actually break at a space
+        space_removed = False
         if break_point < len(current_line) and current_line[break_point] == ' ':
-            line_before = line_before.rstrip()
-            line_after = line_after.lstrip()
+            # We're breaking at a space - remove it from the start of next line only
+            line_after = line_after[1:] if line_after.startswith(' ') else line_after
+            space_removed = True
+            # Don't strip the current line - keep the space
 
         # Update lines
         self.lines[self.cursor_line] = line_before
         if line_after and len(self.lines) < self.max_lines:
             self.lines.insert(self.cursor_line + 1, line_after)
 
-            # Adjust cursor position
+            # FIXED: Cursor positioning that accounts for space removal
             if self.cursor_col > break_point:
                 self.cursor_line += 1
-                self.cursor_col = self.cursor_col - break_point - (1 if current_line[break_point] == ' ' else 0)
-                # ADD: Check if cursor moved outside viewport and scroll if needed
-                # PHASE 4: Ensure cursor remains visible after wrapping
-                self._adjust_scroll()
+                self.cursor_col = self.cursor_col - break_point
+                # Only adjust for space if we actually removed one
+                if space_removed:
+                    self.cursor_col = max(0, self.cursor_col - 1)
             else:
-                self.cursor_col = len(line_before)
+                # Cursor stays on current line
+                self.cursor_col = min(self.cursor_col, len(line_before))
+
+            # Ensure cursor is visible after wrapping
+            self._adjust_scroll()
 
         self._adjust_scroll()
 
@@ -1135,7 +1167,7 @@ class MultiLineInput:
         self._adjust_scroll()
 
     def handle_delete(self) -> bool:
-        """Handle delete key - forward character deletion with line merging"""
+        """Handle delete key - forward character deletion with cascading flow - PHASE 2 UPDATE"""
         current_line = self.lines[self.cursor_line]
 
         if self.cursor_col < len(current_line):
@@ -1143,8 +1175,8 @@ class MultiLineInput:
             new_line = current_line[:self.cursor_col] + current_line[self.cursor_col + 1:]
             self.lines[self.cursor_line] = new_line
 
-            # Check if line needs rewrapping after deletion
-            self._smart_content_flow()  # PHASE 3: Smart content flow
+            # Use cascading flow after deletion
+            self._cascade_content_flow()
             return True
 
         elif self.cursor_line < len(self.lines) - 1:
@@ -1156,9 +1188,9 @@ class MultiLineInput:
             self.lines[self.cursor_line] = current_line + next_line
             del self.lines[self.cursor_line + 1]
 
-            # Adjust scroll and rewrap
+            # Adjust scroll and use cascading flow
             self._adjust_scroll()
-            self._smart_content_flow()  # PHASE 3: Smart content flow
+            self._cascade_content_flow()
             return True
 
         return False
@@ -1198,37 +1230,66 @@ class MultiLineInput:
                         # Next line is now empty, remove it
                         del self.lines[self.cursor_line + 1]
 
-    def _smart_content_flow(self):
-        """PHASE 3: Intelligent content flow after edits"""
-        if self.cursor_line >= len(self.lines) - 1:
-            return  # No next line to pull from
+    def _cascade_content_flow(self, start_line: int = None):
+        """Recursively cascade content flow through all lines after edits - PHASE 2"""
+        if start_line is None:
+            start_line = self.cursor_line
 
-        current_line = self.lines[self.cursor_line]
-        next_line = self.lines[self.cursor_line + 1]
+        # Process from start_line to end of buffer
+        for line_idx in range(start_line, len(self.lines) - 1):
+            current_line = self.lines[line_idx]
+            next_line = self.lines[line_idx + 1]
 
-        # Only flow if current line has significant space (more conservative than -20)
-        available_space = self.max_width - len(current_line)
-        if available_space < 10 or not next_line.strip():
-            return
+            # Calculate available space
+            available_space = self.max_width - len(current_line)
 
-        # Find first word in next line
-        first_word_end = next_line.find(' ')
-        if first_word_end == -1:
-            first_word = next_line.strip()
-            remaining = ""
-        else:
-            first_word = next_line[:first_word_end]
-            remaining = next_line[first_word_end + 1:]
+            # Skip if no significant space or no content to pull
+            if available_space < 2 or not next_line.strip():
+                continue
 
-        # Check if word fits with space
-        if len(first_word) + 1 <= available_space:
-            # Pull the word up
-            if current_line:
-                self.lines[self.cursor_line] = current_line + " " + first_word
+            # Find words that can be pulled up
+            words_pulled = False
+            while available_space > 1 and next_line.strip():
+                # Find first word in next line
+                first_word_end = next_line.find(' ')
+                if first_word_end == -1:
+                    first_word = next_line.strip()
+                    remaining = ""
+                else:
+                    first_word = next_line[:first_word_end]
+                    remaining = next_line[first_word_end + 1:]
+
+                # Check if word fits with space
+                space_needed = (1 if current_line else 0) + len(first_word)
+                if space_needed <= available_space:
+                    # Pull the word up
+                    if current_line:
+                        current_line = current_line + " " + first_word
+                    else:
+                        current_line = first_word
+
+                    self.lines[line_idx] = current_line
+                    next_line = remaining
+                    available_space = self.max_width - len(current_line)
+                    words_pulled = True
+                else:
+                    break  # Word doesn't fit
+
+            # Update or remove the next line
+            if next_line.strip():
+                self.lines[line_idx + 1] = next_line
             else:
-                self.lines[self.cursor_line] = first_word
+                # Next line is now empty, remove it
+                del self.lines[line_idx + 1]
+                # Adjust cursor if it was on the deleted line or beyond
+                if self.cursor_line > line_idx + 1:
+                    self.cursor_line -= 1
+                elif self.cursor_line == line_idx + 1:
+                    # Move cursor to end of the line that absorbed the content
+                    self.cursor_line = line_idx
+                    self.cursor_col = len(self.lines[line_idx])
 
-            if remaining.strip():
-                self.lines[self.cursor_line + 1] = remaining
-            else:
-                del self.lines[self.cursor_line + 1]
+                # Continue cascading from same position since we deleted a line
+                if line_idx < len(self.lines) - 1:
+                    self._cascade_content_flow(line_idx)
+                break
