@@ -275,7 +275,7 @@ def check_dependencies() -> Tuple[bool, List[str]]:
 def initialize_environment():
     """Initialize application environment"""
     # Create logs directory if needed
-    Path('logs').mkdir(exist_ok=True)
+    pass
 
 def cleanup_old_files():
     """Clean up old log and history files in current directory"""

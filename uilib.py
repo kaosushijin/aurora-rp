@@ -925,6 +925,11 @@ class MultiLineInput:
                 self.handle_backspace()
                 return InputResult(submitted=False, content=self.get_content())
 
+            elif key == curses.KEY_DC:  # Delete key - curses.KEY_DC is the standard delete key constant
+                # Delete - delete character at cursor (forward delete)
+                self.handle_delete()
+                return InputResult(submitted=False, content=self.get_content())
+
             elif key in [curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]:
                 # Arrow keys
                 self.handle_arrow_keys(key)
@@ -1084,3 +1089,67 @@ class MultiLineInput:
                 break
 
         self._adjust_scroll()
+
+    def handle_delete(self) -> bool:
+        """Handle delete key - forward character deletion with line merging"""
+        current_line = self.lines[self.cursor_line]
+
+        if self.cursor_col < len(current_line):
+            # Delete character at current cursor position (forward delete)
+            new_line = current_line[:self.cursor_col] + current_line[self.cursor_col + 1:]
+            self.lines[self.cursor_line] = new_line
+
+            # Check if line needs rewrapping after deletion
+            self._adjust_word_wrap_after_edit()
+            return True
+
+        elif self.cursor_line < len(self.lines) - 1:
+            # Merge with next line (cursor stays at current position)
+            current_line = self.lines[self.cursor_line]
+            next_line = self.lines[self.cursor_line + 1]
+
+            # Merge lines - cursor position doesn't change
+            self.lines[self.cursor_line] = current_line + next_line
+            del self.lines[self.cursor_line + 1]
+
+            # Adjust scroll and rewrap
+            self._adjust_scroll()
+            self._adjust_word_wrap_after_edit()
+            return True
+
+        return False
+
+    def _adjust_word_wrap_after_edit(self):
+        """Adjust word wrapping after character deletion"""
+        # Simple approach: check if current line is significantly shorter than max_width
+        # and try to pull content from next line if available
+        if self.cursor_line < len(self.lines) - 1:
+            current_line = self.lines[self.cursor_line]
+            next_line = self.lines[self.cursor_line + 1]
+
+            # If current line has room and next line has content
+            if len(current_line) < self.max_width - 20 and next_line:
+                # Find first word in next line
+                first_space = next_line.find(' ')
+                if first_space == -1:
+                    # Whole next line is one word
+                    word_to_pull = next_line
+                    remaining_next = ""
+                else:
+                    # Pull first word
+                    word_to_pull = next_line[:first_space]
+                    remaining_next = next_line[first_space + 1:]
+
+                # Check if word fits on current line
+                if len(current_line) + 1 + len(word_to_pull) <= self.max_width:
+                    # Pull the word up
+                    if current_line:
+                        self.lines[self.cursor_line] = current_line + " " + word_to_pull
+                    else:
+                        self.lines[self.cursor_line] = word_to_pull
+
+                    if remaining_next:
+                        self.lines[self.cursor_line + 1] = remaining_next
+                    else:
+                        # Next line is now empty, remove it
+                        del self.lines[self.cursor_line + 1]

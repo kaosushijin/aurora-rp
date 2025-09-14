@@ -143,15 +143,36 @@ class Orchestrator:
             return False
     
     def _configure_mcp_client(self):
-        """Configure MCP client with loaded prompts and settings"""
+        """Configure MCP client with loaded prompts and settings - FIXED: Concatenate all prompts"""
         if not self.mcp_client:
             return
 
         try:
-            # Set system prompt from critrules (primary prompt)
+            # Build concatenated system prompt from all loaded prompts
+            system_prompt_parts = []
+
+            # Start with critrules (required)
             if self.loaded_prompts.get('critrules'):
-                self.mcp_client.system_prompt = self.loaded_prompts['critrules']
-                self._log_debug("System prompt set from critrules")
+                system_prompt_parts.append(self.loaded_prompts['critrules'])
+                self._log_debug("Added critrules to system prompt")
+
+            # Add companion prompt if available
+            if self.loaded_prompts.get('companion'):
+                system_prompt_parts.append(self.loaded_prompts['companion'])
+                self._log_debug("Added companion to system prompt")
+
+            # Add lowrules prompt if available
+            if self.loaded_prompts.get('lowrules'):
+                system_prompt_parts.append(self.loaded_prompts['lowrules'])
+                self._log_debug("Added lowrules to system prompt")
+
+            # Concatenate with two newlines between each prompt section
+            if system_prompt_parts:
+                concatenated_prompt = '\n\n'.join(system_prompt_parts)
+                self.mcp_client.system_prompt = concatenated_prompt
+                self._log_debug(f"System prompt configured: {len(concatenated_prompt)} chars from {len(system_prompt_parts)} sections")
+            else:
+                self._log_error("No prompts available for system prompt configuration")
 
             # Configure server settings from config using direct property assignment
             mcp_config = self.config.get('mcp', {})
@@ -162,7 +183,7 @@ class Orchestrator:
             if 'timeout' in mcp_config:
                 self.mcp_client.timeout = mcp_config['timeout']
 
-            self._log_debug("MCP client configured with prompts and settings")
+            self._log_debug("MCP client configured with concatenated prompts and settings")
 
         except Exception as e:
             self._log_error(f"MCP client configuration failed: {e}")
