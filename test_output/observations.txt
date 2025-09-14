@@ -1,0 +1,9 @@
+OBSERVATIONS:
+
+debug.log:
+memory.json.tmp error messages
+[14:46:05.417] ORCHESTRATOR: ERROR: Periodic analysis failed: 'StoryMomentumEngine' object has no attribute 'analyze_momentum'
+input validation falling back to pattern analysis exclusively
+[14:46:15.418] MAIN: SEM: No orchestrator callback available for LLM request
+
+overall:  It seems that we have a lot of vestigial module methods to correct and/or reconnect from the remodularization, starting with async semantic analysis.  Let's start with whatever will remove the most bloat from the debug.log for future testing iterations.
