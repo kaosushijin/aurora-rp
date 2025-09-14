@@ -116,6 +116,9 @@ class NCursesUIController:
             # Update multi-input with correct maximum width
             self.multi_input.update_max_width(self.current_layout.input_box.inner_width - 10)  # Account for prompt and margins
             self._log_debug(f"MultiLineInput width set to: {self.current_layout.input_box.inner_width - 10}")
+            # Set viewport height for scrolling input
+            self.multi_input.set_viewport_height(self.current_layout.input_box.inner_height)
+            self._log_debug(f"MultiLineInput viewport height set to: {self.current_layout.input_box.inner_height}")
 
             # Create windows
             if not self._create_windows():
@@ -298,9 +301,13 @@ class NCursesUIController:
             # Get cursor position from multi-line input
             cursor_line, cursor_col = self.multi_input.get_cursor_position()
 
+            # Calculate visual position relative to viewport, not absolute buffer position
+            scroll_offset = self.multi_input.scroll_offset
+            visual_cursor_line = cursor_line - scroll_offset  # Adjust for scroll
+
             # Calculate visual position with border offset
             visual_x = 1 + cursor_col  # +1 for left border
-            visual_y = 1 + cursor_line  # +1 for top border
+            visual_y = 1 + visual_cursor_line  # +1 for top border, adjusted for scroll
 
             # Clamp to layout boundaries
             max_width = self.current_layout.input_box.inner_width
@@ -437,6 +444,7 @@ class NCursesUIController:
 
             # Update multi-input width
             self.multi_input.update_max_width(self.current_layout.input_box.inner_width - 10)
+            self.multi_input.set_viewport_height(self.current_layout.input_box.inner_height)
 
             # Force complete refresh
             self.stdscr.clear()
@@ -564,9 +572,18 @@ class NCursesUIController:
                 # Split content into lines for display
                 content_lines = content.split('\n')
 
-                # Display each line within the available space
-                for line_idx, line_content in enumerate(content_lines):
-                    display_y = line_idx + 1  # +1 for top border
+                # Get viewport info from multi_input
+                scroll_offset = self.multi_input.scroll_offset
+                viewport_height = self.multi_input.viewport_height
+
+                # Calculate which lines to show based on scroll offset
+                start_line = scroll_offset
+                end_line = min(start_line + viewport_height, len(content_lines))
+                visible_lines = content_lines[start_line:end_line]
+
+                # Display visible lines within the available space
+                for display_idx, line_content in enumerate(visible_lines):
+                    display_y = display_idx + 1  # +1 for top border
 
                     # Only display if within window bounds
                     if display_y < self.current_layout.input_box.height - 1:  # -1 for bottom border
@@ -576,7 +593,9 @@ class NCursesUIController:
                             display_content = line_content[:max_width] if len(line_content) > max_width else line_content
 
                             # Display the line content
-                            if display_content or line_idx == cursor_line:  # Always show cursor line even if empty
+                            # Calculate the actual buffer line index for this display line
+                            actual_line_idx = scroll_offset + display_idx
+                            if display_content or actual_line_idx == cursor_line:  # Always show cursor line even if empty
                                 self.input_window.addstr(display_y, 1, display_content)
 
                         except curses.error:

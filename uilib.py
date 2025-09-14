@@ -645,6 +645,10 @@ class MultiLineInput:
         self.scroll_offset = 0      # Vertical scroll within input area
         self.max_width = max_width  # Maximum line width before wrapping
         self.max_lines = 10         # Maximum number of lines allowed
+        self.scroll_offset = 0          # How many lines we've scrolled down from top of buffer
+        self.viewport_height = 5        # How many lines are visible (will be set by layout)
+        self.total_buffer_lines = 0     # Total lines in the complete input buffer
+        self._update_buffer_size()  # Initialize the buffer size tracking
     
     def insert_char(self, char: str) -> bool:
         """Insert character at cursor position with word wrapping - FIXED: Correct wrap trigger"""
@@ -704,6 +708,10 @@ class MultiLineInput:
         
         # Adjust scroll if needed
         self._adjust_scroll()
+
+        # ADD: Check if cursor moved outside viewport and scroll if needed
+        if self.cursor_line >= self.scroll_offset + self.viewport_height:
+            self.scroll_offset = self.cursor_line - self.viewport_height + 1
     
     def handle_backspace(self) -> bool:
         """Handle backspace with line merging"""
@@ -736,14 +744,24 @@ class MultiLineInput:
     def handle_arrow_keys(self, key: int) -> bool:
         """Handle arrow key navigation"""
         if key == curses.KEY_UP:
-            if self.cursor_line > 0:
+            # NEW: Check if we should scroll instead of moving cursor
+            if self._is_at_viewport_top() and self._can_scroll_up():
+                self._scroll_up_one_line()
+                return True
+            elif self.cursor_line > 0:
+                # EXISTING: Normal cursor movement (unchanged)
                 self.cursor_line -= 1
                 self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
                 self._adjust_scroll()
                 return True
         
         elif key == curses.KEY_DOWN:
-            if self.cursor_line < len(self.lines) - 1:
+            # NEW: Check if we should scroll instead of moving cursor
+            if self._is_at_viewport_bottom() and self._can_scroll_down():
+                self._scroll_down_one_line()
+                return True
+            elif self.cursor_line < len(self.lines) - 1:
+                # EXISTING: Normal cursor movement (unchanged)
                 self.cursor_line += 1
                 self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
                 self._adjust_scroll()
@@ -846,12 +864,16 @@ class MultiLineInput:
             if self.cursor_col > break_point:
                 self.cursor_line += 1
                 self.cursor_col = self.cursor_col - break_point - (1 if current_line[break_point] == ' ' else 0)
+                # ADD: Check if cursor moved outside viewport and scroll if needed
+                if self.cursor_line >= self.scroll_offset + self.viewport_height:
+                    self.scroll_offset = self.cursor_line - self.viewport_height + 1
             else:
                 self.cursor_col = len(line_before)
 
         self._adjust_scroll()
     
     def _adjust_scroll(self):
+        self._update_buffer_size()
         """Adjust scroll to keep cursor visible"""
         # This would be implemented based on available height
         # For now, keep it simple
@@ -909,3 +931,48 @@ class MultiLineInput:
         except Exception as e:
             # Return safe fallback on error
             return InputResult(submitted=False, content=self.get_content())
+
+    def _is_at_viewport_top(self) -> bool:
+        """Check if cursor is at the top line of the visible viewport"""
+        # Top of viewport is at scroll_offset
+        return self.cursor_line == self.scroll_offset
+
+    def _is_at_viewport_bottom(self) -> bool:
+        """Check if cursor is at the bottom line of the visible viewport"""
+        # Bottom of viewport is at scroll_offset + viewport_height - 1
+        viewport_bottom = self.scroll_offset + self.viewport_height - 1
+        return self.cursor_line >= viewport_bottom
+
+    def _can_scroll_up(self) -> bool:
+        """Check if there's content above the current viewport to scroll to"""
+        return self.scroll_offset > 0
+
+    def _can_scroll_down(self) -> bool:
+        """Check if there's content below the current viewport to scroll to"""
+        return (self.scroll_offset + self.viewport_height) < self.total_buffer_lines
+
+    def _scroll_up_one_line(self):
+        """Scroll viewport up by one line (shows earlier content)"""
+        if self._can_scroll_up():
+            self.scroll_offset -= 1
+            # Keep cursor at same screen position but it now points to different buffer content
+
+    def _scroll_down_one_line(self):
+        """Scroll viewport down by one line (shows later content)"""
+        if self._can_scroll_down():
+            self.scroll_offset += 1
+            # Keep cursor at same screen position but it now points to different buffer content
+
+    def _update_buffer_size(self):
+        """Update total buffer size when content changes"""
+        # This gets called whenever we add/remove lines
+        self.total_buffer_lines = len(self.lines)
+
+        # Ensure scroll_offset doesn't go beyond available content
+        max_scroll = max(0, self.total_buffer_lines - self.viewport_height)
+        if self.scroll_offset > max_scroll:
+            self.scroll_offset = max_scroll
+
+    def set_viewport_height(self, height: int):
+        """Set the visible height of the input viewport"""
+        self.viewport_height = max(1, height)  # Ensure at least 1 line visible
