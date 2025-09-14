@@ -286,7 +286,9 @@ class Orchestrator:
         UPDATED: Added support for stateless UI operations
         """
         try:
-            self._log_debug(f"Processing UI callback: {action}")
+            # Only log non-routine callbacks to reduce spam
+            if callback_type not in ["get_messages", "get_display_status"]:
+                self._log_debug(f"Processing UI callback: {callback_type}")
 
             if action == "user_input":
                 return self._process_user_input(data)

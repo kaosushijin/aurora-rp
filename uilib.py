@@ -663,7 +663,7 @@ class MultiLineInput:
 
         # FIXED: Check if line needs wrapping using proper width
         # Remove the arbitrary "- 5" that was causing premature wrapping
-        if len(new_line) >= self.max_width:
+        if len(new_line) > self.max_width:
             self._wrap_current_line()
 
         return True
@@ -721,6 +721,9 @@ class MultiLineInput:
             new_line = current_line[:self.cursor_col-1] + current_line[self.cursor_col:]
             self.lines[self.cursor_line] = new_line
             self.cursor_col -= 1
+
+            # PHASE 3: Try to flow content after character deletion
+            self._smart_content_flow()
             return True
         
         elif self.cursor_line > 0:
@@ -731,12 +734,19 @@ class MultiLineInput:
             # Move cursor to end of previous line
             self.cursor_col = len(prev_line)
             
-            # Merge lines
-            self.lines[self.cursor_line - 1] = prev_line + current_line
+            # PHASE 3: Smart line merge with overflow check
+            merged_line = prev_line + current_line
+            self.lines[self.cursor_line - 1] = merged_line
             del self.lines[self.cursor_line]
             self.cursor_line -= 1
-            
-            self._adjust_scroll()
+
+            # Check if merged line needs wrapping
+            if len(merged_line) > self.max_width:
+                self._wrap_current_line()
+            else:
+                self._adjust_scroll()
+            # PHASE 3: Try to flow content after backspace
+            self._smart_content_flow()
             return True
         
         return False
@@ -853,19 +863,20 @@ class MultiLineInput:
 
         # FIXED: Use actual max_width instead of arbitrary reduction
         # The issue was subtracting 5 from max_width, causing premature wrapping
-        if len(current_line) < self.max_width:
+        if len(current_line) <= self.max_width:
             return
 
-        # Find best break point (space before cursor)
-        break_point = self.cursor_col
-        for i in range(self.cursor_col - 1, max(0, self.cursor_col - 20), -1):
-            if current_line[i] == ' ':
-                break_point = i
-                break
+        # PHASE 2: Intelligent word boundary detection
+        break_point = self._find_wrap_point(current_line, self.max_width)
 
-        # Split line
-        line_before = current_line[:break_point].rstrip()
-        line_after = current_line[break_point:].lstrip()
+        # PHASE 2: Smart line splitting with space handling
+        line_before = current_line[:break_point]
+        line_after = current_line[break_point:]
+
+        # Only strip spaces if we broke at a space
+        if break_point < len(current_line) and current_line[break_point] == ' ':
+            line_before = line_before.rstrip()
+            line_after = line_after.lstrip()
 
         # Update lines
         self.lines[self.cursor_line] = line_before
@@ -877,22 +888,55 @@ class MultiLineInput:
                 self.cursor_line += 1
                 self.cursor_col = self.cursor_col - break_point - (1 if current_line[break_point] == ' ' else 0)
                 # ADD: Check if cursor moved outside viewport and scroll if needed
-                if self.cursor_line >= self.scroll_offset + self.viewport_height:
-                    self.scroll_offset = self.cursor_line - self.viewport_height + 1
+                # PHASE 4: Ensure cursor remains visible after wrapping
+                self._adjust_scroll()
             else:
                 self.cursor_col = len(line_before)
 
         self._adjust_scroll()
+
+    def _find_wrap_point(self, text: str, max_width: int) -> int:
+        """PHASE 2: Find intelligent word boundary for wrapping"""
+        if len(text) <= max_width:
+            return len(text)
+
+        # Look backwards from max_width for good break points
+        for i in range(max_width, max(0, max_width - 25), -1):
+            if i >= len(text):
+                continue
+
+            char = text[i]
+
+            # Prefer breaking after punctuation
+            if char in '.!?;:':
+                return i + 1
+
+            # Break at spaces (most common)
+            if char == ' ':
+                return i
+
+            # Break after commas
+            if char == ',':
+                return i + 1
+
+        # Fallback: break at max_width (hard break)
+        return max_width
     
     def _adjust_scroll(self):
+        """PHASE 4: Proper scroll adjustment with viewport boundaries"""
         self._update_buffer_size()
-        """Adjust scroll to keep cursor visible"""
-        # This would be implemented based on available height
-        # For now, keep it simple
+
+        # Scroll up if cursor is above viewport
         if self.cursor_line < self.scroll_offset:
             self.scroll_offset = self.cursor_line
-        elif self.cursor_line >= self.scroll_offset + 5:  # Assume max 5 visible lines
-            self.scroll_offset = self.cursor_line - 4
+
+        # Scroll down if cursor is below viewport
+        elif self.cursor_line >= self.scroll_offset + self.viewport_height:
+            self.scroll_offset = self.cursor_line - self.viewport_height + 1
+
+        # Ensure scroll doesn't go negative or beyond content
+        self.scroll_offset = max(0, min(self.scroll_offset,
+                                    max(0, self.total_buffer_lines - self.viewport_height)))
 
     def get_cursor_position(self) -> Tuple[int, int]:
         """Get current cursor position as (line, column)"""
@@ -1100,7 +1144,7 @@ class MultiLineInput:
             self.lines[self.cursor_line] = new_line
 
             # Check if line needs rewrapping after deletion
-            self._adjust_word_wrap_after_edit()
+            self._smart_content_flow()  # PHASE 3: Smart content flow
             return True
 
         elif self.cursor_line < len(self.lines) - 1:
@@ -1114,7 +1158,7 @@ class MultiLineInput:
 
             # Adjust scroll and rewrap
             self._adjust_scroll()
-            self._adjust_word_wrap_after_edit()
+            self._smart_content_flow()  # PHASE 3: Smart content flow
             return True
 
         return False
@@ -1153,3 +1197,38 @@ class MultiLineInput:
                     else:
                         # Next line is now empty, remove it
                         del self.lines[self.cursor_line + 1]
+
+    def _smart_content_flow(self):
+        """PHASE 3: Intelligent content flow after edits"""
+        if self.cursor_line >= len(self.lines) - 1:
+            return  # No next line to pull from
+
+        current_line = self.lines[self.cursor_line]
+        next_line = self.lines[self.cursor_line + 1]
+
+        # Only flow if current line has significant space (more conservative than -20)
+        available_space = self.max_width - len(current_line)
+        if available_space < 10 or not next_line.strip():
+            return
+
+        # Find first word in next line
+        first_word_end = next_line.find(' ')
+        if first_word_end == -1:
+            first_word = next_line.strip()
+            remaining = ""
+        else:
+            first_word = next_line[:first_word_end]
+            remaining = next_line[first_word_end + 1:]
+
+        # Check if word fits with space
+        if len(first_word) + 1 <= available_space:
+            # Pull the word up
+            if current_line:
+                self.lines[self.cursor_line] = current_line + " " + first_word
+            else:
+                self.lines[self.cursor_line] = first_word
+
+            if remaining.strip():
+                self.lines[self.cursor_line + 1] = remaining
+            else:
+                del self.lines[self.cursor_line + 1]
