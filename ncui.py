@@ -182,13 +182,46 @@ class NCursesUIController:
             return False
 
     def _populate_welcome_content(self):
-        """FIXED: Welcome message goes through orchestrator like .bak version"""
+        """FIXED: Conditional welcome with system-only memory cleanup"""
         try:
-            # Instead of adding to local buffer, add to orchestrator memory
+            # Check if there's meaningful existing memory through orchestrator
+            has_meaningful_memory = False
+            system_only_memory = False
+
             if self.callback_handler:
+                result = self.callback_handler("get_messages", {"limit": 10})
+                if result and result.get("success", False):
+                    messages = result.get("messages", [])
+
+                    if messages:
+                        # Check message composition
+                        user_messages = [msg for msg in messages if msg.get("type") == "user"]
+                        assistant_messages = [msg for msg in messages if msg.get("type") == "assistant"]
+                        system_messages = [msg for msg in messages if msg.get("type") == "system"]
+
+                        # Meaningful memory = has user/assistant conversation
+                        has_meaningful_memory = len(user_messages) > 0 or len(assistant_messages) > 0
+
+                        # System-only memory = only system messages exist
+                        system_only_memory = len(system_messages) > 0 and len(user_messages) == 0 and len(assistant_messages) == 0
+
+            # Clear system-only memory if detected
+            if system_only_memory and not has_meaningful_memory:
+                self._log_debug("Detected system-only memory, clearing for fresh start")
+                if self.callback_handler:
+                    self.callback_handler("clear_memory", {})
+                has_meaningful_memory = False
+
+            # Send appropriate welcome message
+            if self.callback_handler:
+                if has_meaningful_memory:
+                    welcome_message = "Resuming previous session."
+                else:
+                    welcome_message = "Starting new session. Type /help for commands."
+
                 # Send welcome message as system message through orchestrator
                 result = self.callback_handler("add_system_message", {
-                    "content": "Welcome to DevName RPG Client",
+                    "content": welcome_message,
                     "message_type": "system"
                 })
 
