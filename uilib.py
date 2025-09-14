@@ -743,6 +743,10 @@ class MultiLineInput:
     
     def handle_arrow_keys(self, key: int) -> bool:
         """Handle arrow key navigation"""
+        # DEBUG: Log all key codes to find Ctrl combinations
+        if key < 32 or key > 126:  # Non-printable keys
+            print(f"DEBUG: Special key pressed: {key}", file=sys.stderr)
+
         if key == curses.KEY_UP:
             # NEW: Check if we should scroll instead of moving cursor
             if self._is_at_viewport_top() and self._can_scroll_up():
@@ -788,6 +792,14 @@ class MultiLineInput:
                 self.cursor_col = 0
                 self._adjust_scroll()
                 return True
+
+        elif key == 543:  # Ctrl+Left - jump word left
+            self._jump_word_left()
+            return True
+
+        elif key == 558:  # Ctrl+Right - jump word right
+            self._jump_word_right()
+            return True
         
         return False
     
@@ -976,3 +988,99 @@ class MultiLineInput:
     def set_viewport_height(self, height: int):
         """Set the visible height of the input viewport"""
         self.viewport_height = max(1, height)  # Ensure at least 1 line visible
+
+    def _jump_word_left(self):
+        """Jump cursor to beginning of previous word, across line boundaries"""
+        # If at beginning of buffer, do nothing
+        if self.cursor_line == 0 and self.cursor_col == 0:
+            return
+
+        # Move one position left to start search
+        if self.cursor_col > 0:
+            self.cursor_col -= 1
+        elif self.cursor_line > 0:
+            # Move to end of previous line
+            self.cursor_line -= 1
+            self.cursor_col = len(self.lines[self.cursor_line])
+
+        # Skip whitespace and punctuation
+        while True:
+            if self.cursor_line == 0 and self.cursor_col == 0:
+                break
+
+            current_char = self._get_char_at_cursor()
+            if current_char and current_char.isalnum():
+                break
+
+            if self.cursor_col > 0:
+                self.cursor_col -= 1
+            elif self.cursor_line > 0:
+                self.cursor_line -= 1
+                self.cursor_col = len(self.lines[self.cursor_line])
+            else:
+                break
+
+        # Skip to beginning of current word
+        while True:
+            if self.cursor_line == 0 and self.cursor_col == 0:
+                break
+
+            # Look at previous character
+            if self.cursor_col > 0:
+                prev_char = self.lines[self.cursor_line][self.cursor_col - 1]
+                if not prev_char.isalnum():
+                    break
+                self.cursor_col -= 1
+            elif self.cursor_line > 0:
+                prev_line = self.lines[self.cursor_line - 1]
+                if not prev_line or not prev_line[-1].isalnum():
+                    break
+                self.cursor_line -= 1
+                self.cursor_col = len(self.lines[self.cursor_line]) - 1
+            else:
+                break
+
+        self._adjust_scroll()
+
+    def _get_char_at_cursor(self):
+        """Get character at current cursor position, or None if at end"""
+        if self.cursor_line >= len(self.lines):
+            return None
+        current_line = self.lines[self.cursor_line]
+        if self.cursor_col >= len(current_line):
+            return None
+        return current_line[self.cursor_col]
+
+    def _jump_word_right(self):
+        """Jump cursor to beginning of next word, across line boundaries"""
+        # Skip current word if we're in one
+        while True:
+            current_char = self._get_char_at_cursor()
+            if not current_char or not current_char.isalnum():
+                break
+
+            if self.cursor_col < len(self.lines[self.cursor_line]):
+                self.cursor_col += 1
+            elif self.cursor_line < len(self.lines) - 1:
+                self.cursor_line += 1
+                self.cursor_col = 0
+            else:
+                # At end of buffer
+                return
+
+        # Skip whitespace and punctuation to find next word
+        while True:
+            current_char = self._get_char_at_cursor()
+            if current_char and current_char.isalnum():
+                break
+
+            if self.cursor_col < len(self.lines[self.cursor_line]):
+                self.cursor_col += 1
+            elif self.cursor_line < len(self.lines) - 1:
+                self.cursor_line += 1
+                self.cursor_col = 0
+            else:
+                # At end of buffer
+                break
+
+        self._adjust_scroll()
