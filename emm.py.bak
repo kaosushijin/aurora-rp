@@ -52,9 +52,7 @@ class Message:
         self.timestamp = timestamp or datetime.now().isoformat()
         self.token_estimate = self._estimate_tokens(content)
         self.id = str(uuid4())
-        self.content_category = "standard"  # Existing field
-        self.importance_score = 0.4  # NEW: Add importance scoring
-        self.semantic_metadata = {}  # NEW: Additional semantic data
+        self.content_category = "standard"  # Set by sem.py categorization
         self.condensed = False
     
     def _estimate_tokens(self, text: str) -> int:
@@ -73,8 +71,6 @@ class Message:
             "timestamp": self.timestamp,
             "tokens": self.token_estimate,
             "content_category": self.content_category,
-            "importance_score": self.importance_score,  # NEW
-            "semantic_metadata": self.semantic_metadata,  # NEW
             "condensed": self.condensed
         }
     
@@ -89,8 +85,6 @@ class Message:
         message.id = data.get("id", str(uuid4()))
         message.token_estimate = data.get("tokens", message.token_estimate)
         message.content_category = data.get("content_category", "standard")
-        message.importance_score = data.get("importance_score", 0.4)  # NEW
-        message.semantic_metadata = data.get("semantic_metadata", {})  # NEW
         message.condensed = data.get("condensed", False)
         return message
 

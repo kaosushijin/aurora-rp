@@ -417,11 +417,6 @@ class Orchestrator:
                     self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
                     self.state.message_count += 1
 
-                    # NEW: Add immediate semantic analysis for assistant message
-                    if self.memory_manager.messages:
-                        assistant_message = self.memory_manager.messages[-1]
-                        self._perform_immediate_semantic_analysis(assistant_message)
-
                     # Force save of assistant response
                     if hasattr(self.memory_manager, '_auto_save'):
                         try:
@@ -717,8 +712,6 @@ Provide analysis in JSON format:
                 return self._trigger_immediate_analysis()
             elif action == "shutdown":
                 return self._handle_shutdown()
-            elif action == "show_semantic_analysis":
-                return self._show_semantic_analysis(data)
             else:
                 self._log_error(f"Unknown UI callback action: {action}")
                 return {"success": False, "error": f"Unknown action: {action}"}
@@ -787,11 +780,6 @@ Provide analysis in JSON format:
             if self.memory_manager:
                 self.memory_manager.add_message(user_input, MessageType.USER)
                 self.state.message_count += 1
-
-                # NEW: Add immediate semantic analysis for user message
-                if self.memory_manager.messages:
-                    user_message = self.memory_manager.messages[-1]
-                    self._perform_immediate_semantic_analysis(user_message)
 
                 # CRITICAL: Force immediate save for echo availability
                 if hasattr(self.memory_manager, '_auto_save'):
@@ -1471,154 +1459,6 @@ Provide analysis in JSON format:
 
         except Exception as e:
             self._log_error(f"Failed to add resolution guidance: {e}")
-
-    def _perform_immediate_semantic_analysis(self, message) -> None:
-        """
-        Perform immediate pattern-based semantic analysis
-        Called synchronously after each message is stored
-        """
-        try:
-            content_lower = message.content.lower()
-
-            # Story critical patterns - highest importance
-            if any(phrase in content_lower for phrase in [
-                "main quest", "primary objective", "critical mission", "prophecy",
-                "fate of", "destiny", "chosen one", "final battle",
-                "world ending", "save the kingdom", "last hope", "ancient evil",
-                "bandit leader", "quest"  # Added based on your conversation
-            ]):
-                message.content_category = "story_critical"
-                message.importance_score = 0.9
-
-            # Character focused patterns
-            elif any(phrase in content_lower for phrase in [
-                "my name is", "i am called", "backstory", "my past",
-                "character development", "personality", "my motivation",
-                "why i", "i believe", "my goal", "my family", "i grew up",
-                "i will play", "half-elf", "rogue named", "koryn"  # Added from your intro
-            ]):
-                message.content_category = "character_focused"
-                message.importance_score = 0.8
-
-            # Relationship dynamics patterns
-            elif any(phrase in content_lower for phrase in [
-                "trust", "betray", "alliance", "friendship", "romance",
-                "rival", "enemy turned", "companion", "loyalty",
-                "working together", "conflict between", "i care about",
-                "kael", "lyria", "companions"  # Added your companions
-            ]):
-                message.content_category = "relationship_dynamics"
-                message.importance_score = 0.7
-
-            # Emotional significance patterns
-            elif any(phrase in content_lower for phrase in [
-                "i feel", "makes me", "emotional", "heart breaks",
-                "fear overwhelms", "love", "hate", "joy", "sorrow",
-                "triumph", "devastating", "overwhelming", "tears",
-                "afraid", "scared", "terrified", "anxious", "worried"
-            ]):
-                message.content_category = "emotional_significance"
-                message.importance_score = 0.6
-
-            # World building patterns
-            elif any(phrase in content_lower for phrase in [
-                "history of", "legend says", "long ago", "ancient",
-                "culture", "tradition", "geography", "politics",
-                "economy", "religion", "magic system", "technology",
-                "ashen wastes", "watchtower", "ruins"  # Added from your story
-            ]):
-                message.content_category = "world_building"
-                message.importance_score = 0.5
-
-            # Action/tension patterns that might be elevated
-            elif any(phrase in content_lower for phrase in [
-                "draw", "weapon", "rapier", "sword", "attack", "fight",
-                "danger", "threat", "enemy", "presence", "watching",
-                "ground trembles", "earth shudders", "ancient", "stirs"
-            ]):
-                message.content_category = "emotional_significance"  # Tension is emotionally significant
-                message.importance_score = 0.6
-
-            # Default standard category
-            else:
-                message.content_category = "standard"
-                message.importance_score = 0.4
-
-            # Add semantic metadata
-            message.semantic_metadata = {
-                "analysis_type": "pattern",
-                "analyzed_at": time.time(),
-                "content_length": len(message.content),
-                "token_count": message.token_estimate,
-                "analysis_version": "1.0"
-            }
-
-            self._log_debug(f"Semantic analysis: {message.id[:8]} -> {message.content_category} (score: {message.importance_score})")
-
-        except Exception as e:
-            self._log_error(f"Immediate semantic analysis failed for message {getattr(message, 'id', 'unknown')}: {e}")
-            # Set safe defaults on error
-            message.content_category = "standard"
-            message.importance_score = 0.4
-            message.semantic_metadata = {"analysis_type": "error", "error": str(e)}
-
-    def _show_semantic_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Show semantic analysis results for recent messages"""
-        try:
-            limit = data.get("limit", 10)
-
-            if not self.memory_manager:
-                return {"success": False, "error": "Memory manager not available"}
-
-            # Get recent messages
-            recent_messages = self.memory_manager.get_messages(limit)
-
-            if not recent_messages:
-                return {"success": False, "error": "No messages found"}
-
-            # Display semantic analysis for each message
-            analysis_lines = ["=== SEMANTIC ANALYSIS REPORT ==="]
-
-            category_counts = {}
-            total_importance = 0.0
-
-            for msg in recent_messages:
-                # Skip system messages for cleaner display
-                if msg.message_type.value == "system":
-                    continue
-
-                category = getattr(msg, 'content_category', 'unknown')
-                importance = getattr(msg, 'importance_score', 0.0)
-                content_preview = msg.content[:50] + "..." if len(msg.content) > 50 else msg.content
-
-                analysis_lines.append(f"[{msg.message_type.value.upper()}] {content_preview}")
-                analysis_lines.append(f"  Category: {category} | Score: {importance:.2f}")
-
-                # Track statistics
-                category_counts[category] = category_counts.get(category, 0) + 1
-                total_importance += importance
-
-            # Add summary statistics
-            analysis_lines.append("")
-            analysis_lines.append("=== SUMMARY ===")
-            analysis_lines.append(f"Messages analyzed: {len([m for m in recent_messages if m.message_type.value != 'system'])}")
-            analysis_lines.append(f"Average importance: {total_importance / max(1, len(recent_messages)):.2f}")
-            analysis_lines.append("Category distribution:")
-            for category, count in sorted(category_counts.items()):
-                analysis_lines.append(f"  {category}: {count}")
-
-            # Send each line as a system message
-            for line in analysis_lines:
-                self._add_system_message({
-                    "content": line,
-                    "message_type": "system"
-                })
-
-            return {"success": True, "messages_analyzed": len(recent_messages)}
-
-        except Exception as e:
-            self._log_error(f"Show semantic analysis failed: {e}")
-            return {"success": False, "error": str(e)}
 
 # =============================================================================
 # MODULE EXPORTS

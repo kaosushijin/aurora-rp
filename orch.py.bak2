@@ -717,8 +717,6 @@ Provide analysis in JSON format:
                 return self._trigger_immediate_analysis()
             elif action == "shutdown":
                 return self._handle_shutdown()
-            elif action == "show_semantic_analysis":
-                return self._show_semantic_analysis(data)
             else:
                 self._log_error(f"Unknown UI callback action: {action}")
                 return {"success": False, "error": f"Unknown action: {action}"}
@@ -1561,64 +1559,6 @@ Provide analysis in JSON format:
             message.content_category = "standard"
             message.importance_score = 0.4
             message.semantic_metadata = {"analysis_type": "error", "error": str(e)}
-
-    def _show_semantic_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Show semantic analysis results for recent messages"""
-        try:
-            limit = data.get("limit", 10)
-
-            if not self.memory_manager:
-                return {"success": False, "error": "Memory manager not available"}
-
-            # Get recent messages
-            recent_messages = self.memory_manager.get_messages(limit)
-
-            if not recent_messages:
-                return {"success": False, "error": "No messages found"}
-
-            # Display semantic analysis for each message
-            analysis_lines = ["=== SEMANTIC ANALYSIS REPORT ==="]
-
-            category_counts = {}
-            total_importance = 0.0
-
-            for msg in recent_messages:
-                # Skip system messages for cleaner display
-                if msg.message_type.value == "system":
-                    continue
-
-                category = getattr(msg, 'content_category', 'unknown')
-                importance = getattr(msg, 'importance_score', 0.0)
-                content_preview = msg.content[:50] + "..." if len(msg.content) > 50 else msg.content
-
-                analysis_lines.append(f"[{msg.message_type.value.upper()}] {content_preview}")
-                analysis_lines.append(f"  Category: {category} | Score: {importance:.2f}")
-
-                # Track statistics
-                category_counts[category] = category_counts.get(category, 0) + 1
-                total_importance += importance
-
-            # Add summary statistics
-            analysis_lines.append("")
-            analysis_lines.append("=== SUMMARY ===")
-            analysis_lines.append(f"Messages analyzed: {len([m for m in recent_messages if m.message_type.value != 'system'])}")
-            analysis_lines.append(f"Average importance: {total_importance / max(1, len(recent_messages)):.2f}")
-            analysis_lines.append("Category distribution:")
-            for category, count in sorted(category_counts.items()):
-                analysis_lines.append(f"  {category}: {count}")
-
-            # Send each line as a system message
-            for line in analysis_lines:
-                self._add_system_message({
-                    "content": line,
-                    "message_type": "system"
-                })
-
-            return {"success": True, "messages_analyzed": len(recent_messages)}
-
-        except Exception as e:
-            self._log_error(f"Show semantic analysis failed: {e}")
-            return {"success": False, "error": str(e)}
 
 # =============================================================================
 # MODULE EXPORTS

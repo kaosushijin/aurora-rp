@@ -884,8 +884,7 @@ class NCursesUIController:
                     "/theme <name> - Change color theme",
                     "  Available themes: classic, dark, bright, nord, solarized, monokai",
                     "/stats - Show system statistics",
-                    "/analyze - Trigger immediate analysis",
-                    "/semantic - Show semantic analysis for recent messages"  # NEW
+                    "/analyze - Trigger immediate analysis"
                 ]
                 for line in help_text:
                     if self.callback_handler:
@@ -933,21 +932,6 @@ class NCursesUIController:
                     else:
                         self.callback_handler("add_system_message", {
                             "content": "Failed to trigger analysis",
-                            "message_type": "system"
-                        })
-                    self._process_display_updates()
-                return True
-
-            elif command == "/semantic":
-                # Show semantic analysis for recent messages
-                if self.callback_handler:
-                    result = self.callback_handler("show_semantic_analysis", {"limit": 10})
-                    if result and result.get("success", False):
-                        # Results will be displayed as system messages by orchestrator
-                        pass
-                    else:
-                        self.callback_handler("add_system_message", {
-                            "content": "Failed to retrieve semantic analysis data",
                             "message_type": "system"
                         })
                     self._process_display_updates()
