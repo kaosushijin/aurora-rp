@@ -237,37 +237,23 @@ class SemanticAnalysisEngine:
                     "analysis_prompt": self._build_semantic_prompt(content)
                 }
             )
-
+            
             # Request LLM analysis through orchestrator
             llm_result = self._request_llm_analysis(request)
-
+            
             if llm_result and llm_result.success:
-                self._log_debug(f"LLM analysis successful for {message_id}")
-                raw_response = llm_result.data.get("response", "")
-                self._log_debug(f"Raw LLM response for {message_id}: {raw_response[:200]}...")  # First 200 chars
-
                 # Parse and validate LLM response
-                parsed_result = self._parse_semantic_response_robust(raw_response, attempt=1)
-
-                if parsed_result:
-                    self._log_debug(f"Parsed result for {message_id}: {parsed_result}")
-                    if self._validate_semantic_data(parsed_result, 1):
-                        self._log_debug(f"Successfully analyzed {message_id} with LLM")
-                        return self._inject_missing_fields(parsed_result, 1)
-                    else:
-                        self._log_debug(f"Validation failed for {message_id}: missing required fields")
-                else:
-                    self._log_debug(f"Parsing failed for {message_id}: could not extract semantic data")
-            else:
-                if llm_result:
-                    self._log_debug(f"LLM analysis failed for {message_id}: {llm_result.error_message}")
-                else:
-                    self._log_debug(f"LLM analysis returned None for {message_id}")
-
+                parsed_result = self._parse_semantic_response_robust(
+                    llm_result.data.get("response", ""), attempt=1
+                )
+                
+                if parsed_result and self._validate_semantic_data(parsed_result, 1):
+                    return self._inject_missing_fields(parsed_result, 1)
+            
             # Fallback to pattern-based analysis
             self._log_debug(f"Using pattern-based analysis for message {message_id}")
             return self._pattern_extract_semantic(content)
-
+            
         except Exception as e:
             self._log_debug(f"Message semantic analysis failed for {message_id}: {e}")
             return None
@@ -299,42 +285,17 @@ Consider:
         """
         if not response:
             return None
-
+        
         # Try multiple parsing strategies
         strategies = [1, 2, 3, 4]  # JSON, key-value, pattern, fallback
-
+        
         for strategy in strategies:
             try:
                 if strategy == 1:
-                    # Enhanced JSON parsing with multiple patterns
-                    self._log_debug(f"Attempting JSON parsing on: {response[:100]}...")
-
-                    # Try direct JSON parse first
-                    try:
-                        return json.loads(response.strip())
-                    except json.JSONDecodeError:
-                        pass
-
-                    # Try finding JSON object in response
-                    json_patterns = [
-                        r'\{[^{}]*"importance_score"[^{}]*\}',  # Look for our specific structure
-                        r'\{[^{}]*\}',  # Any JSON object
-                        r'```json\s*(\{[^}]*\})\s*```',  # JSON in code blocks
-                        r'```\s*(\{[^}]*\})\s*```'  # JSON in generic code blocks
-                    ]
-
-                    for pattern in json_patterns:
-                        matches = re.findall(pattern, response, re.DOTALL | re.IGNORECASE)
-                        for match in matches:
-                            try:
-                                if isinstance(match, tuple):
-                                    match = match[0] if match else ""
-                                result = json.loads(match.strip())
-                                self._log_debug(f"Successfully parsed JSON: {result}")
-                                return result
-                            except json.JSONDecodeError:
-                                continue
-
+                    # JSON parsing
+                    json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+                    if json_match:
+                        return json.loads(json_match.group())
                 elif strategy == 2:
                     # Parse key-value pairs
                     return self._extract_key_values(response)
@@ -344,11 +305,9 @@ Consider:
                 elif strategy == 4:
                     # Fallback parsing for specific attempt
                     return self._fallback_parse_semantic(response, attempt)
-            except (json.JSONDecodeError, Exception) as e:
-                self._log_debug(f"Strategy {strategy} failed: {e}")
+            except (json.JSONDecodeError, Exception):
                 continue
-
-        self._log_debug("All parsing strategies failed")
+        
         return None
     
     def _parse_momentum_response(self, response: str) -> Optional[Dict[str, Any]]:
@@ -446,33 +405,23 @@ Consider:
                 "categories": ["story_critical"] if preserve else ["standard"],
                 "fragments": None
             }
-
+        
         # Ensure importance_score is valid
         importance = data.get("importance_score", 0.4)
         if not isinstance(importance, (int, float)) or importance < 0 or importance > 1:
             importance = 0.4
         data["importance_score"] = importance
-
-        # Normalize categories to list format
+        
+        # Ensure categories is a list
         categories = data.get("categories", ["standard"])
-
-        if isinstance(categories, dict):
-            # Convert dict format to list (take keys where value > 0.5 or True)
-            category_list = []
-            for cat, value in categories.items():
-                if (isinstance(value, (int, float)) and value > 0.5) or \
-                   (isinstance(value, bool) and value):
-                    category_list.append(cat)
-            categories = category_list if category_list else ["standard"]
-        elif not isinstance(categories, list):
+        if not isinstance(categories, list):
             categories = ["standard"]
-
         data["categories"] = categories
-
+        
         # Ensure fragments field exists
         if "fragments" not in data:
             data["fragments"] = None
-
+        
         return data
     
     def _request_llm_analysis(self, request: SemanticAnalysisRequest) -> Optional[SemanticAnalysisResult]:

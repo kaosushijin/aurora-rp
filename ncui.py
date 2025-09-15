@@ -923,38 +923,18 @@ class NCursesUIController:
 
             elif command == "/analyze":
                 if self.callback_handler:
-                    # Show immediate feedback
-                    self.callback_handler("add_system_message", {
-                        "content": "Starting analysis...",
-                        "message_type": "system"
-                    })
+                    result = self.callback_handler("force_analysis", {})
+                    if result and result.get("success", False):
+                        self.callback_handler("add_system_message", {
+                            "content": "Analysis triggered",
+                            "message_type": "system"
+                        })
+                    else:
+                        self.callback_handler("add_system_message", {
+                            "content": "Failed to trigger analysis",
+                            "message_type": "system"
+                        })
                     self._process_display_updates()
-
-                    # Run analysis in background thread
-                    def background_analysis():
-                        try:
-                            result = self.callback_handler("force_analysis", {})
-
-                            # Update UI when complete
-                            if result and result.get("success", False):
-                                self.callback_handler("add_system_message", {
-                                    "content": "Analysis completed",
-                                    "message_type": "system"
-                                })
-                            else:
-                                self.callback_handler("add_system_message", {
-                                    "content": "Analysis failed",
-                                    "message_type": "system"
-                                })
-                        except Exception as e:
-                            self.callback_handler("add_system_message", {
-                                "content": f"Analysis error: {e}",
-                                "message_type": "system"
-                            })
-
-                    import threading
-                    analysis_thread = threading.Thread(target=background_analysis, daemon=True)
-                    analysis_thread.start()
                 return True
 
             return False
