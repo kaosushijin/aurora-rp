@@ -709,26 +709,17 @@ class Orchestrator:
         try:
             if self.state.analysis_in_progress:
                 return {"success": False, "error": "Analysis already in progress"}
-
+            
             self._log_debug("Starting immediate analysis")
-
-            # Run analysis in background thread for UI responsiveness
-            def background_analysis():
-                try:
-                    self._trigger_periodic_analysis()
-
-                    # Notify UI when complete
-                    if self.ui_controller:
-                        # This would require a callback to UI to update status
-                        pass
-                except Exception as e:
-                    self._log_error(f"Background analysis failed: {e}")
-
-            analysis_thread = threading.Thread(target=background_analysis, daemon=True)
-            analysis_thread.start()
-
-            return {"success": True, "message": "Analysis started in background"}
-
+            
+            # Run analysis in current thread since user requested it
+            self._trigger_periodic_analysis()
+            
+            return {
+                "success": True,
+                "results": self.state.analysis_results
+            }
+            
         except Exception as e:
             self._log_error(f"Immediate analysis failed: {e}")
             return {"success": False, "error": str(e)}
@@ -967,17 +958,17 @@ class Orchestrator:
             if not self.mcp_client:
                 return {"success": False, "error": "MCP client not available"}
 
-            # Create isolated analysis context - NO game context
+            # Create a simplified message for analysis
             analysis_messages = [
-                {"role": "system", "content": "You are a semantic analyzer. Respond only with JSON analysis."},
-                {"role": "user", "content": f"{prompt}\n\nMessage to analyze: {content}"}
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": content}
             ]
 
-            # Use MCP client with isolated context
+            # Use MCP client directly for analysis
             response = self.mcp_client.send_message(
-                user_input=f"Analyze: {content}",
-                conversation_history=[],  # NO main conversation context
-                story_context="Semantic analysis task"  # Clear context
+                user_input=content,
+                conversation_history=[],  # No history for analysis
+                story_context=prompt      # Use prompt as context
             )
 
             return {"success": True, "response": response}

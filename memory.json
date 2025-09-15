@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "saved_at": "2025-09-14T18:30:26.691038",
+    "message_count": 7,
+    "total_tokens": 936,
+    "condensations": 0,
+    "auto_save_enabled": true
+  },
+  "messages": [
+    {
+      "id": "730d8995-d519-45f5-bac7-c17df36ce49c",
+      "content": "Starting new session. Type /help for commands.",
+      "type": "system",
+      "timestamp": "2025-09-14T18:29:19.029702",
+      "tokens": 11,
+      "content_category": "standard",
+      "condensed": false
+    },
+    {
+      "id": "a1c22195-d688-41f5-baff-68cd04c2f823",
+      "content": "Hello, I will play as a half-elf named Koryn (he/him).",
+      "type": "user",
+      "timestamp": "2025-09-14T18:29:28.657684",
+      "tokens": 13,
+      "content_category": "standard",
+      "condensed": false
+    },
+    {
+      "id": "89bc19bd-94de-49f8-a319-534295f1369f",
+      "content": "Hello, Koryn. Welcome to the realm of Eldrath, where ancient magic hums beneath the surface and the echoes of forgotten wars linger in the wind. You stand at the edge of a village called Virelle, nestled between the mist-shrouded peaks of the Frostspire Mountains and the winding River Thalor. The air is crisp with the scent of pine and damp earth, and the distant sound of a bell tolls from the village square, marking the hour of dawn.\n\nBefore you lies a cobbled path that winds through the village, leading toward the inn where you’ve been told to meet your companions. But as you step forward, the wind shifts, carrying with it the faint scent of charred wood and something… metallic. A low murmur rises from the streets—whispers of a strange occurrence last night, of a fire that burned without flame, and of a shadow that moved where no one was.\n\nWhat will you do, Koryn?",
+      "type": "assistant",
+      "timestamp": "2025-09-14T18:29:34.677122",
+      "tokens": 219,
+      "content_category": "standard",
+      "condensed": false
+    },
+    {
+      "id": "848af3ab-de54-4ef4-b728-046f330cb66d",
+      "content": "I want to go to the tavern to find my companions, and then I want to ask the barkeep about the rumors of the flame.",
+      "type": "user",
+      "timestamp": "2025-09-14T18:30:09.353994",
+      "tokens": 28,
+      "content_category": "standard",
+      "condensed": false
+    },
+    {
+      "id": "d735fa6a-8a52-4f6a-98e9-50dee85d2af5",
+      "content": "You stride down the cobbled path toward the heart of Virelle, the morning light casting long shadows across the uneven stones. The village is quiet, save for the occasional clatter of a cart or the murmur of conversation from nearby stalls. The air carries the scent of fresh bread and roasted meat, mingled with the faint, lingering trace of something acrid—like burnt wood, but not quite.\n\nYou reach the tavern, its wooden sign creaking in the breeze: *The Ember’s Rest*. The door is ajar, and the sound of laughter and clinking mugs echoes from within. Inside, the warmth of a hearth contrasts with the chill of the morning air. A few patrons are already gathered around the fire, their faces lit by the glow of a single lantern. At the bar, a burly man with a scar running from his temple to his jawline is wiping a tankard with a rag, his eyes sharp and watchful.\n\nYou step inside, the scent of ale and smoke thick in the air. Your gaze sweeps the room, searching for your companions. Kael is already there, leaning against the bar, a tankard in one hand and a grin on his face. Lyria is nearby, perched on a stool with a book open in her lap, her fingers idly tracing the edge of the page. They both look up as you enter.\n\nKael raises a hand in greeting, his voice loud and cheerful. \"Well, well, look who’s finally decided to show up! You’re late, Koryn. But I suppose you had to make sure the roads weren’t crawling with goblins or something.\"\n\nLyria looks up from her book, her blue-gray eyes meeting yours. \"You’re here,\" she says, her tone calm but edged with relief. \"I was beginning to think you’d gotten lost in the mountains.\"\n\nYou take a seat beside them, and Kael slaps a hand on the table, knocking over a glass of ale. \"Right, right. You came all this way to find out about the flame, didn’t you?\" He turns to the barkeep, who is still wiping the tankard. \"Hey, old man, you heard anything about the flame that burned without fire? The one that scared the whole village?\"\n\nThe barkeep nods slowly, his gaze flicking to the window where the morning light filters through the mist. \"Aye,\" he says, his voice low. \"It happened last night. A fire in the east quarter, but no flame. Just… a shadow. People say it moved like a living thing, and when it passed, the walls were scorched, but no damage was done. Some say it was a demon, others say it was a trick of the light. But one thing’s certain—no one’s been able to explain it.\"\n\nKael leans in, his eyes alight with curiosity. \"So, what do you think?\"\n\nYou glance between your companions, the weight of the mystery pressing on your mind. What do you do next?",
+      "type": "assistant",
+      "timestamp": "2025-09-14T18:30:20.407057",
+      "tokens": 656,
+      "content_category": "standard",
+      "condensed": false
+    },
+    {
+      "id": "6070a456-a317-45d8-9866-f17e8de4c80d",
+      "content": "Starting analysis...",
+      "type": "system",
+      "timestamp": "2025-09-14T18:30:26.686767",
+      "tokens": 5,
+      "content_category": "standard",
+      "condensed": false
+    },
+    {
+      "id": "f7e29cbb-9cb2-4ad7-ac25-16ce69998d3e",
+      "content": "Analysis completed",
+      "type": "system",
+      "timestamp": "2025-09-14T18:30:26.690510",
+      "tokens": 4,
+      "content_category": "standard",
+      "condensed": false
+    }
+  ]
+}
