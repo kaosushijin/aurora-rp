@@ -10,8 +10,9 @@ FIXED: All debug logger calls use method pattern with null safety checks
 import threading
 import time
 import sys
+import queue
+from typing import Dict, Any, Optional, Callable, List, Tuple, Union
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable, List, Tuple
 from enum import Enum
 from dataclasses import dataclass, field
 
@@ -52,14 +53,43 @@ class OrchestrationState:
     last_analysis_count: int = 0
     analysis_in_progress: bool = False
     startup_complete: bool = False
-    
+
     # Analysis tracking
     pending_analysis_requests: List[str] = field(default_factory=list)
     analysis_results: Dict[str, Any] = field(default_factory=dict)
-    
+
     # Threading coordination
     background_threads: List[threading.Thread] = field(default_factory=list)
     shutdown_requested: bool = False
+
+    # LLM Queue Management
+    llm_queue: queue.PriorityQueue = field(default_factory=lambda: queue.PriorityQueue())
+    llm_worker_thread: Optional[threading.Thread] = None
+    llm_worker_shutdown: threading.Event = field(default_factory=threading.Event)
+    llm_processing_lock: threading.Lock = field(default_factory=threading.Lock)
+    current_llm_request: Optional['LLMRequest'] = None  # FIXED: Use string annotation
+
+    # Request tracking
+    next_request_id: int = 1
+    completed_requests: Dict[str, Any] = field(default_factory=dict)
+    failed_requests: Dict[str, Any] = field(default_factory=dict)
+
+class LLMRequestType(Enum):
+    """Types of LLM requests that can be queued"""
+    USER_RESPONSE = "user_response"
+    SEMANTIC_ANALYSIS = "semantic_analysis"
+    CONDENSATION = "condensation"
+
+@dataclass
+class LLMRequest:
+    """Request structure for LLM queue"""
+    request_type: LLMRequestType
+    user_input: str
+    context_data: Dict[str, Any]
+    callback: Optional[Callable] = None
+    priority: int = 5  # Lower numbers = higher priority
+    request_id: str = ""
+    timestamp: float = 0.0
 
 # =============================================================================
 # MAIN ORCHESTRATOR CLASS
@@ -191,6 +221,41 @@ class Orchestrator:
 
         except Exception as e:
             self._log_error(f"MCP client configuration failed: {e}")
+
+    def get_llm_queue_status(self) -> Dict[str, Any]:
+        """Get current LLM queue status for debugging"""
+        try:
+            with self.state.llm_processing_lock:
+                current_request = self.state.current_llm_request
+
+            return {
+                "queue_size": self.state.llm_queue.qsize(),
+                "worker_running": (
+                    self.state.llm_worker_thread is not None and
+                    self.state.llm_worker_thread.is_alive()
+                ),
+                "current_request": {
+                    "type": current_request.request_type.value if current_request else None,
+                    "id": current_request.request_id if current_request else None,
+                    "timestamp": current_request.timestamp if current_request else None
+                } if current_request else None,
+                "completed_requests": len(self.state.completed_requests),
+                "failed_requests": len(self.state.failed_requests),
+                "next_request_id": self.state.next_request_id
+            }
+
+        except Exception as e:
+            self._log_error(f"Queue status check failed: {e}")
+            return {"error": str(e)}
+
+    def _add_queue_stats_to_system_stats(self, stats: Dict[str, Any]):
+        """Add LLM queue statistics to system stats"""
+        try:
+            queue_status = self.get_llm_queue_status()
+            stats["llm_queue"] = queue_status
+            self._log_debug("Added LLM queue stats to system stats")
+        except Exception as e:
+            self._log_debug(f"Failed to add queue stats: {e}")
     
     def _setup_module_callbacks(self):
         """Set up orchestrator callbacks for modules that need cross-module communication"""
@@ -212,14 +277,17 @@ class Orchestrator:
             self._log_error(f"Callback setup failed: {e}")
     
     def _start_background_services(self):
-        """Start background threads for periodic operations"""
+        """Start background threads for periodic operations - UPDATED with LLM worker"""
         try:
-            # Start memory auto-save thread
+            # Start LLM worker thread (NEW)
+            self._start_llm_worker()
+
+            # Start memory auto-save thread (existing)
             if self.memory_manager and hasattr(self.memory_manager, 'start_auto_save'):
                 self.memory_manager.start_auto_save()
                 self._log_debug("Memory auto-save thread started")
-            
-            # Start periodic analysis thread
+
+            # Start periodic analysis thread (existing)
             self.analysis_thread = threading.Thread(
                 target=self._analysis_worker,
                 daemon=True,
@@ -228,9 +296,268 @@ class Orchestrator:
             self.analysis_thread.start()
             self.state.background_threads.append(self.analysis_thread)
             self._log_debug("Background analysis thread started")
-            
+
         except Exception as e:
             self._log_error(f"Background service startup failed: {e}")
+
+    def _start_llm_worker(self):
+        """Start the LLM worker thread for serial processing"""
+        try:
+            self.state.llm_worker_thread = threading.Thread(
+                target=self._llm_worker,
+                daemon=True,
+                name="LLMWorker"
+            )
+            self.state.llm_worker_thread.start()
+            self.state.background_threads.append(self.state.llm_worker_thread)
+            self._log_debug("LLM worker thread started")
+
+        except Exception as e:
+            self._log_error(f"LLM worker startup failed: {e}")
+
+    def _llm_worker(self):
+        """
+        Serial LLM worker thread - processes one request at a time
+        Ensures no concurrent LLM calls
+        """
+        self._log_debug("LLM worker thread started")
+
+        while not self.state.llm_worker_shutdown.is_set():
+            try:
+                # Get next request from queue (blocks until available or timeout)
+                try:
+                    # Use priority queue - lower priority numbers processed first
+                    priority, request = self.state.llm_queue.get(timeout=1.0)
+                except queue.Empty:
+                    continue  # Check shutdown and try again
+
+                if request is None:  # Shutdown signal
+                    break
+
+                self._log_debug(f"Processing LLM request: {request.request_type.value} (ID: {request.request_id})")
+
+                # Set current request for tracking
+                with self.state.llm_processing_lock:
+                    self.state.current_llm_request = request
+
+                # Process the request based on type
+                try:
+                    if request.request_type == LLMRequestType.USER_RESPONSE:
+                        self._process_user_response_request(request)
+                    elif request.request_type == LLMRequestType.SEMANTIC_ANALYSIS:
+                        self._process_semantic_analysis_request(request)
+                    elif request.request_type == LLMRequestType.CONDENSATION:
+                        self._process_condensation_request(request)
+                    else:
+                        self._log_error(f"Unknown LLM request type: {request.request_type}")
+
+                except Exception as e:
+                    self._log_error(f"LLM request processing failed: {e}")
+                    self._record_failed_request(request, str(e))
+
+                finally:
+                    # Clear current request
+                    with self.state.llm_processing_lock:
+                        self.state.current_llm_request = None
+
+                    # Mark queue task as done
+                    self.state.llm_queue.task_done()
+
+            except Exception as e:
+                self._log_error(f"LLM worker error: {e}")
+                # Continue processing other requests
+
+        self._log_debug("LLM worker thread stopped")
+
+    def _process_user_response_request(self, request: LLMRequest):
+        """Process a user response LLM request"""
+        try:
+            user_input = request.user_input
+            context_data = request.context_data
+
+            self._log_debug(f"Processing user response for: {user_input[:50]}...")
+
+            # Make the actual LLM request (this is the serial bottleneck)
+            llm_response = self._make_llm_request(user_input)
+
+            if llm_response.get("success", False):
+                # Store LLM response in memory
+                response_text = llm_response.get("response", "")
+                if self.memory_manager and response_text:
+                    self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
+                    self.state.message_count += 1
+
+                    # Force save of assistant response
+                    if hasattr(self.memory_manager, '_auto_save'):
+                        try:
+                            self.memory_manager._auto_save()
+                        except Exception as save_error:
+                            self._log_error(f"Failed to save assistant response: {save_error}")
+
+                    self._log_debug("LLM response stored in memory")
+
+                    # Update momentum engine
+                    if self.momentum_engine:
+                        try:
+                            self.momentum_engine.process_user_input(user_input, self.state.message_count)
+                        except Exception as e:
+                            self._log_error(f"Momentum engine processing failed: {e}")
+
+                    # Record successful completion
+                    self._record_completed_request(request, {
+                        "response": response_text,
+                        "success": True
+                    })
+            else:
+                # Store error message
+                error_msg = f"LLM Error: {llm_response.get('error', 'Unknown error')}"
+                if self.memory_manager:
+                    self.memory_manager.add_message(error_msg, MessageType.SYSTEM)
+                    if hasattr(self.memory_manager, '_auto_save'):
+                        try:
+                            self.memory_manager._auto_save()
+                        except Exception:
+                            pass
+
+                self._record_failed_request(request, error_msg)
+
+        except Exception as e:
+            self._log_error(f"User response request failed: {e}")
+            self._record_failed_request(request, str(e))
+
+    def _process_semantic_analysis_request(self, request: LLMRequest):
+        """Process a semantic analysis LLM request"""
+        try:
+            self._log_debug("Processing semantic analysis request")
+
+            # Extract semantic analysis data
+            analysis_data = request.context_data
+            content = analysis_data.get("content", "")
+            message_id = analysis_data.get("message_id", "")
+
+            # Build semantic analysis prompt
+            prompt = f"""
+Analyze this RPG message for semantic importance:
+
+Message: "{content}"
+
+Provide analysis in JSON format:
+{{
+    "importance_score": 0.0-1.0,
+    "categories": ["story_critical", "character_focused", "relationship_dynamics", "emotional_significance", "world_building", "standard"],
+    "reasoning": "Brief explanation"
+}}
+"""
+
+            # Make LLM request for semantic analysis
+            llm_response = self._make_llm_request_for_analysis(prompt, content)
+
+            if llm_response.get("success", False):
+                # Parse response and update message category
+                response_text = llm_response.get("response", "")
+                category = self._parse_semantic_response(response_text)
+
+                if category and self.memory_manager:
+                    self.memory_manager.update_message_category(message_id, category)
+                    self._log_debug(f"Updated message {message_id} category to {category}")
+
+                self._record_completed_request(request, {
+                    "category": category,
+                    "success": True
+                })
+            else:
+                self._record_failed_request(request, llm_response.get("error", "Analysis failed"))
+
+        except Exception as e:
+            self._log_error(f"Semantic analysis request failed: {e}")
+            self._record_failed_request(request, str(e))
+
+    def _process_condensation_request(self, request: LLMRequest):
+        """Process a condensation LLM request"""
+        try:
+            self._log_debug("Processing condensation request")
+
+            # For now, implement basic condensation without LLM
+            # TODO: Implement full LLM-based condensation
+            condensed_content = "[Condensed summary of narrative progression]"
+
+            self._record_completed_request(request, {
+                "condensed_content": condensed_content,
+                "success": True
+            })
+
+        except Exception as e:
+            self._log_error(f"Condensation request failed: {e}")
+            self._record_failed_request(request, str(e))
+
+    def _record_completed_request(self, request: LLMRequest, result: Dict[str, Any]):
+        """Record a completed LLM request"""
+        self.state.completed_requests[request.request_id] = {
+            "request": request,
+            "result": result,
+            "completed_at": time.time()
+        }
+
+    def _record_failed_request(self, request: LLMRequest, error: str):
+        """Record a failed LLM request"""
+        self.state.failed_requests[request.request_id] = {
+            "request": request,
+            "error": error,
+            "failed_at": time.time()
+        }
+
+    def _make_llm_request_for_analysis(self, prompt: str, content: str) -> Dict[str, Any]:
+        """Make simplified LLM request for analysis purposes"""
+        try:
+            if not self.mcp_client:
+                return {"success": False, "error": "MCP client not available"}
+
+            # Create simplified context for analysis
+            response = self.mcp_client.send_message(
+                user_input=content,
+                conversation_history=[],  # No history for analysis
+                story_context=prompt      # Use prompt as context
+            )
+
+            return {"success": True, "response": response}
+
+        except Exception as e:
+            self._log_error(f"Analysis LLM request failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _parse_semantic_response(self, response: str) -> str:
+        """Parse semantic analysis response to extract category"""
+        try:
+            import json
+            import re
+
+            # Try to find JSON in response
+            json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                categories = data.get("categories", ["standard"])
+                if categories and isinstance(categories, list):
+                    return categories[0]  # Return first category
+
+            # Fallback: look for category names in text
+            category_keywords = {
+                "story_critical": ["critical", "important", "key", "vital"],
+                "character_focused": ["character", "personality", "development"],
+                "relationship_dynamics": ["relationship", "social", "interaction"],
+                "emotional_significance": ["emotion", "feeling", "heart", "dramatic"],
+                "world_building": ["world", "setting", "environment", "lore"]
+            }
+
+            response_lower = response.lower()
+            for category, keywords in category_keywords.items():
+                if any(keyword in response_lower for keyword in keywords):
+                    return category
+
+            return "standard"  # Default fallback
+
+        except Exception as e:
+            self._log_debug(f"Semantic response parsing failed: {e}")
+            return "standard"
     
     def _analysis_worker(self):
         """Background worker for periodic analysis operations"""
@@ -305,6 +632,8 @@ class Orchestrator:
                 return self._add_system_message(data)
             elif action == "clear_memory":
                 return self._clear_memory()
+            elif action == "queue_debug":
+                return self._handle_queue_debug(data)
             elif action == "get_stats":
                 return self._get_system_stats()
             elif action == "analyze_now" or action == "force_analysis":
@@ -360,14 +689,14 @@ class Orchestrator:
 
     def _process_user_input(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        FIXED: Ensure user message is immediately available for echo before returning
+        Process user input with serial LLM queue - FIXED for immediate echo
         """
         try:
             user_input = data.get("input", "").strip()
             if not user_input:
                 return {"success": False, "error": "Empty input"}
 
-            self._log_debug("Processing user input")
+            self._log_debug("Processing user input via queue system")
 
             # 1. Validate input through semantic engine (quick operation)
             if self.semantic_engine:
@@ -375,96 +704,79 @@ class Orchestrator:
                 if not validation_result.get("valid", True):
                     return {"success": False, "error": validation_result.get("error", "Input validation failed")}
 
-            # 2. Store user message in memory IMMEDIATELY and ensure it's committed
+            # 2. Store user message in memory IMMEDIATELY for echo
             if self.memory_manager:
                 self.memory_manager.add_message(user_input, MessageType.USER)
                 self.state.message_count += 1
 
-                # CRITICAL FIX: Force immediate save/commit to ensure message is available for get_messages
+                # CRITICAL: Force immediate save for echo availability
                 if hasattr(self.memory_manager, '_auto_save'):
                     try:
                         self.memory_manager._auto_save()
-                        self._log_debug("User message saved and committed to memory")
+                        self._log_debug("User message saved and available for echo")
                     except Exception as save_error:
                         self._log_error(f"Failed to save user message: {save_error}")
-                        # Continue anyway - message is still in memory
-                else:
-                    self._log_debug("Memory manager has no save method - message stored in memory only")
 
-                self._log_debug("User message stored in memory - ready for immediate echo")
+            # 3. Queue LLM processing instead of spawning background thread
+            request_id = self._generate_request_id()
+            llm_request = LLMRequest(
+                request_type=LLMRequestType.USER_RESPONSE,
+                user_input=user_input,
+                context_data={"original_data": data},
+                request_id=request_id,
+                timestamp=time.time(),
+                priority=1  # High priority for user responses
+            )
 
-            # 3. Start background LLM processing (TRULY asynchronous)
-            def background_llm_processing():
-                try:
-                    self._log_debug("Background LLM processing started")
+            # Add to queue for serial processing
+            self.state.llm_queue.put((llm_request.priority, llm_request))
+            self._log_debug(f"Queued LLM request {request_id} for processing")
 
-                    # Send to LLM for response
-                    llm_response = self._make_llm_request(user_input)
-
-                    if llm_response.get("success", False):
-                        # Store LLM response in memory
-                        response_text = llm_response.get("response", "")
-                        if self.memory_manager and response_text:
-                            self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
-                            self.state.message_count += 1
-
-                            # Force save of assistant response too
-                            if hasattr(self.memory_manager, '_auto_save'):
-                                try:
-                                    self.memory_manager._auto_save()
-                                except Exception as save_error:
-                                    self._log_error(f"Failed to save assistant response: {save_error}")
-
-                            self._log_debug("LLM response stored in memory")
-
-                            # Update momentum engine if available
-                            if self.momentum_engine:
-                                try:
-                                    # Use process_user_input instead of process_exchange
-                                    if hasattr(self.momentum_engine, 'process_user_input'):
-                                        self.momentum_engine.process_user_input(user_input, len(self.memory_manager.messages))
-                                except Exception as e:
-                                    self._log_error(f"Momentum engine processing failed: {e}")
-                    else:
-                        # Store error message if LLM failed
-                        error_msg = f"LLM Error: {llm_response.get('error', 'Unknown error')}"
-                        if self.memory_manager:
-                            self.memory_manager.add_message(error_msg, MessageType.SYSTEM)
-                            if hasattr(self.memory_manager, '_auto_save'):
-                                try:
-                                    self.memory_manager._auto_save()
-                                except Exception:
-                                    pass
-
-                    self._log_debug("Background LLM processing completed")
-
-                except Exception as e:
-                    self._log_error(f"Background LLM processing failed: {e}")
-                    # Store error in memory so UI can display it
-                    if self.memory_manager:
-                        self.memory_manager.add_message(f"Error: {str(e)}", MessageType.SYSTEM)
-                        if hasattr(self.memory_manager, '_auto_save'):
-                            try:
-                                self.memory_manager._auto_save()
-                            except Exception:
-                                pass
-
-            # 4. Start background processing thread immediately
-            llm_thread = threading.Thread(target=background_llm_processing, daemon=True, name="LLMProcessing")
-            llm_thread.start()
-
-            # 5. CRITICAL: Return success IMMEDIATELY - user message is now available for echo
-            # UI can now call get_messages and will receive the user's message for immediate display
+            # 4. Return success IMMEDIATELY - user message is available for echo
             return {
                 "success": True,
                 "message": "User input processed",
                 "message_count": self.state.message_count,
-                "processing_started": True
+                "request_id": request_id,
+                "queued_for_processing": True
             }
 
         except Exception as e:
             self._log_error(f"User input processing failed: {e}")
             return {"success": False, "error": str(e)}
+
+    def _generate_request_id(self) -> str:
+        """Generate unique request ID"""
+        request_id = f"req_{self.state.next_request_id:04d}_{int(time.time() * 1000) % 10000}"
+        self.state.next_request_id += 1
+        return request_id
+
+    def _queue_semantic_analysis(self, message_id: str, content: str, msg_type: str):
+        """Queue semantic analysis request for background processing"""
+        try:
+            request_id = self._generate_request_id()
+
+            semantic_request = LLMRequest(
+                request_type=LLMRequestType.SEMANTIC_ANALYSIS,
+                user_input=content,
+                context_data={
+                    "message_id": message_id,
+                    "content": content,
+                    "msg_type": msg_type
+                },
+                request_id=request_id,
+                timestamp=time.time(),
+                priority=3  # Lower priority than user responses
+            )
+
+            self.state.llm_queue.put((semantic_request.priority, semantic_request))
+            self._log_debug(f"Queued semantic analysis {request_id}")
+
+            return request_id
+
+        except Exception as e:
+            self._log_error(f"Failed to queue semantic analysis: {e}")
+            return None
     
     def _make_llm_request(self, user_input: str) -> Dict[str, Any]:
         """
@@ -733,7 +1045,7 @@ class Orchestrator:
     
     def _get_system_stats(self) -> Dict[str, Any]:
         """
-        Get current system statistics - FIXED method calls
+        Get current system statistics - FIXED method calls and structure
         """
         try:
             stats = {
@@ -784,10 +1096,45 @@ class Orchestrator:
                     self._log_debug(f"MCP stats unavailable: {e}")
                     stats["mcp"] = {"error": "stats unavailable"}
 
+            # Add LLM queue stats - FIXED: Place inside try block
+            self._add_queue_stats_to_system_stats(stats)
+
             return {"success": True, "stats": stats}
 
         except Exception as e:
             self._log_error(f"Stats retrieval failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _handle_queue_debug(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle queue debugging commands"""
+        try:
+            command = data.get("command", "")
+
+            if command == "status":
+                return {
+                    "success": True,
+                    "queue_status": self.get_llm_queue_status(),
+                    "recent_completed": list(self.state.completed_requests.keys())[-5:],
+                    "recent_failed": list(self.state.failed_requests.keys())[-5:]
+                }
+            elif command == "clear_history":
+                # Clear old request history to prevent memory buildup
+                self.state.completed_requests.clear()
+                self.state.failed_requests.clear()
+                return {"success": True, "message": "Request history cleared"}
+            elif command == "worker_restart":
+                # Emergency worker restart (for debugging only)
+                if self.state.llm_worker_thread:
+                    self.state.llm_worker_shutdown.set()
+                    self.state.llm_worker_thread.join(timeout=5.0)
+                self.state.llm_worker_shutdown.clear()
+                self._start_llm_worker()
+                return {"success": True, "message": "LLM worker restarted"}
+            else:
+                return {"success": False, "error": f"Unknown queue debug command: {command}"}
+
+        except Exception as e:
+            self._log_error(f"Queue debug failed: {e}")
             return {"success": False, "error": str(e)}
     
     def _handle_shutdown(self) -> Dict[str, Any]:
@@ -802,44 +1149,49 @@ class Orchestrator:
             return {"success": False, "error": str(e)}
     
     def _shutdown_modules(self):
-        """Clean shutdown of all modules and background threads"""
+        """Clean shutdown of all modules and background threads - UPDATED with LLM cleanup"""
         try:
             self._log_debug("Starting module shutdown")
             self.state.phase = OrchestrationPhase.SHUTTING_DOWN
-            
-            # Stop background analysis thread
+
+            # Stop LLM worker thread (NEW)
+            if self.state.llm_worker_thread and self.state.llm_worker_thread.is_alive():
+                self.state.llm_worker_shutdown.set()
+                # Send shutdown signal to queue
+                self.state.llm_queue.put((0, None))  # High priority shutdown signal
+                self.state.llm_worker_thread.join(timeout=5.0)
+                self._log_debug("LLM worker thread stopped")
+
+            # Stop background analysis thread (existing)
             if self.analysis_thread and self.analysis_thread.is_alive():
                 self.analysis_shutdown_event.set()
                 self.analysis_thread.join(timeout=5.0)
                 self._log_debug("Analysis thread stopped")
-            
-            # Shutdown memory manager (stop auto-save)
+
+            # Shutdown modules (existing code)
             if self.memory_manager and hasattr(self.memory_manager, 'shutdown'):
                 self.memory_manager.shutdown()
                 self._log_debug("Memory manager shutdown")
-            
-            # Shutdown momentum engine
+
             if self.momentum_engine and hasattr(self.momentum_engine, 'shutdown'):
                 self.momentum_engine.shutdown()
                 self._log_debug("Momentum engine shutdown")
-            
-            # Shutdown semantic engine
+
             if self.semantic_engine and hasattr(self.semantic_engine, 'shutdown'):
                 self.semantic_engine.shutdown()
                 self._log_debug("Semantic engine shutdown")
-            
-            # Shutdown MCP client
+
             if self.mcp_client and hasattr(self.mcp_client, 'shutdown'):
                 self.mcp_client.shutdown()
                 self._log_debug("MCP client shutdown")
-            
+
             # Wait for remaining background threads
             for thread in self.state.background_threads:
                 if thread.is_alive():
                     thread.join(timeout=2.0)
-            
+
             self._log_debug("All modules shutdown completed")
-            
+
         except Exception as e:
             self._log_error(f"Module shutdown failed: {e}")
 
