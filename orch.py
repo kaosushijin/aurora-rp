@@ -358,30 +358,6 @@ class Orchestrator:
             self._log_error(f"Add system message failed: {e}")
             return {"success": False, "error": str(e)}
 
-    def _clear_memory(self) -> Dict[str, Any]:
-        """
-        Clear conversation memory
-        UPDATED: Support for stateless UI
-        """
-        try:
-            if self.memory_manager:
-                # Clear all messages
-                self.memory_manager.messages.clear()
-                self.state.message_count = 0
-
-                # Save empty state
-                self.memory_manager._auto_save()
-
-                self._log_debug("Memory cleared")
-
-                return {"success": True, "message": "Memory cleared"}
-            else:
-                return {"success": False, "error": "Memory manager not available"}
-
-        except Exception as e:
-            self._log_error(f"Clear memory failed: {e}")
-            return {"success": False, "error": str(e)}
-    
     def _process_user_input(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         FIXED: Ensure user message is immediately available for echo before returning
@@ -725,35 +701,39 @@ class Orchestrator:
             return {"success": False, "error": str(e)}
     
     def _clear_memory(self) -> Dict[str, Any]:
-        """Clear conversation memory"""
+        """
+        Clear conversation memory - FIXED reset calls
+        """
         try:
             if not self.memory_manager:
                 return {"success": False, "error": "Memory manager not available"}
-            
+
             self._log_debug("Clearing conversation memory")
-            
-            # Clear memory and reset counters
-            self.memory_manager.clear_memory()
+
+            # Clear memory using correct method
+            self.memory_manager.reset_state()  # Now uses our new method
+
+            # Reset orchestrator counters
             self.state.message_count = 0
             self.state.last_analysis_count = 0
             self.state.analysis_results = {}
-            
-            # Reset momentum engine state
+
+            # Reset momentum engine using correct method
             if self.momentum_engine:
-                self.momentum_engine.reset_state()
-            
+                self.momentum_engine.reset_state()  # Now uses our new method
+                self._log_debug("Momentum engine state reset")
+
             self._log_debug("Memory cleared successfully")
-            
+
             return {"success": True}
-            
+
         except Exception as e:
             self._log_error(f"Memory clear failed: {e}")
             return {"success": False, "error": str(e)}
     
     def _get_system_stats(self) -> Dict[str, Any]:
         """
-        Get current system statistics
-        FIXED: Handle missing get_stats() methods gracefully
+        Get current system statistics - FIXED method calls
         """
         try:
             stats = {
@@ -764,37 +744,24 @@ class Orchestrator:
                 "startup_complete": self.state.startup_complete
             }
 
-            # Add memory stats with graceful fallback
+            # Add memory stats - FIXED: Use correct method name
             if self.memory_manager:
                 try:
-                    if hasattr(self.memory_manager, 'get_stats'):
-                        memory_stats = self.memory_manager.get_stats()
-                        stats["memory"] = memory_stats
-                    else:
-                        # Fallback: provide basic memory info
-                        stats["memory"] = {
-                            "available": True,
-                            "message_count": getattr(self.memory_manager, 'message_count', 0)
-                        }
+                    # Use get_memory_stats() directly instead of get_stats()
+                    memory_stats = self.memory_manager.get_memory_stats()
+                    stats["memory"] = memory_stats
+                    self._log_debug("Memory stats retrieved successfully")
                 except Exception as e:
                     self._log_debug(f"Memory stats unavailable: {e}")
                     stats["memory"] = {"error": "stats unavailable"}
 
-            # Add momentum stats with graceful fallback
+            # Add momentum stats - FIXED: Use correct method name
             if self.momentum_engine:
                 try:
-                    if hasattr(self.momentum_engine, 'get_stats'):
-                        momentum_stats = self.momentum_engine.get_stats()
-                        stats["momentum"] = momentum_stats
-                    elif hasattr(self.momentum_engine, 'get_current_state'):
-                        # Fallback: get current state instead of stats
-                        current_state = self.momentum_engine.get_current_state()
-                        stats["momentum"] = {
-                            "available": True,
-                            "current_state": current_state
-                        }
-                    else:
-                        stats["momentum"] = {"available": True, "stats": "method not available"}
+                    # Use get_pressure_stats() directly instead of get_stats()
+                    momentum_stats = self.momentum_engine.get_pressure_stats()
+                    stats["momentum"] = momentum_stats
+                    self._log_debug("Momentum stats retrieved successfully")
                 except Exception as e:
                     self._log_debug(f"Momentum stats unavailable: {e}")
                     stats["momentum"] = {"error": "stats unavailable"}
@@ -802,8 +769,8 @@ class Orchestrator:
             # Add MCP stats with graceful fallback
             if self.mcp_client:
                 try:
-                    if hasattr(self.mcp_client, 'get_stats'):
-                        mcp_stats = self.mcp_client.get_stats()
+                    if hasattr(self.mcp_client, 'get_server_info'):
+                        mcp_stats = self.mcp_client.get_server_info()
                         stats["mcp"] = mcp_stats
                     else:
                         # Fallback: provide basic MCP info
@@ -812,6 +779,7 @@ class Orchestrator:
                             "server_url": getattr(self.mcp_client, 'server_url', 'unknown'),
                             "model": getattr(self.mcp_client, 'model', 'unknown')
                         }
+                    self._log_debug("MCP stats retrieved successfully")
                 except Exception as e:
                     self._log_debug(f"MCP stats unavailable: {e}")
                     stats["mcp"] = {"error": "stats unavailable"}

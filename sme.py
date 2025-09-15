@@ -341,6 +341,44 @@ class StoryMomentumEngine:
                 "pressure_history_length": len(self.pressure_history),
                 "narrative_time": self.narrative_tracker.get_stats()
             }
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Alias for get_pressure_stats() to match orchestrator interface
+        Provides consistent method naming across modules
+        """
+        return self.get_pressure_stats()
+
+    def reset_state(self) -> None:
+        """
+        Reset momentum engine to initial state
+        Called by orchestrator when clearing conversation or starting fresh
+        """
+        with self.lock:
+            # Reset pressure and story state
+            self.pressure_level = 0.0
+            self.escalation_count = 0
+            self.base_pressure_floor = 0.0
+            self.last_analysis_count = 0
+            self.last_pressure_decay_sequence = 0
+
+            # Reset story progression
+            self.story_arc = StoryArc.SETUP
+            self.current_antagonist = None
+            self.pressure_history = []
+
+            # Reset narrative time tracker
+            self.narrative_tracker = NarrativeTimeTracker()
+
+            self._log_debug("Momentum state reset to initial values")
+
+    def shutdown(self) -> None:
+        """
+        Shutdown method for orchestrator compatibility
+        SME doesn't need special cleanup but provides consistent interface
+        """
+        with self.lock:
+            self._log_debug("SME shutdown completed")
     
     def save_state(self) -> Dict[str, Any]:
         """Save current state to dict for persistence"""

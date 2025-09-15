@@ -644,6 +644,35 @@ class EnhancedMemoryManager:
                 self.debug_logger.error(f"Export failed: {e}")
             return False
 
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Alias for get_memory_stats() to match orchestrator interface
+        Provides consistent method naming across modules
+        """
+        return self.get_memory_stats()
+
+    def reset_state(self) -> None:
+        """
+        Reset memory manager to initial state
+        Called by orchestrator when clearing conversation
+        """
+        with self.lock:
+            self.clear_memory()
+            self.condensation_count = 0
+
+            # Reset narrative time if available
+            if hasattr(self, 'narrative_tracker'):
+                self.narrative_tracker.total_narrative_seconds = 0.0
+                self.narrative_tracker.exchange_count = 0
+                self.narrative_tracker.sequence_history = []
+
+            # Force save empty state
+            if self.auto_save_enabled:
+                self._auto_save()
+
+        if self.debug_logger:
+            self.debug_logger.debug("EMM: Memory state reset to initial values")
+
 # =============================================================================
 # MODULE TEST FUNCTIONALITY
 # =============================================================================
