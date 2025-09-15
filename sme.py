@@ -104,19 +104,23 @@ class NarrativeTimeTracker:
     
     def add_exchange(self, input_text: str, sequence_number: int) -> float:
         """Add exchange and return narrative duration"""
-        with self.lock:
-            duration = self.detect_duration_from_text(input_text)
-            self.total_narrative_seconds += duration
-            self.exchange_count += 1
-            
-            # Store sequence history
-            self.sequence_history.append((sequence_number, duration, self.total_narrative_seconds))
-            
-            # Keep only recent history (last 50 exchanges)
-            if len(self.sequence_history) > 50:
-                self.sequence_history = self.sequence_history[-50:]
-            
-            return duration
+        try:
+            with self.lock:
+                duration = self.detect_duration_from_text(input_text)
+                self.total_narrative_seconds += duration
+                self.exchange_count += 1
+
+                # Store sequence history
+                self.sequence_history.append((sequence_number, duration, self.total_narrative_seconds))
+
+                # Keep only recent history (last 50 exchanges)
+                if len(self.sequence_history) > 50:
+                    self.sequence_history = self.sequence_history[-50:]
+
+                return duration
+        except Exception as e:
+            # Return safe default if anything fails
+            return 30.0
 
     def get_stats(self) -> Dict[str, Any]:
         """Get narrative time statistics"""
@@ -174,50 +178,76 @@ class StoryMomentumEngine:
     
     def process_user_input(self, input_text: str, sequence_number: int = 0) -> Dict[str, Any]:
         """Process user input and update state using basic pattern detection"""
-        with self.lock:
-            # Add narrative time
-            duration = self.narrative_tracker.add_exchange(input_text, sequence_number)
-            
-            # Basic pressure adjustment using pattern detection
-            pressure_change = self._calculate_pressure_change(input_text)
-            self.pressure_level = max(0.0, min(1.0, self.pressure_level + pressure_change))
-            
-            # Update story arc based on pressure trends
-            self._update_story_arc()
-            
-            # Update antagonist state if mentioned
-            self._update_antagonist_state(input_text)
-            
-            # Store pressure history
-            self.pressure_history.append({
-                "sequence": sequence_number,
+        self._log_debug(f"SME: process_user_input called with: '{input_text[:50]}', seq={sequence_number}")
+
+        try:
+            with self.lock:
+                self._log_debug("SME: Acquired lock, starting processing...")
+
+                # Add narrative time
+                self._log_debug("SME: Adding narrative time...")
+                duration = self.narrative_tracker.add_exchange(input_text, sequence_number)
+                self._log_debug(f"SME: Narrative time added: {duration}s")
+
+                # Basic pressure adjustment using pattern detection
+                self._log_debug("SME: Calculating pressure change...")
+                pressure_change = self._calculate_pressure_change(input_text)
+                self.pressure_level = max(0.0, min(1.0, self.pressure_level + pressure_change))
+                self._log_debug(f"SME: Pressure updated: {self.pressure_level}")
+
+                # Update story arc based on pressure trends
+                self._log_debug("SME: Updating story arc...")
+                self._update_story_arc()
+
+                # Update antagonist state if mentioned
+                self._log_debug("SME: Updating antagonist state...")
+                self._update_antagonist_state(input_text)
+
+                # Store pressure history
+                self._log_debug("SME: Storing pressure history...")
+                self.pressure_history.append({
+                    "sequence": sequence_number,
+                    "pressure": self.pressure_level,
+                    "duration": duration,
+                    "timestamp": time.time()
+                })
+
+                # Keep only recent history
+                if len(self.pressure_history) > 100:
+                    self.pressure_history = self.pressure_history[-100:]
+
+                # Check for resolution triggers after updating pressure
+                self._log_debug("SME: Checking resolution triggers...")
+                resolution_trigger = self.check_resolution_trigger()
+
+                # Reset resolution state if pressure dropped significantly
+                self._log_debug("SME: Resetting resolution state...")
+                self.reset_resolution_state()
+
+                result = {
+                    "pressure": self.pressure_level,
+                    "narrative_duration": duration,
+                    "total_narrative_time": self.narrative_tracker.total_narrative_seconds,
+                    "story_arc": self.story_arc.value,
+                    "antagonist_active": self.current_antagonist.active if self.current_antagonist else False,
+                    "resolution_trigger": resolution_trigger
+                }
+
+                self._log_debug(f"SME: Processing completed successfully: pressure={self.pressure_level:.3f}")
+                return result
+
+        except Exception as e:
+            self._log_debug(f"SME: ERROR in process_user_input: {e}")
+            # Return safe default values
+            return {
                 "pressure": self.pressure_level,
-                "duration": duration,
-                "timestamp": time.time()
-            })
-            
-            # Keep only recent history
-            if len(self.pressure_history) > 100:
-                self.pressure_history = self.pressure_history[-100:]
-
-            # Check for resolution triggers after updating pressure
-            resolution_trigger = self.check_resolution_trigger()
-
-            # Reset resolution state if pressure dropped significantly
-            self.reset_resolution_state()
-
-            result = {
-                "pressure": self.pressure_level,
-                "narrative_duration": duration,
+                "narrative_duration": 30.0,
                 "total_narrative_time": self.narrative_tracker.total_narrative_seconds,
                 "story_arc": self.story_arc.value,
-                "antagonist_active": self.current_antagonist.active if self.current_antagonist else False,
-                "resolution_trigger": resolution_trigger  # NEW: Include resolution guidance
+                "antagonist_active": False,
+                "resolution_trigger": None,
+                "error": str(e)
             }
-            
-            self._log_debug(f"Processed input: pressure={self.pressure_level:.3f}, duration={duration:.1f}s")
-            
-            return result
     
     def _calculate_pressure_change(self, text: str) -> float:
         """Calculate pressure change using basic pattern detection"""
@@ -806,12 +836,22 @@ class StoryMomentumEngine:
         """
         Check if current state requires resolution guidance
         Returns guidance data if resolution should be triggered
+        FIXED: Added debug logging and error handling to prevent hanging
         """
-        with self.lock:
+        try:
+            self._log_debug("SME: check_resolution_trigger() called")
+
+            # Don't acquire the lock again - we're already in a locked context
+            # with self.lock:  # REMOVE THIS - it causes deadlock!
+
+            self._log_debug(f"SME: Checking pressure level: {self.pressure_level}")
+
             # Trigger resolution when pressure is maxed and we're in climax
             if (self.pressure_level >= 1.0 and
                 self.story_arc == StoryArc.CLIMAX and
                 not self._resolution_guidance_sent):
+
+                self._log_debug("SME: High pressure resolution trigger activated")
 
                 resolution_data = {
                     "trigger_type": "max_pressure_resolution",
@@ -824,12 +864,14 @@ class StoryMomentumEngine:
                 # Mark that we've sent resolution guidance
                 self._resolution_guidance_sent = True
 
-                self._log_debug(f"Resolution trigger activated: pressure={self.pressure_level}")
+                self._log_debug(f"SME: Resolution trigger activated: pressure={self.pressure_level}")
                 return resolution_data
 
             # Also check for extended combat without resolution
             elif (self.pressure_level >= 0.9 and
                   self._count_recent_combat_exchanges() >= 5):
+
+                self._log_debug("SME: Extended combat resolution trigger")
 
                 resolution_data = {
                     "trigger_type": "extended_combat_resolution",
@@ -842,15 +884,21 @@ class StoryMomentumEngine:
                 self._log_debug("Extended combat resolution suggested")
                 return resolution_data
 
+            self._log_debug("SME: No resolution trigger needed")
+            return None
+
+        except Exception as e:
+            self._log_debug(f"SME: ERROR in check_resolution_trigger: {e}")
             return None
 
     def _generate_resolution_prompt(self) -> str:
-        """Generate system prompt to drive encounter to conclusion"""
-        antagonist_context = ""
-        if self.current_antagonist and self.current_antagonist.active:
-            antagonist_context = f" The current threat ({self.current_antagonist.name}) has reached maximum intensity."
+        """Generate system prompt to drive encounter to conclusion - SAFE VERSION"""
+        try:
+            antagonist_context = ""
+            if self.current_antagonist and self.current_antagonist.active:
+                antagonist_context = f" The current threat ({self.current_antagonist.name}) has reached maximum intensity."
 
-        return f"""RESOLUTION GUIDANCE: Maximum narrative pressure reached (1.0).{antagonist_context}
+            return f"""RESOLUTION GUIDANCE: Maximum narrative pressure reached (1.0).{antagonist_context}
 
 The current encounter MUST conclude in your next response. Choose ONE outcome:
 1. VICTORY: Player/allies succeed, threat defeated/neutralized
@@ -859,35 +907,56 @@ The current encounter MUST conclude in your next response. Choose ONE outcome:
 4. TRANSFORMATION: Encounter resolves through unexpected revelation/change
 
 Avoid prolonged exchanges. Drive to a definitive narrative conclusion that allows pressure to decrease and story to progress."""
+        except Exception as e:
+            self._log_debug(f"SME: ERROR in _generate_resolution_prompt: {e}")
+            return "RESOLUTION GUIDANCE: Please conclude the current encounter."
 
     def _generate_extended_combat_prompt(self) -> str:
-        """Generate guidance for extended combat situations"""
-        return """COMBAT GUIDANCE: Extended conflict detected. Consider escalating toward resolution:
+        """Generate guidance for extended combat situations - SAFE VERSION"""
+        try:
+            return """COMBAT GUIDANCE: Extended conflict detected. Consider escalating toward resolution:
 - Introduce decisive moments or turning points
 - Allow tactical advantages/disadvantages to emerge
 - Create opportunities for creative solutions
 - Move toward encounter conclusion within 2-3 exchanges"""
+        except Exception as e:
+            self._log_debug(f"SME: ERROR in _generate_extended_combat_prompt: {e}")
+            return "COMBAT GUIDANCE: Consider moving toward resolution."
 
     def _count_recent_combat_exchanges(self) -> int:
-        """Count recent exchanges that involved combat patterns"""
-        combat_count = 0
-        recent_history = self.pressure_history[-10:]  # Last 10 pressure events
+        """Count recent exchanges that involved combat patterns - SAFE VERSION"""
+        try:
+            combat_count = 0
+            recent_history = self.pressure_history[-10:] if self.pressure_history else []
 
-        for event in recent_history:
-            # Check if this event involved combat-related pressure increase
-            if (isinstance(event, dict) and
-                event.get("pressure", 0) > 0.6 and
-                "combat" in event.get("description", "").lower()):
-                combat_count += 1
+            for event in recent_history:
+                # Check if this event involved combat-related pressure increase
+                if (isinstance(event, dict) and
+                    event.get("pressure", 0) > 0.6 and
+                    "combat" in event.get("description", "").lower()):
+                    combat_count += 1
 
-        return combat_count
+            return combat_count
+        except Exception as e:
+            self._log_debug(f"SME: ERROR in _count_recent_combat_exchanges: {e}")
+            return 0
 
     def reset_resolution_state(self):
         """Reset resolution guidance state when pressure drops significantly"""
-        with self.lock:
+        try:
+            # Don't acquire the lock again - we're already in a locked context
+            # with self.lock:  # REMOVE THIS - it causes deadlock!
+
+            self._log_debug("SME: reset_resolution_state() called")
+
             if self.pressure_level < 0.7:  # Reset when pressure drops below climax threshold
                 self._resolution_guidance_sent = False
-                self._log_debug("Resolution state reset - ready for new encounter")
+                self._log_debug("SME: Resolution state reset - ready for new encounter")
+            else:
+                self._log_debug(f"SME: Resolution state unchanged - pressure still high: {self.pressure_level}")
+
+        except Exception as e:
+            self._log_debug(f"SME: ERROR in reset_resolution_state: {e}")
 
 # =============================================================================
 # MODULE TEST

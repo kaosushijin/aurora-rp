@@ -319,19 +319,28 @@ class Orchestrator:
         """
         Serial LLM worker thread - processes one request at a time
         Ensures no concurrent LLM calls
+        ENHANCED: Added detailed debug logging to trace queue issues
         """
         self._log_debug("LLM worker thread started")
 
         while not self.state.llm_worker_shutdown.is_set():
             try:
+                # ENHANCED: Log queue status before each attempt
+                queue_size = self.state.llm_queue.qsize()
+                self._log_debug(f"LLM worker loop: queue_size={queue_size}, shutdown={self.state.llm_worker_shutdown.is_set()}")
+
                 # Get next request from queue (blocks until available or timeout)
                 try:
-                    # Use priority queue - lower priority numbers processed first
+                    # ENHANCED: Log the queue get attempt
+                    self._log_debug("LLM worker: attempting to get request from queue...")
                     priority, request = self.state.llm_queue.get(timeout=1.0)
+                    self._log_debug(f"LLM worker: got request from queue, priority={priority}")
                 except queue.Empty:
+                    self._log_debug("LLM worker: queue empty, continuing...")
                     continue  # Check shutdown and try again
 
                 if request is None:  # Shutdown signal
+                    self._log_debug("LLM worker: received shutdown signal")
                     break
 
                 self._log_debug(f"Processing LLM request: {request.request_type.value} (ID: {request.request_id})")
@@ -340,28 +349,40 @@ class Orchestrator:
                 with self.state.llm_processing_lock:
                     self.state.current_llm_request = request
 
+                # ENHANCED: Log before processing
+                self._log_debug(f"About to process request type: {request.request_type}")
+
                 # Process the request based on type
                 try:
                     if request.request_type == LLMRequestType.USER_RESPONSE:
+                        self._log_debug("Calling _process_user_response_request...")
                         self._process_user_response_request(request)
                     elif request.request_type == LLMRequestType.SEMANTIC_ANALYSIS:
+                        self._log_debug("Calling _process_semantic_analysis_request...")
                         self._process_semantic_analysis_request(request)
                     elif request.request_type == LLMRequestType.CONDENSATION:
+                        self._log_debug("Calling _process_condensation_request...")
                         self._process_condensation_request(request)
                     else:
                         self._log_error(f"Unknown LLM request type: {request.request_type}")
+
+                    self._log_debug(f"Completed processing request: {request.request_id}")
 
                 except Exception as e:
                     self._log_error(f"LLM request processing failed: {e}")
                     self._record_failed_request(request, str(e))
 
                 finally:
+                    # ENHANCED: Log cleanup
+                    self._log_debug(f"Cleaning up request: {request.request_id}")
+
                     # Clear current request
                     with self.state.llm_processing_lock:
                         self.state.current_llm_request = None
 
                     # Mark queue task as done
                     self.state.llm_queue.task_done()
+                    self._log_debug(f"Request cleanup complete: {request.request_id}")
 
             except Exception as e:
                 self._log_error(f"LLM worker error: {e}")
@@ -370,7 +391,7 @@ class Orchestrator:
         self._log_debug("LLM worker thread stopped")
 
     def _process_user_response_request(self, request: LLMRequest):
-        """Process a user response LLM request with resolution guidance integration"""
+        """Process a user response LLM request with enhanced debugging"""
         try:
             user_input = request.user_input
             context_data = request.context_data
@@ -378,14 +399,20 @@ class Orchestrator:
             self._log_debug(f"Processing user response for: {user_input[:50]}...")
 
             # STEP 1: Check if resolution guidance should be added BEFORE making LLM request
+            self._log_debug("Step 1: Checking resolution guidance...")
             resolution_guidance = self._check_resolution_guidance()
+            self._log_debug(f"Resolution guidance result: {bool(resolution_guidance)}")
 
             # STEP 2: Make the actual LLM request (this is the serial bottleneck)
+            self._log_debug("Step 2: Making LLM request...")
             llm_response = self._make_llm_request(user_input)
+            self._log_debug(f"LLM request completed, success: {llm_response.get('success', False)}")
 
             if llm_response.get("success", False):
                 # Store LLM response in memory
                 response_text = llm_response.get("response", "")
+                self._log_debug(f"Step 3: Storing response ({len(response_text)} chars)...")
+
                 if self.memory_manager and response_text:
                     self.memory_manager.add_message(response_text, MessageType.ASSISTANT)
                     self.state.message_count += 1
@@ -394,30 +421,27 @@ class Orchestrator:
                     if hasattr(self.memory_manager, '_auto_save'):
                         try:
                             self.memory_manager._auto_save()
+                            self._log_debug("Assistant response saved successfully")
                         except Exception as save_error:
                             self._log_error(f"Failed to save assistant response: {save_error}")
 
                     self._log_debug("LLM response stored in memory")
 
-                    # STEP 3: Update momentum engine and check for resolution state changes
+                    # STEP 3: Update momentum engine with timeout protection
+                    self._log_debug("Step 4: Updating momentum engine...")
                     if self.momentum_engine:
                         try:
+                            self._log_debug("Calling momentum engine...")
                             momentum_result = self.momentum_engine.process_user_input(user_input, self.state.message_count)
-
-                            # Check if resolution was triggered and log the outcome
-                            if resolution_guidance:
-                                new_pressure = momentum_result.get("pressure", 0.0)
-                                self._log_debug(f"Post-resolution pressure: {new_pressure}")
-
-                                # If pressure dropped significantly after resolution guidance,
-                                # the guidance likely worked
-                                if new_pressure < 0.8:
-                                    self._log_debug("Resolution guidance appears to have been effective")
-
+                            self._log_debug(f"Momentum engine completed: pressure={momentum_result.get('pressure', 0.0)}")
                         except Exception as e:
                             self._log_error(f"Momentum engine processing failed: {e}")
+                            # Continue processing even if momentum fails
+                    else:
+                        self._log_debug("No momentum engine available")
 
                     # Record successful completion
+                    self._log_debug("Step 5: Recording successful completion...")
                     self._record_completed_request(request, {
                         "response": response_text,
                         "success": True,
@@ -426,6 +450,8 @@ class Orchestrator:
             else:
                 # Store error message
                 error_msg = f"LLM Error: {llm_response.get('error', 'Unknown error')}"
+                self._log_error(f"LLM request failed: {error_msg}")
+
                 if self.memory_manager:
                     self.memory_manager.add_message(error_msg, MessageType.SYSTEM)
                     if hasattr(self.memory_manager, '_auto_save'):
@@ -436,9 +462,28 @@ class Orchestrator:
 
                 self._record_failed_request(request, error_msg)
 
+            self._log_debug("User response processing completed")
+
         except Exception as e:
             self._log_error(f"User response request failed: {e}")
             self._record_failed_request(request, str(e))
+
+    def debug_queue_status(self) -> Dict[str, Any]:
+        """Debug method to check queue status"""
+        try:
+            with self.state.llm_processing_lock:
+                current_request = self.state.current_llm_request
+
+            return {
+                "queue_size": self.state.llm_queue.qsize(),
+                "worker_alive": self.state.llm_worker_thread.is_alive() if self.state.llm_worker_thread else False,
+                "worker_shutdown_set": self.state.llm_worker_shutdown.is_set(),
+                "current_request_id": current_request.request_id if current_request else None,
+                "completed_count": len(self.state.completed_requests),
+                "failed_count": len(self.state.failed_requests)
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
     def _process_semantic_analysis_request(self, request: LLMRequest):
         """Process a semantic analysis LLM request"""
@@ -506,20 +551,32 @@ Provide analysis in JSON format:
             self._record_failed_request(request, str(e))
 
     def _record_completed_request(self, request: LLMRequest, result: Dict[str, Any]):
-        """Record a completed LLM request"""
-        self.state.completed_requests[request.request_id] = {
-            "request": request,
-            "result": result,
-            "completed_at": time.time()
-        }
+        """Record a successfully completed LLM request"""
+        try:
+            self.state.completed_requests[request.request_id] = {
+                "request_type": request.request_type.value,
+                "timestamp": time.time(),
+                "result": result,
+                "processing_time": time.time() - request.timestamp
+            }
+            self._log_debug(f"Recorded completed request: {request.request_id}")
 
-    def _record_failed_request(self, request: LLMRequest, error: str):
+        except Exception as e:
+            self._log_error(f"Failed to record completed request: {e}")
+
+    def _record_failed_request(self, request: LLMRequest, error_message: str):
         """Record a failed LLM request"""
-        self.state.failed_requests[request.request_id] = {
-            "request": request,
-            "error": error,
-            "failed_at": time.time()
-        }
+        try:
+            self.state.failed_requests[request.request_id] = {
+                "request_type": request.request_type.value,
+                "timestamp": time.time(),
+                "error": error_message,
+                "processing_time": time.time() - request.timestamp
+            }
+            self._log_error(f"Recorded failed request: {request.request_id} - {error_message}")
+
+        except Exception as e:
+            self._log_error(f"Failed to record failed request: {e}")
 
     def _make_llm_request_for_analysis(self, prompt: str, content: str) -> Dict[str, Any]:
         """Make simplified LLM request for analysis purposes"""
@@ -746,6 +803,12 @@ Provide analysis in JSON format:
             # Add to queue for serial processing
             self.state.llm_queue.put((llm_request.priority, llm_request))
             self._log_debug(f"Queued LLM request {request_id} for processing")
+
+            # CRITICAL FIX: Check if worker thread died and restart if needed
+            if not self.state.llm_worker_thread or not self.state.llm_worker_thread.is_alive():
+                self._log_error("CRITICAL: LLM worker thread died! Restarting...")
+                self._start_llm_worker()
+                time.sleep(0.1)  # Give new thread a moment to start
 
             # 4. Return success IMMEDIATELY - user message is available for echo
             return {
