@@ -370,17 +370,14 @@ class Orchestrator:
         self._log_debug("LLM worker thread stopped")
 
     def _process_user_response_request(self, request: LLMRequest):
-        """Process a user response LLM request with resolution guidance integration"""
+        """Process a user response LLM request"""
         try:
             user_input = request.user_input
             context_data = request.context_data
 
             self._log_debug(f"Processing user response for: {user_input[:50]}...")
 
-            # STEP 1: Check if resolution guidance should be added BEFORE making LLM request
-            resolution_guidance = self._check_resolution_guidance()
-
-            # STEP 2: Make the actual LLM request (this is the serial bottleneck)
+            # Make the actual LLM request (this is the serial bottleneck)
             llm_response = self._make_llm_request(user_input)
 
             if llm_response.get("success", False):
@@ -399,29 +396,17 @@ class Orchestrator:
 
                     self._log_debug("LLM response stored in memory")
 
-                    # STEP 3: Update momentum engine and check for resolution state changes
+                    # Update momentum engine
                     if self.momentum_engine:
                         try:
-                            momentum_result = self.momentum_engine.process_user_input(user_input, self.state.message_count)
-
-                            # Check if resolution was triggered and log the outcome
-                            if resolution_guidance:
-                                new_pressure = momentum_result.get("pressure", 0.0)
-                                self._log_debug(f"Post-resolution pressure: {new_pressure}")
-
-                                # If pressure dropped significantly after resolution guidance,
-                                # the guidance likely worked
-                                if new_pressure < 0.8:
-                                    self._log_debug("Resolution guidance appears to have been effective")
-
+                            self.momentum_engine.process_user_input(user_input, self.state.message_count)
                         except Exception as e:
                             self._log_error(f"Momentum engine processing failed: {e}")
 
                     # Record successful completion
                     self._record_completed_request(request, {
                         "response": response_text,
-                        "success": True,
-                        "resolution_guidance_sent": bool(resolution_guidance)
+                        "success": True
                     })
             else:
                 # Store error message
@@ -1059,7 +1044,9 @@ Provide analysis in JSON format:
             return {"success": False, "error": str(e)}
     
     def _get_system_stats(self) -> Dict[str, Any]:
-        """Get current system statistics with resolution monitoring"""
+        """
+        Get current system statistics - FIXED method calls and structure
+        """
         try:
             stats = {
                 "message_count": self.state.message_count,
@@ -1069,9 +1056,10 @@ Provide analysis in JSON format:
                 "startup_complete": self.state.startup_complete
             }
 
-            # Add memory stats
+            # Add memory stats - FIXED: Use correct method name
             if self.memory_manager:
                 try:
+                    # Use get_memory_stats() directly instead of get_stats()
                     memory_stats = self.memory_manager.get_memory_stats()
                     stats["memory"] = memory_stats
                     self._log_debug("Memory stats retrieved successfully")
@@ -1079,32 +1067,25 @@ Provide analysis in JSON format:
                     self._log_debug(f"Memory stats unavailable: {e}")
                     stats["memory"] = {"error": "stats unavailable"}
 
-            # Add momentum stats with resolution state
+            # Add momentum stats - FIXED: Use correct method name
             if self.momentum_engine:
                 try:
+                    # Use get_pressure_stats() directly instead of get_stats()
                     momentum_stats = self.momentum_engine.get_pressure_stats()
-
-                    # Add resolution monitoring info
-                    resolution_trigger = self.momentum_engine.check_resolution_trigger()
-                    momentum_stats["resolution_state"] = {
-                        "guidance_needed": bool(resolution_trigger),
-                        "trigger_type": resolution_trigger.get("trigger_type") if resolution_trigger else None,
-                        "guidance_sent": getattr(self.momentum_engine, '_resolution_guidance_sent', False)
-                    }
-
                     stats["momentum"] = momentum_stats
-                    self._log_debug("Momentum stats with resolution state retrieved")
+                    self._log_debug("Momentum stats retrieved successfully")
                 except Exception as e:
                     self._log_debug(f"Momentum stats unavailable: {e}")
                     stats["momentum"] = {"error": "stats unavailable"}
 
-            # Add MCP stats
+            # Add MCP stats with graceful fallback
             if self.mcp_client:
                 try:
                     if hasattr(self.mcp_client, 'get_server_info'):
                         mcp_stats = self.mcp_client.get_server_info()
                         stats["mcp"] = mcp_stats
                     else:
+                        # Fallback: provide basic MCP info
                         stats["mcp"] = {
                             "available": True,
                             "server_url": getattr(self.mcp_client, 'server_url', 'unknown'),
@@ -1115,7 +1096,7 @@ Provide analysis in JSON format:
                     self._log_debug(f"MCP stats unavailable: {e}")
                     stats["mcp"] = {"error": "stats unavailable"}
 
-            # Add LLM queue stats
+            # Add LLM queue stats - FIXED: Place inside try block
             self._add_queue_stats_to_system_stats(stats)
 
             return {"success": True, "stats": stats}
@@ -1346,56 +1327,6 @@ Provide analysis in JSON format:
         except Exception as e:
             self._log_error(f"Condensation request failed: {e}")
             return {"success": False, "error": str(e)}
-
-    def _check_resolution_guidance(self) -> Optional[str]:
-        """
-        Check if momentum engine suggests resolution guidance
-        Returns system prompt if resolution guidance should be sent
-        """
-        if not self.momentum_engine:
-            return None
-
-        try:
-            resolution_trigger = self.momentum_engine.check_resolution_trigger()
-
-            if resolution_trigger:
-                trigger_type = resolution_trigger.get("trigger_type", "unknown")
-                guidance_prompt = resolution_trigger.get("guidance_prompt", "")
-                force_conclusion = resolution_trigger.get("force_conclusion", False)
-
-                self._log_debug(f"Resolution guidance triggered: {trigger_type}")
-
-                # Add resolution guidance as system message
-                if guidance_prompt:
-                    self._add_resolution_guidance(guidance_prompt, force_conclusion)
-                    return guidance_prompt
-
-            return None
-
-        except Exception as e:
-            self._log_error(f"Resolution guidance check failed: {e}")
-            return None
-
-    def _add_resolution_guidance(self, guidance_prompt: str, force_conclusion: bool = False):
-        """
-        Add resolution guidance as system message
-        """
-        try:
-            if self.memory_manager:
-                # Create system message with resolution guidance
-                priority_marker = "[CRITICAL] " if force_conclusion else "[GUIDANCE] "
-                system_message = f"{priority_marker}{guidance_prompt}"
-
-                self.memory_manager.add_message(system_message, MessageType.SYSTEM)
-
-                # Force immediate save to ensure guidance is available for next LLM request
-                if hasattr(self.memory_manager, '_auto_save'):
-                    self.memory_manager._auto_save()
-
-                self._log_debug("Resolution guidance added to conversation context")
-
-        except Exception as e:
-            self._log_error(f"Failed to add resolution guidance: {e}")
 
 # =============================================================================
 # MODULE EXPORTS
