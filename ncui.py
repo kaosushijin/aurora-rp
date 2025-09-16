@@ -50,6 +50,9 @@ class NCursesUIController:
         self.processing = False
         self.processing_started_time = None  # ADD: Timestamp tracking for processing timeout
 
+        # NEW: Message change tracking to prevent unnecessary clearing
+        self._last_displayed_messages = []
+
         # Configuration
         self.debug_mode = bool(debug_logger)
 
@@ -368,13 +371,18 @@ class NCursesUIController:
             self._log_error(f"Cursor positioning error: {e}")
 
     def _handle_user_input(self, user_input: str):
-        """FIXED: Ensure immediate display update after orchestrator stores message"""
+        """ENHANCED: Clear message cache when user submits input to ensure immediate echo"""
         try:
-            # 1. Clear input field IMMEDIATELY
+            # 1. Exit scrollback mode when user submits input
+            if self.scroll_manager.in_scrollback:
+                self.scroll_manager.auto_scroll_to_bottom()
+                self._log_debug("Exited scrollback mode - user submitted input")
+
+            # 2. Clear input field IMMEDIATELY
             self.multi_input.clear()
             self._refresh_input_window()
 
-            # 2. Handle commands locally (these don't go to orchestrator)
+            # 3. Handle commands locally (these don't go to orchestrator)
             if user_input.startswith('/'):
                 if self._handle_command(user_input):
                     self._ensure_cursor_in_input()
@@ -382,15 +390,18 @@ class NCursesUIController:
 
             self._log_debug("Submitting user input")
 
-            # 3. Send to orchestrator FIRST (which stores user message immediately)
+            # 4. CRITICAL: Clear message cache BEFORE sending to orchestrator
+            # This ensures the user's message will be detected as a change
+            self._last_displayed_messages = []
+
+            # 5. Send to orchestrator (which stores user message immediately)
             if self.callback_handler:
                 result = self.callback_handler("user_input", {"input": user_input})
 
                 if result and result.get("success", False):
                     # SUCCESS: User message stored in orchestrator memory
-                    # Now we can set processing state and force immediate display update
 
-                    # 4. Set processing state AFTER orchestrator confirms storage
+                    # 6. Set processing state AFTER orchestrator confirms storage
                     self.processing = True
                     self.processing_started_time = time.time()
                     self.status_message = "Processing..."
@@ -402,8 +413,8 @@ class NCursesUIController:
                     except curses.error:
                         pass
 
-                    # 5. CRITICAL: Force immediate display update to show user message echo
-                    # This will now show the user's message because orchestrator has stored it
+                    # 7. CRITICAL: Force immediate display update to show user message echo
+                    # Since we cleared message cache, this will detect the change and refresh
                     self._process_display_updates()
 
                     # Force screen update
@@ -491,46 +502,106 @@ class NCursesUIController:
 # Chunk 4/6 - ncui.py - Display and Message Management (Comprehensive Fix)
 
     def _process_display_updates(self):
-        """FIXED: Always refresh display, then manage processing state separately"""
+        """FIXED: Only refresh display when content actually changes"""
         try:
-            # CRITICAL: Always get and display fresh messages first, regardless of processing state
+            # Check if user is in scrollback mode
+            if self.scroll_manager.in_scrollback:
+                # User is viewing history - only handle processing state, don't refresh display
+                self._handle_processing_state_minimal()
+                return
+
+            # Get ALL messages - no limit for full scrollback capability
             messages_to_display = []
             if self.callback_handler:
-                result = self.callback_handler("get_messages", {"limit": 20})
+                result = self.callback_handler("get_messages", {})  # ← REMOVED LIMIT
                 if result and result.get("success", False):
                     messages_to_display = result.get("messages", [])
 
-            # ALWAYS refresh output with latest messages (including immediate user echo)
-            self._refresh_output_with_messages(messages_to_display)
+            # CRITICAL: Only refresh if content actually changed
+            if self._has_message_content_changed(messages_to_display):
+                self._refresh_output_with_messages(messages_to_display)
+                self._last_displayed_messages = [
+                    {
+                        'content': msg.get('content', ''),
+                        'type': msg.get('type', ''),
+                        'timestamp': msg.get('timestamp', ''),
+                        'id': msg.get('id', '')
+                    }
+                    for msg in messages_to_display
+                ]
+                self._log_debug(f"Display refreshed - content changed ({len(messages_to_display)} messages)")
 
-            # THEN manage processing state separately
-            if self.processing:
-                # Check for timeout (30 seconds max processing time)
-                if (self.processing_started_time and
-                    time.time() - self.processing_started_time > 30):
-                    # Timeout - force clear processing state and show error
-                    self._clear_processing_state()
-                    if self.callback_handler:
-                        self.callback_handler("add_system_message", {
-                            "content": "Processing timeout - please try again",
-                            "message_type": "system"
-                        })
-                    self._log_debug("Processing timeout - state cleared")
-                    return
-
-                # Check if assistant response arrived (most recent message is assistant)
-                if messages_to_display:
-                    latest_message = messages_to_display[-1]
-                    if latest_message and latest_message.get("type") == "assistant":
-                        # Assistant response received - clear processing
-                        self._clear_processing_state()
-
-            # If not processing, ensure cursor is positioned correctly
-            elif not self.processing:
-                self._ensure_cursor_in_input()
+            # Handle processing state without triggering display refresh
+            self._handle_processing_state_minimal()
 
         except Exception as e:
             self._log_error(f"Display update error: {e}")
+
+    def _has_message_content_changed(self, new_messages: List[Dict]) -> bool:
+        """Check if message content has actually changed"""
+        try:
+            # First run - always consider changed
+            if not self._last_displayed_messages:
+                return len(new_messages) > 0
+
+            # Quick check: different number of messages
+            if len(new_messages) != len(self._last_displayed_messages):
+                return True
+
+            # Deep check: compare each message
+            for new_msg, old_msg in zip(new_messages, self._last_displayed_messages):
+                if (new_msg.get('content', '') != old_msg.get('content', '') or
+                    new_msg.get('type', '') != old_msg.get('type', '') or
+                    new_msg.get('timestamp', '') != old_msg.get('timestamp', '') or
+                    new_msg.get('id', '') != old_msg.get('id', '')):
+                    return True
+
+            # No changes detected
+            return False
+
+        except Exception as e:
+            self._log_error(f"Message change detection error: {e}")
+            return True  # On error, assume change to be safe
+
+    def _handle_processing_state_minimal(self):
+        """Handle processing state changes without triggering display refresh"""
+        try:
+            if not self.processing:
+                # Not processing - ensure cursor is positioned
+                self._ensure_cursor_in_input()
+                return
+
+            # Check for processing timeout
+            if (self.processing_started_time and
+                time.time() - self.processing_started_time > 30):
+                # Timeout occurred
+                self._clear_processing_state()
+                if self.callback_handler:
+                    self.callback_handler("add_system_message", {
+                        "content": "Processing timeout - please try again",
+                        "message_type": "system"
+                    })
+                # Force message change detection on next cycle
+                self._last_displayed_messages = []
+                self._log_debug("Processing timeout - cleared message cache")
+                return
+
+            # Check if assistant response arrived (without full message fetch)
+            if self.callback_handler:
+                result = self.callback_handler("get_messages", {"limit": 1})
+                if result and result.get("success", False):
+                    messages = result.get("messages", [])
+                    if messages:
+                        latest_message = messages[-1]
+                        if latest_message and latest_message.get("type") == "assistant":
+                            # Assistant response received
+                            self._clear_processing_state()
+                            # Force refresh on next cycle by clearing cache
+                            self._last_displayed_messages = []
+                            self._log_debug("Assistant response detected - cleared message cache")
+
+        except Exception as e:
+            self._log_error(f"Minimal processing state error: {e}")
 
     def _clear_processing_state(self):
         """FIXED: Clear processing state and reset timestamp"""
@@ -829,8 +900,9 @@ class NCursesUIController:
                 if self.callback_handler:
                     result = self.callback_handler("clear_memory", {})
                     if result and result.get("success", False):
-                        # Reset scroll manager and force refresh
+                        # Reset scroll manager and CLEAR MESSAGE CACHE
                         self.scroll_manager = ScrollManager(self.current_layout.output_box.inner_height)
+                        self._last_displayed_messages = []  # CRITICAL: Clear cache
                         self._process_display_updates()  # Force immediate refresh
                 return True
 
@@ -1097,10 +1169,10 @@ class NCursesUIController:
             self.output_window.clear()
             self._draw_borders()
 
-            # Get current messages from orchestrator instead of local buffer
+            # Get ALL messages from orchestrator - no limit
             messages = []
             if self.callback_handler:
-                result = self.callback_handler("get_messages", {"limit": 50})
+                result = self.callback_handler("get_messages", {})  # ← REMOVED LIMIT
                 if result and result.get("success", False):
                     messages = result.get("messages", [])
 

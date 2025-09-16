@@ -977,8 +977,8 @@ Provide analysis in JSON format:
             if not self.memory_manager:
                 return {"success": False, "error": "Memory manager not available"}
 
-            # Get parameters from data
-            limit = data.get("limit", 50)
+            # Get parameters from data - default to None for no limit
+            limit = data.get("limit", None)  # ← Changed from 50 to None
 
             messages = []
 
